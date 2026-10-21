@@ -1,0 +1,13 @@
+{
+  "name": "collection-sheet",
+  "private": true,
+  "description": "Google-Sheets-Tool für Pokémon-Kartensammlungen (Apps Script) – Tests mit Node",
+  "license": "SEE LICENSE IN LICENSE",
+  "scripts": {
+    "build": "sh build_import.sh",
+    "test": "node test/run_all.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}

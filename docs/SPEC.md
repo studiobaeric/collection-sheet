@@ -1,0 +1,281 @@
+# Build spec: Import tool + collection rework (Pokémon Google Sheet, Apps Script)
+
+Owner: Eric (German UI, "du"). This spec is the single source of truth for every build agent.
+The plan Eric approved (German) is mirrored in `plan-draft.md` next to this file only partially; THIS spec wins.
+Decisions memory: /tmp/claude/memory/team/silo/pokemon-import-decisions.md and pokemon-import-undo-decisions.md (read both).
+
+## 0. Ground rules
+
+- Code lives in `/mnt/project-files/pokemon-sheets/apps-script/`. Eric pastes each file by hand into the Apps Script editor.
+  Final files: `Code.gs` (existing, reworked), `Ui.html` (existing, reworked, now an HtmlService *template*),
+  `Import.gs` (new script file named "Import"), `ImportUi.html` (new HTML file named "ImportUi").
+  All .gs files share one global scope (Apps Script), so Import.gs can call Code.gs helpers directly.
+- Apps Script V8. Plain functions, `const`/`let`, no modules, no `import`. Server functions ending in `_` are private
+  (not callable from google.script.run). Public UI-callable functions have no trailing underscore.
+- All UI text and sheet names German, natural, "du". No em-dashes (—) in new UI strings; use commas/periods.
+- Every write to the spreadsheet goes through `withLock_(fn)` (existing). Never hold the lock across UrlFetch calls
+  if avoidable: fetch first, then lock+write.
+- Nothing may import Eric's data during the build. Tests use mocks only. The cloud sandbox cannot reach tcgdex or Google.
+- Keep the existing code style (see Code.gs): JSDoc-ish German comments, 2-space indent, single quotes.
+- Never break existing behaviour that is not mentioned here (search, price run, history, API check, web app link).
+
+## 1. Data model (sheet "Daten", hidden)
+
+One Daten row = copies of ONE card entry from ONE origin. Columns (0-based index, header text):
+
+| idx | COL name | header | notes |
+|---|---|---|---|
+| 0 | key | Schlüssel | entry key, see below |
+| 1 | id | Karten-ID | tcgdex id, '' for free cards |
+| 2 | setId | Set-ID | '' for free cards |
+| 3 | setName | Setname | free cards: text from user/source |
+| 4 | setDate | Set-Erscheinungsdatum | |
+| 5 | localId | Nummer | free cards: number text |
+| 6 | normNum | Nummer normalisiert | normalizeNumber_(localId) |
+| 7 | setSize | Setgröße | |
+| 8 | name | Name | display name (German, or the user's name for en-Ersatz / free) |
+| 9 | nameEn | Name englisch | |
+| 10 | source | Quelle | 'de' / 'en-Ersatz' / 'frei' (tcgdex DATA language; NOT the card's physical language) |
+| 11 | variant | Variante | normal/holo/reverse/firstEdition |
+| 12 | cond | Zustand | '' or MT/NM/EX/GD/LP/PL/PO |
+| 13 | count | Anzahl | integer >= 0 |
+| 14 | price | Trendpreis (EUR) | tcgdex Cardmarket trend for the variant, number or '' |
+| 15 | priceDate | Preisstand | |
+| 16 | img | Bild-URL | |
+| 17 | rarity | Seltenheit | |
+| 18 | category | Kartentyp | |
+| 19 | illustrator | Illustrator | |
+| 20 | added | Hinzugefügt am | Date |
+| 21 | changed | Zuletzt geändert | Date |
+| 22 | numSort | Nummer sortierbar | |
+| 23 | eid | Eintrag-ID | NEW, stable, unique, never reused: 'E' + 10 hex chars from Utilities.getUuid() |
+| 24 | lang | Sprache | NEW physical card language code, default 'DE' |
+| 25 | version | Sonderversion | NEW free text, '' = none (e.g. 'Snowflake') |
+| 26 | ownPrice | Eigener Preis (EUR) | NEW number or '' |
+| 27 | ownPriceDate | Eigener Preis Stand | NEW 'yyyy-MM-dd' text or '' |
+| 28 | origin | Herkunft | NEW 'Hand' or 'Import <n>' (n = import number) |
+| 29 | fp | Quellzeile | NEW fingerprint of the source row for import rows, '' for Hand |
+| 30.. | (extras) | <extra name> | NEW free extra columns ("Zusatzspalten"), header = extra name, text values |
+
+Constants in Code.gs: `DATA_HEADERS` (30 fixed headers), `COL` with the names above, `NCOL = 30` (fixed part).
+`readData_(sh)` must now return full-width rows (fixed + extras): read `max(NCOL, sh.getLastColumn())` columns.
+Helpers (Code.gs, exact names, used by Import.gs):
+- `dataHeaders_()` -> full header row array (fixed + extras).
+- `extraNames_()` -> array of extra column names (headers from index 30 on, non-empty).
+- `ensureExtraColumn_(name)` -> 0-based column index of that extra; creates the header (and text format) if missing. Call inside lock.
+- `newEid_()`.
+- `entryKey_(o)` where o has {id, name, setName, localId (or normNum), variant, version, cond, lang}:
+  tcgdex card: `[id, variant, version, cond, lang].join('|')`;
+  free card (id ''): `['frei:' + lower(trim(name)) + '~' + lower(trim(setName)) + '~' + normalizeNumber_(localId), variant, version, cond, lang].join('|')`.
+- `groupKey_(o)`: same first part, then variant and version only: `[idOrFreePart, variant, version].join('|')`.
+- `rowObj_(r, headers)` -> object view of a row incl. `extras: {name: value}`; `objToRow_(o, width)` inverse. (Use these instead of raw indexes in new code where it helps.)
+- `ORIGIN_HAND = 'Hand'`; `originOf_(nr)` -> 'Import ' + nr; `importNrOf_(origin)` -> number or null.
+- `LANGS` = [['DE','Deutsch'],['EN','Englisch'],['FR','Französisch'],['IT','Italienisch'],['ES','Spanisch'],['PT','Portugiesisch'],['NL','Niederländisch'],['PL','Polnisch'],['JP','Japanisch'],['KO','Koreanisch'],['ZH','Chinesisch']].
+- `effectivePrice_(row)` -> ownPrice if number else price if number else null.
+- `buildCardRow_(card, opts)` -> full-width Daten row from a card summary (shape of summarizeCard_ output plus `price`, `priceDate`, `setDate`, `dataLang` 'de'/'en', `inputName`) and opts {variant, cond, lang, version, count, origin, fp, ownPrice, ownPriceDate, extras, now}. For free cards pass card = {free:true, name, setName, localId} and it sets source 'frei', id '' etc.
+- `appendDataRows_(rows)` (inside lock): appends many rows in one setValues (ensureRows_), applies text formats.
+- `rewriteData_(rows)` (inside lock): replaces the whole data block (rows below header) with `rows` in one setValues and clears leftover rows below. Used by deletes (undo) so deletion is one write.
+- `rebuildGroups_()` (inside lock or not, idempotent): recomputes sheet "Gruppen" (see §3).
+
+Rules:
+- At most ONE Hand row per entry key. Adding by hand merges into it.
+- Import rows: one row per (import number, fp). Never merged with other origins.
+- Rows with count 0 stay (hidden in view unless "0er zeigen"), except where undo deletes them (§7).
+- Own price ("Eigener Preis") applies to the whole Sammlung row (group): when set by hand it is written to ALL rows of the group. The group's own price = first numeric ownPrice among its rows, Hand rows first, then by `added`.
+
+### Migration (`migrateSchema_()`, Code.gs)
+- Detect: header cell index 23 !== 'Eintrag-ID' (or fewer than 30 columns of headers). Script property `SCHEMA_VERSION` = '2' after success; `ensureSchema_()` is a cheap check (property first) called at the start of every public server function that reads/writes Daten (incl. web app calls and the price run).
+- For each existing data row: keep columns 0..22, set eid = newEid_(), lang 'DE', version '', ownPrice '', ownPriceDate '', origin 'Hand', fp '', and recompute key with entryKey_. Old keys were `id|variant|cond`; new keys are `id|variant||cond|DE`.
+- Write headers + rows in one go, apply formats, rebuild Gruppen. Idempotent. `einrichtung` runs it first (before setupDataSheet_ rewrites headers!) and `setupDataSheet_` must not clobber extra headers beyond index 29.
+- Must also work when Daten is empty or does not exist yet.
+
+## 2. Import log (sheet "Import-Protokoll", hidden) — shared by Code.gs and Import.gs
+
+Columns: `Log-ID | Import-Nr | Typ | Eintrag-ID | Quellzeile | Menge | Daten | Status | Zeitpunkt | Quelle-ID`
+- Log-ID: 'L' + 10 hex (uuid). Daten: JSON text. Status: 'geplant' | 'erledigt' | 'übersprungen'.
+Types:
+- `neu`: import created Daten row (Eintrag-ID) for source fp; Menge = copies; Daten = snapshot {id, variant, version, cond, lang, ownPrice, extras} at import time.
+- `gleich`: "Dieselbe Karte" — source fp is the same physical card as a Hand row (Eintrag-ID = that hand row); Menge = covered copies; no Daten change.
+- `abgleich`: sync decrease on row Eintrag-ID that belongs to an earlier import of the same source; Menge = -k; Daten = {countBefore, fromImport (nr of the row's import), fp}.
+- `handentfernt`: Eric removed copies by hand (−1) from an import row; Import-Nr = the ROW's import nr; Quellzeile = row fp; Menge = k (positive); Quelle-ID = that import's source id.
+- `spalte`: import created an extra column; Daten = {name}.
+Helpers in Code.gs (exact names): `PROTO_HEADERS`, `protoSheet_()` (get or create with headers, hidden), `appendProto_(entries)` -> returns Log-IDs (entries are objects {nr, type, eid, fp, qty, data, status, sourceId}), `readProto_()` -> array of objects {logId, nr, type, eid, fp, qty, data (parsed), status, time, sourceId, row (1-based sheet row)}, `deleteProtoByIds_(ids)`, `setProtoStatus_(ids, status)`.
+
+## 3. Sammlung view (sheet "Sammlung") and helper sheet "Gruppen" (hidden)
+
+The live view formula no longer reads Daten. The script maintains "Gruppen": one row per group (card + variant + version), rebuilt by `rebuildGroups_()` after EVERY Daten change (add, adjust, edit, link, price run, migration, import commit, undo) and from `onEdit` when Eric edits Daten directly, and from "Ansicht neu aufbauen".
+Gruppen columns (1-based, the view formula depends on these positions):
+1 Gruppenschlüssel, 2 Karten-ID, 3 Set-ID, 4 Setname, 5 Set-Erscheinungsdatum, 6 Nummer, 7 Nummer normalisiert, 8 Setgröße,
+9 Name (name + ' · ' + version when version set), 10 Name englisch, 11 Quelle, 12 Variante, 13 Exemplare (text), 14 Anzahl (sum),
+15 Preis (effective number or ''), 16 Preisstand ('manuell ' + dd.MM.yyyy for own price, else trend priceDate), 17 Bild-URL, 18 Seltenheit,
+19 Kartentyp, 20 Illustrator, 21 Hinzugefügt am (max of group), 22 Zuletzt geändert (max), 23 Nummer sortierbar, 24.. shown extras (values of the group's rows joined with ' / ', distinct, non-empty).
+- Exemplare text: sum counts per (lang, cond) over rows with count > 0, ordered by LANGS order then CONDITIONS order: "1× DE NM, 1× EN LP"; cond '' -> "2× DE". Empty when total 0.
+- Shown extras = script property `VIEW_EXTRAS` (JSON array of names). `getViewExtras_()` / `setViewExtras(names)` (public; rebuilds Gruppen and the view header/formula).
+- `viewFormula_(nExtras)`: like the current formula but reads `Gruppen!A2:<lastCol>`, column 13 is Exemplare, price column 15 is already effective, sort keys use computed positions (24+nExtras ...). "Zuletzt hinzugefügt" sorts by column 21. Name column: append ' (EN)' when Quelle = 'en-Ersatz'. Image: '' -> '–'.
+- VIEW_HEADERS: ['Bild','Name','Set','Nummer','Variante','Exemplare','Anzahl','Preis (EUR)','Wert (EUR)','Seltenheit','Kartentyp','Illustrator','Preisstand'] + shown extras.
+- Keep `setFormulaLocal_` self-check, `FORMULA_PROBES` (update the Daten probe to Gruppen), conditional grey rule, protections, Z-column set list (now from Gruppen!D2:D).
+- `onEdit(e)`: existing H4 behaviour + if the edited sheet is "Daten" -> `rebuildGroups_()` (wrap in try/catch, use `LockService.getScriptLock().tryLock(5000)`; skip silently if busy).
+- Price run: `priceTargets_()` skips ids where every row of that id has an own price; free rows (no id) never fetched. `writePrices_` still writes trend prices for fetched ids (harmless). `writeHistory_` total uses `effectivePrice_`. After writePrices_ -> rebuildGroups_().
+
+## 4. Collection API (Code.gs, called by Ui.html; also used by web app)
+
+All return plain JSON-able objects (no Dates: convert to 'yyyy-MM-dd' text).
+- `getUiConfig()` -> `{conditions: [{code, label}], langs: [{code, label}], versions: [distinct non-empty versions in Daten], extras: extraNames_(), viewExtras: getViewExtras_()}`.
+- `addCard(req)`: req = {id, lang ('de'|'en' data language), variant ('base'|'reverse'|'firstEdition'), condition, qty, inputName, cardLang (physical, default 'DE'), version (default ''), ownPrice (number|null|'')}. Merges into the Hand row of the entry key or creates it (origin 'Hand', fp ''). If ownPrice given -> set it on all rows of the group (with today's date). Returns `{eid, key, gkey, count, message}`. Message mentions language/version when not default.
+- `addFreeCard(req)`: {name (required), setName, number, variant ('normal' default), condition, qty, cardLang, version, ownPrice} -> Hand row with source 'frei', no image, price ''. Returns same shape as addCard.
+- `searchCollection(query, setText)` -> `{total, groups: [...]}` (max 60 groups). Matching as today (words: number tokens vs normNum/setSize, text vs name/nameEn/version), set filter as today. Group object:
+  `{gkey, name, nameEn, source, isFree, setName, localId, setSize, variant, variantLabel, version, count, image, price (effective or null), priceManual (bool), ownPrice (number|null), exemplare (text), rows: [{eid, key, cond, lang, count, origin, originLabel, isImport, importNr, extras: {}}]}`.
+  originLabel: 'von Hand' or '<Quellname>, Import <n>' (Quellname from sheet "Importe" column Quelle; fallback 'Import <n>').
+  Sort groups: count>0 first, then setDate, setId, numSort, localId, variant, version. Rows inside: Hand first, then import nr, then lang, cond.
+- `adjustEntry(eid, delta)` -> `{token, eid, count, groupCount, applied, gkey}`.
+  - delta > 0 on a non-Hand row: the copies go to the Hand row with the same entry key (create it as a copy of the row's card fields with origin 'Hand', fp '', count 0, new eid, extras copied, ownPrice copied) — "+1 by hand always goes to the hand row".
+  - delta < 0: floor at 0 on that row. If the row is an import row and copies were actually removed: appendProto_ `handentfernt` (Menge = removed count, Import-Nr from origin, fp from row, Quelle-ID from sheet Importe).
+  - token = {eid (the row actually changed), applied, logIds (handentfernt ids or []), createdEid (eid of a Hand row created by this call or '')}.
+  - Rebuild Gruppen; return.
+- `revertAdjust(token)` -> reverses exactly: count -= applied on token.eid (floor 0); delete the log rows in token.logIds; if token.createdEid and that row is back to 0 -> delete that row. Returns `{eid, count, groupCount, gkey}`.
+- `adjustCount(key, delta)` kept for old clients: applies to the Hand row of that key if any, else the first row with that key, via adjustEntry semantics. Returns `{key, count, applied}`.
+- `editEntry(eid, changes, qty)`: changes = {cond?, cardLang?, version?, extras?: {name: value}} (only given fields change), qty = how many copies of this row to change (default = all; 1..count). If qty < count: split — the row keeps count-qty, a new row (new eid, same origin, same fp, same added date) gets qty and the changes. After changing key fields: if another row has the same new key AND same origin AND same fp, merge into it (sum counts, delete the emptied row). Hand rows merge with the Hand row of the same key. Returns `{ok, eid (resulting row), gkey}`. Version changes move the copies into another group (fine).
+- `setGroupOwnPrice(gkey, price)`: price number > 0 sets ownPrice + ownPriceDate today on all rows of the group; null/''/0 clears own price on all rows. Returns `{gkey, price, priceManual}`.
+- `linkFreeGroup(gkey, cardId, dataLang, variant)`: turns all rows of a free group into a tcgdex card: fetch the card (getCardDetail-style, with en fallback for image/price), set id/setId/setName/setDate/localId/normNum/setSize/nameEn/source/img/rarity/category/illustrator/numSort/price/priceDate; name: tcgdex German name if dataLang 'de', else keep the free name; variant = given ('base' -> baseVariant_). Keep cond/lang/version/count/origin/fp/extras/ownPrice (own price stays; Eric can clear it). Recompute keys; merge Hand rows that now share a key with an existing Hand row. Returns `{gkey (new)}`.
+- `getSetSuggestions()` unchanged.
+
+## 5. Sidebar / web app UI (Ui.html, template)
+
+- `kartenErfassen()` uses `HtmlService.createTemplateFromFile('Ui')`, sets `t.mode = 'sidebar'`, `evaluate().setTitle('Pokémon-Karten')`. `doGet()` same with `t.mode = 'web'` (+ viewport meta). New `include(name)` returns `HtmlService.createHtmlOutputFromFile(name).getContent()`.
+- Ui.html: `var MODE = '<?!= mode ?>';` and, at the end of body, `<?!= include('ImportUi') ?>`. Tabs: "Hinzufügen", "Sammlung", and "Import" only when MODE === 'sidebar'. `showTab('import')` calls `impInit()` (defined by ImportUi.html). Shared helpers in Ui.html stay global for ImportUi: `$`, `esc`, `call`, `setMsg`, `spinner`, `imgTag`, `cardImg`, `eur`, `errText`, `PLACEHOLDER`, `VARIANT_LABELS`, `CONDITIONS`, `CONDITION_LABELS`, plus new `LANGS` (filled from getUiConfig, default list inline).
+- Hinzufügen confirm view gets: Sprache (select, default DE), Sonderversion (text input with datalist of known versions, optional), Eigener Preis (number input, optional, hint "nur nötig, wenn tcgdex keinen Preis hat"). Sent as cardLang/version/ownPrice.
+- When search finds nothing (stage 'none', or pickSet with no luck): button "Als freie Karte speichern" opens a small form (Name prefilled, Set, Nummer, Variante select Normal/Holo/Reverse Holo/1. Edition, Zustand, Sprache, Sonderversion, Anzahl, Eigener Preis) -> addFreeCard.
+- Tab "Sammlung" (renamed from "Entfernen"): search fields as before; list of GROUPS. Group line: image, name (+ " · version"), sub line set · nr · variant · price (+ " manuell" when priceManual) · Exemplare text; −1 / count / +1. Tapping the info area expands the group: one line per Daten row: "<count>× <lang> <cond> · <originLabel>" (+ extras inline), with −1 / +1 and "Bearbeiten".
+  - Group −1: if exactly one row has count > 0 -> adjustEntry(that eid, -1). Otherwise show an inline chooser "Welches Exemplar?" listing those rows ("1× DE NM · von Hand", "1× DE · Pokemon Ordner, Import 3") -> adjustEntry(chosen, -1). This is Eric's "Kurz nachfragen" decision.
+  - Group +1: if the group has a Hand row -> adjustEntry(hand row eid, +1); else if it has exactly one row -> adjustEntry(that eid, +1) (server redirects to a new Hand row); else chooser listing rows (server redirects import rows to Hand).
+  - After any count change: "Rückgängig" link for 5 s calls revertAdjust(token) (reuse the existing busy/undo/timer patterns and race guards: searchGen/collGen, busy flags, stale-list protection).
+  - Bearbeiten (per row): inline form: Zustand, Sprache, Sonderversion, one text input per known extra, "Wie viele davon?" (1..count, only when count > 1) -> editEntry. 
+  - Group actions (in the expanded area): "Eigener Preis" input + Speichern/Entfernen -> setGroupOwnPrice; for free groups "Mit tcgdex-Karte verknüpfen": mini search (name/number/set) using searchCards/getCardBySetNumber, pick a tile -> linkFreeGroup.
+  - Web app (phone) has Hinzufügen + Sammlung incl. Bearbeiten. Only the Import tab is sidebar-only.
+- Keep: XSS-safe `esc` everywhere, 44px tap targets, existing stale-response guards.
+
+## 6. Import tool backend (Import.gs)
+
+### 6.1 Sheets (created by `setupImportSheets_(ss)`, called from einrichtung via `if (typeof setupImportSheets_ === 'function')`)
+- "Importe" (visible): `Nr | Datum | Quelle | Quelle-ID | Tab | Vorlage | Modus | Status | Neu | Mehr | Weniger | Übersprungen | Prüfliste offen | Wertänderung (EUR) | Zurückgenommen am | Bericht`. Status: 'läuft' | 'aktiv' | 'zurückgenommen'. A 'läuft' import with no live run (script property IMPORT_RUN missing or older than 6 minutes) is reported as 'unterbrochen'. Modus values: 'Nur Neues' | 'Alles addieren' | 'Mit Quelle abgleichen'.
+- "Import-Begriffe" (visible, editable): `Begriff | Bedeutung | Wert | Wo`. Bedeutung ∈ Variante/Zustand/Sonderversion/Sprache/Ignorieren. Wert: variant code (normal/holo/reverse/firstEdition), condition code, version text, language code. Wo ∈ 'Name und Spalten' | 'nur Spalten'. Prefilled (only if sheet empty):
+  Variante: "Reverse Holo", "Rev Holo", "Reverse", "RH", "Rev" -> reverse (Name und Spalten except "RH"/"Rev" nur Spalten); "Holo" -> holo (nur Spalten); "Non Holo", "Normal" -> normal (nur Spalten); "1st Edition", "1. Edition", "Erste Edition", "First Edition" -> firstEdition (Name und Spalten).
+  Zustand: "Mint" MT, "Near Mint" NM, "Excellent" EX, "Good" GD, "Light Played" LP, "Played" PL, "Poor" PO (Name und Spalten for the long forms); "MT","NM","EX","GD","LP","PL","PO" nur Spalten.
+  Sonderversion: "Snowflake" -> Snowflake (Name und Spalten), "Staff" -> Staff, "Prerelease" -> Prerelease.
+  Sprache: "Deutsch" DE, "Englisch" EN, "Japanisch" JP, "Japanese" JP, "English" EN, "German" DE (nur Spalten); "JP" JP, "EN" EN, "DE" DE (nur Spalten).
+  Ignorieren: none prefilled.
+- "Import-Sets" (visible, editable): `Cardmarket-Name | Kürzel | tcgdex-Sets | Herkunft`. tcgdex-Sets = comma list of set ids (several = ambiguous). Herkunft 'auto' | 'Hand' (rows marked Hand are never overwritten by prefill).
+- Hidden: "Import-Vorlagen" (`Name | Konfiguration | Kopfzeilen | Zuletzt benutzt`), "Import-Quelle" (raw display values of the current draft tab, nothing else), "Import-Prüfung" (current draft rows, §6.4), "Import-Antworten" (`Quelle-ID | Quellzeile | Entscheidung | Karte | Datum`), "Import-Protokoll" (via protoSheet_()).
+
+### 6.2 Draft state
+Script property `IMPORT_DRAFT` JSON: `{sourceId, sourceName, sourceUrl, kind: 'sheet'|'xlsx', tmpId: '' , tab, cfg, templateName, mode: 'neu'|'alle'|'abgleich', stage: 'tab'|'zuordnung'|'erkennung'|'pruefung'|'vorschau', recognizePos, total, startedAt}`. Only one draft at a time. `importDiscardDraft()` clears draft, Import-Quelle, Import-Prüfung, trashes tmp copy.
+
+### 6.3 Source access and layout (part "Quelle")
+- `importState()` -> `{draft (without big data) | null, imports: importList(), busy: null | {nr, phase}, driveService: typeof Drive !== 'undefined', templates: [{name, mode}]}`.
+- `importOpenSource(url)`: parse file id from docs.google.com/spreadsheets/d/<id>, drive.google.com/file/d/<id>, drive.google.com/open?id=<id>, or a bare id. `DriveApp.getFileById(id)` -> name, mime. Google Sheet -> `SpreadsheetApp.openById`. xlsx/xls (mime contains 'spreadsheetml' or 'ms-excel'): needs advanced service `Drive`; if missing throw German error "Für .xlsx-Dateien bitte im Apps-Script-Editor links unter „Dienste“ die „Drive API“ hinzufügen." Convert: v3 (`Drive.Files.create` exists): `Drive.Files.copy({name: 'Pokémon-Import (temporär) ' + name, mimeType: MimeType.GOOGLE_SHEETS}, id)`; v2: `Drive.Files.copy({title: ..., mimeType: MimeType.GOOGLE_SHEETS}, id, {convert: true})`. Store tmpId. Returns `{sourceId: id, sourceName, kind, tabs: [{name, rows, cols}]}`; draft.stage='tab'.
+- `importSelectTab(tab)`: reads the tab's data range display values (`getDisplayValues`) and, for cells whose rich text has a link URL that is not already the text, appends ' ' + url to the text (use `getRichTextValues`, guard for null). Writes them to "Import-Quelle" (clear first). Then trashes the tmp copy (`DriveApp.getFileById(tmpId).setTrashed(true)`; tmpId=''). Returns `{tab, nRows, nCols, sample: first 25 rows (cells truncated to 60 chars), guess: guessLayout_(values), templates: [{name, matches, mode}], suggested: name|null}`. matches = template's saved header signature equals this tab's header signature (normalized header row text joined by '|').
+- `guessLayout_(values)` -> `{headerRow, firstRow, cols: {name, number, set, qty, variant, cond, lang, version, cmLink, tcgdexId, price, priceDate, check}}` (1-based rows, 0-based column indexes, -1 = none). Header row = first row within the first 10 with >= 2 non-empty non-numeric cells. Synonyms (case-insensitive, trimmed, substring allowed when unambiguous):
+  name: name, kartenname, karte name, karte, pokémon, pokemon, card, card name; number: setnummer, nummer, nr, nr., kartennummer, number, no, #, card number, localid; set: set, setname, edition, serie, expansion; qty: anzahl, menge, stück, stk, qty, quantity, count; variant: variante, variant, holo, reverse; cond: zustand, condition, cond; lang: sprache, language, lang; version: sonderversion, version; cmLink: cardmarket, cardmarket link, link, url; tcgdexId: tcgdex, tcgdex-id, karten-id, id; price: preis, price, preistrend, trend, 30 tage preistrend, wert; priceDate: datum preis, datum preis-daten, preisstand, preisdatum, datum; check: vorhanden, besitze, habe, owned, gesammelt, check.
+  Also content: a column where >= 30% of the first 30 data cells contain 'cardmarket.com' -> cmLink.
+- Config (`cfg`, saved in templates as JSON):
+  `{form: 'liste'|'checkliste'|'raster', headerRow, firstRow, lastRow (0 = until data ends), cols: {...as guess...}, fixed: {lang: 'DE'|'' , cond: '', variant: '', version: ''}, extras: [{col, name, show}], grid: {startRow, startCol, blockRows, blockCols, gapRows, gapCols, perRow (blocks per row, 0 = until empty), cells: {name: [r, c], number: [r, c], set: [r, c], qty: [r, c], check: [r, c], ...}}}` (grid cell offsets 0-based within the block).
+- `parseSourceRecords_(cfg)` (part Quelle) -> array of raw records `{srcRows: [1-based source row numbers or 'r5c3' for grid], raw: {field: text}, extrasRaw: {name: text}}` from "Import-Quelle":
+  - liste: one record per row from firstRow to lastRow (or last non-empty row).
+  - checkliste: like liste; raw.check holds the check column text (and qty if mapped).
+  - raster: walk blocks: block i at row startRow + bi*(blockRows+gapRows), col startCol + bj*(blockCols+gapCols); a block whose name and number cells are both empty is skipped; stop a block row when perRow reached or (perRow 0 and) 3 consecutive empty blocks; stop overall after 3 consecutive empty block rows.
+- `importPreviewRows(cfg)` -> `{rows: [{srcRows, fields (from extractRow_), extras, skip}] (first 10 records incl. skipped ones), total, skippedCounts: {summe, leer, nichtAngehakt}}`.
+- Templates: `importListTemplates()`, `importSaveTemplate(name, cfg, mode)` (also stores header signature, 'Zuletzt benutzt' now), `importDeleteTemplate(name)`.
+
+### 6.4 Extraction, terms, set mapping, recognition, review (part "Erkennung")
+- `loadTerms_()` -> list {term, meaning, value, scope}; `extractRow_(rec, cfg, terms)` -> fields:
+  `{name, nameClean, number, set, qty, variant, cond, lang, version, cmUrl, tcgdexId, price (number|null), priceDate, extras: {}, skip: null|'summe'|'leer'|'nichtAngehakt'}`.
+  - Text trimmed. URLs found anywhere in a mapped cmLink cell (regex https?://\S+) -> cmUrl; a cmLink cell without cardmarket.com URL keeps cmUrl ''.
+  - name: terms with scope 'Name und Spalten' are removed from the name as whole words (case-insensitive, also with '-' around) and applied (variant/cond/version/lang). Then collapse spaces. nameClean = result.
+  - variant/cond/lang/version columns: map cell text via terms (any scope) and direct codes (normal/holo/reverse/firstEdition; condition codes; LANGS codes/labels). Unknown text in version column -> version text as is.
+  - fixed values (cfg.fixed) fill fields that are still empty. lang default 'DE' if still empty.
+  - qty: from qty column (integer >= 0; empty -> 1 for liste/raster; for checkliste: checked -> max(1, qty) else 0). Check truthy: TRUE, WAHR, x, ✓, ✔, ja, yes, 1, true (case-insensitive).
+  - price: parse "1,50 €", "1.50", "€ 1,5", "1.234,56" -> number; invalid -> null. priceDate: text as is (date display).
+  - skip: 'summe' when the name (or first non-empty mapped cell) matches /^(summe|gesamt|total|sum)\b/i or name empty but price present and number empty; 'leer' when name, number, cmUrl and tcgdexId are all empty; 'nichtAngehakt' for checkliste rows with qty 0.
+- `fingerprint_(f)` -> 12 hex chars of MD5 over JSON [lower(nameClean), normalizeNumber_(number without spaces), lower(set), variant, cond, lang, lower(version), cmUrl path lowercased without query except isReverseHolo/isFirstEd flags, tcgdexId]. NOT price, priceDate, extras or qty.
+- Records with the same fp are aggregated: qty summed, srcRows concatenated, extras of the first record (others appended with ' / ' if different).
+- Set mapping: `loadCmSets_()` -> {byName: {squashed cardmarket name: [setIds]}, byCode: {UPPERCODE: [setIds]}}; also all Sets-cache names (de + en, squashed alnum lowercase) map to their set id. `importSetsVorbelegen()` (public) fills "Import-Sets" rows marked auto: one row per English set in the Sets cache (Cardmarket-Name = English name, tcgdex-Sets = id), plus Kürzel from tcgdex full set objects (`abbreviation.official`, `abbreviation` string, or `tcgOnline`) fetched with fetchAllJson_ in batches of 20, plus this seed of old-era codes when tcgdex gives none (set id -> code): ex1 RS, ex2 SS, ex3 DR, ex4 MA, ex5 HL, ex6 RG, ex7 TRR, ex8 DX, ex9 EM, ex10 UF, ex11 DS, ex12 LM, ex13 HP, ex14 CG, ex15 DF, ex16 PK, dp1 DP, dp2 MT, dp3 SW, dp4 GE, dp5 MD, dp6 LA, dp7 SF, pl1 PL, pl2 RR, pl3 SV, pl4 AR, hgss1 HS, hgss2 UL, hgss3 UD, hgss4 TM, col1 CL, dpp DPPR, hgssp HGSS. Only for set ids that exist in the Sets cache. Rows with Herkunft 'Hand' are kept untouched. Returns count text.
+- `parseCardmarketUrl_(url, idx)` -> `{setIds, code, number, nameEn, variant}` or null. URL shape: .../Products/Singles/<SetSlug>/<CardSlug>[?query]. setIds from squashed SetSlug via idx.byName. Last '-'-token of CardSlug = code+number token: try codes of the found sets (and all codes, longest first) as prefix; remainder = number (e.g. "UL88" -> UL/88, "HGSSHGSS01" -> HGSS/HGSS01, "DPPRDP12" -> DPPR/DP12, "DPPR16" -> DPPR/16, "MEP099" -> MEP/099, "DS62" -> DS/62); fallback regex /^([A-Z]+?)(\d+[A-Za-z]?)$/. nameEn = CardSlug tokens before the code token, dropping tokens matching /^(V\d+|Lv\d+|LVX|Lv\.?X)$/i, joined by ' '. variant: query isReverseHolo=Y -> reverse, isFirstEd=Y -> firstEdition.
+- `parseSetNumber_(setText, numberText, idx)` -> {setIds, number, ambiguous}: setText matched by squashed name or as a code; numberText like "DS 62" / "MEW 132" (letters, optional space, digits) where the letters are a known code -> setIds from code, number = digits; promo style "DP 16"/"HGSS 01"/"MEP 091": if setText names a promo set use it; the letters+digits joined ("DP16") is the number. A code mapping to several sets => ambiguous unless setText narrows it.
+- Number matching inside a set (set card list from `sets/<id>` de, then en; cache in CacheService 6h under 'set:<lang>:<id>' when <= 90 KB): exact normalizeNumber_ match first; else digits-only match if exactly one card has the same digits.
+- Recognition stages per aggregated entry (first that yields exactly one card wins):
+  1. tcgdexId -> fetch de then en card.
+  2. cmUrl -> parse; set + number -> card; if number missing/unmatched but setIds + nameEn -> en name search filtered to setIds.
+  3. set + number (parseSetNumber_ on set/number fields).
+  4. name (+number, +set filter): reuse `findCandidates_` (de with nameClean; on none: `translateName_` -> en; also try `splitSuffix_`). Without number: only a single hit counts as clear.
+  Result: 'eindeutig' (one card) | 'unklar' (2..24 candidates; reason text) | 'nicht gefunden' (0 candidates or > 24 with reason "zu viele Treffer") | 'übersprungen' (skip set) | 'bekannt' (mode Nur Neues and coverage says nothing new for this fp: covered >= qty) — 'bekannt' rows are not recognized (saves API calls).
+  For 'eindeutig' (and later decisions) store the card JSON needed for Daten rows: `{dataLang, id, name, nameEn, setId, setName, setDate, localId, setSize, img, rarity, category, illustrator, baseVariant, variant (resolved), price (priceFor_ for variant, en fallback like cardmarketWithFallback_), priceDate}`. Resolved variant: cm query > extracted variant > card base variant. Fetch details with fetchAllJson_ in batches of 20.
+- "Import-Prüfung" sheet columns: `Quellzeile (fp) | Quellzeilen | Werte (JSON of extracted fields incl. raw texts) | Menge | Status | Grund | Kandidaten (JSON) | Entscheidung (JSON) | Karte (JSON) | Vorbelegt | Bestätigt`.
+- Public:
+  - `importStartRecognition(cfg, templateName, mode)` -> builds aggregated entries into Import-Prüfung (status 'offen'), applies stored answers from "Import-Antworten" for this source (Entscheidung + Karte copied, Vorbelegt TRUE, Bestätigt FALSE) for fps whose recognition would otherwise be unclear/not found (apply after recognition of that fp), draft.stage='erkennung'. Returns `{total, skipped: {summe, leer, nichtAngehakt}}`.
+  - `importRecognizeStep()` -> processes the next entries (stop after 40 entries or 4 minutes), returns `{done, pos, total, counts: {eindeutig, unklar, nichtGefunden, uebersprungen, bekannt}}`. When done: stage 'pruefung' if any unklar/nicht gefunden else 'vorschau'.
+  - `importReviewList()` -> `{items: [{fp, srcRows, values, qty, status, reason, candidates: [{id, lang, name, setName, localId, setSize, image}], decision, prefilled, confirmed, card}], open: n, total: n}` (only unklar / nicht gefunden rows).
+  - `importReviewSearch(fp, input)` -> same shape as `searchCards(input)` (call it).
+  - `importReviewDecide(fp, decision)` decision: `{type: 'karte', id, lang, variant?}` (fetch details, store card JSON) | `{type: 'frei'}` (card JSON = {free: true, name: nameClean or name, setName: set text, localId: number}) | `{type: 'skip'}` | `{type: ''}` (reset). Sets Bestätigt TRUE. Returns `{item, open}`.
+  - `importReviewAcceptPrefilled()` -> confirms all prefilled; returns `{open}`.
+  - Decisions are also upserted into "Import-Antworten" (sourceId + fp) right away (so they survive undo and re-import).
+
+### 6.5 Coverage, preview, commit, list, undo (part "Protokoll")
+Definitions per source (Quelle-ID) and fp, using Importe + Import-Protokoll + Daten:
+- active imports: status 'aktiv' or 'läuft'/'unterbrochen' for that source.
+- D(fp) = Σ Menge of `neu` + `gleich` entries (status 'erledigt') of active imports + Σ Menge of `abgleich` entries (negative) of active imports whose target row's import (Daten.fromImport) is active.
+- Rundone(fp) = Σ Menge of `handentfernt` entries whose Import-Nr is NOT active (undone).
+- Rall(fp) = Σ Menge of all `handentfernt` entries for that source+fp.
+- held(fp) = Σ current Daten count of rows with origin in active imports of the source and that fp.
+- covered(fp) = D(fp) + Rundone(fp).
+`coverageFor_(sourceId)` -> {fp: {D, Rundone, Rall, held, rows: [{eid, nr, count}]}}.
+Per fp with source qty S (entries whose decision is skip or still open count as present but add nothing):
+- Mode 'neu' (Nur Neues, default): add = max(0, S − covered); blockedByYou = min(Rundone, max(0, S − D)) -> shown in "Von dir entfernt" (unticked), tick adds them.
+- Mode 'alle' (Alles addieren): add = S − min(S, Rall); blockedByYou = min(S, Rall).
+- Mode 'abgleich' (Mit Quelle abgleichen): add as 'neu'; decrease = max(0, held − S) taken from active import rows of that fp, newest import first. fps in coverage with held > 0 but absent from the current source -> S = 0 (decrease all held). Unclear/open rows count as present (no decrease).
+- "Schon von Hand erfasst": for fps with add > 0 whose group (card id or free key + variant + version) has Hand rows with count > 0: preview item with choice 'same' (default, Dieselbe Karte) or 'extra' (Zusätzliches Exemplar). 'same': covered = min(add, handCount) -> `gleich` entry, only the remainder is added.
+- Own price for new rows: if the card has no trend price (null or free card) and the source row has a price, and the group has no own price yet -> ownPrice = source price, ownPriceDate = source priceDate parsed to yyyy-MM-dd if possible else today. Otherwise ''. Never overwrite existing values on other rows.
+- Extras: new rows get the mapped extras; missing extra columns are created (log `spalte`). If cfg.extras[i].show -> add to VIEW_EXTRAS.
+- `importBuildPreview()` -> `{mode, sourceName, tab, counts: {neu (new rows), mehr (copies added to groups that already exist), weniger, uebersprungen, pruefOffen, bekannt}, handMatch: [{fp, title, sub, image, qty, handCount, choice: 'same'}], removedByYou: [{fp, title, sub, qty}], added: [{fp, title, sub, image, qty, newGroup}], decreased: [{eid, title, sub, qty, fromImport}], skipped: [{fp, title, reason}], valueChange}` (titles: card name + version; sub: set · number · variant label · lang cond).
+- `importCommit(choices)` choices = `{hand: {fp: 'same'|'extra'}, removed: {fp: true}}`: recompute the plan server-side (never trust client numbers), then inside withLock_: create Importe row (Nr = max + 1, status 'läuft', IMPORT_RUN property {nr, phase: 'commit', at}), append all log entries as 'geplant' (`neu` with the new eids pre-assigned, `gleich`, `abgleich` with countBefore, `spalte`), write Daten (appendDataRows_ for new rows; abgleich: set count = countBefore − k only if current count == countBefore, else skip+mark 'übersprungen'), set log status 'erledigt', Importe status 'aktiv' + counts + valueChange + Bericht, delete IMPORT_RUN, upsert answers, clear draft + Import-Quelle + Import-Prüfung, rebuildGroups_(), view extras. Returns `{nr, counts, message}`.
+- `importResume(nr)`: for a 'läuft' import whose run died: apply remaining 'geplant' entries idempotently (neu: skip if eid already in Daten; abgleich: countBefore check), then finish like commit.
+- `importList()` -> `[{nr, date, sourceName, sourceId, tab, template, mode, status ('aktiv'|'unterbrochen'|'läuft'|'zurückgenommen'), counts: {neu, mehr, weniger, uebersprungen, pruefOffen}, valueChange, undoneAt}]` newest first.
+- `importUndoPreview(nr)` -> `{nr, sourceName, counts: {loeschen, zurueck (abgleich restores), fehlt (rows already gone)}, changed: [{eid, title, sub, count, changes: ['Zustand NM → LP', 'Sprache DE → EN', 'Sonderversion', 'Eigener Preis', 'Zusatzwert <name>', 'Mit tcgdex-Karte verknüpft', 'Aufgeteilt']}], laterSameSource: [nrs of active imports of the same source], newTerms: [] }`.
+  - Rows of this import: all Daten rows with origin 'Import <nr>' (this includes split children). A row is "changed" if its current id/variant/version/cond/lang/ownPrice/extras differ from the `neu` snapshot of its fp (split children compare against the snapshot of their fp too, and are always listed as "Aufgeteilt" when their eid is not in the log). Count changes alone are not a change.
+- `importUndo(nr, decisions)` decisions = {eid: 'keep'|'remove'} required for every changed row (throw German error if missing). Inside lock, IMPORT_RUN {nr, phase: 'undo'}: unchanged rows of this import -> deleted; changed rows: 'remove' -> deleted, 'keep' -> origin 'Hand', fp '' (merge into an existing Hand row with the same key if any); `abgleich` entries of this import: target row exists -> count += k; else skip; delete extra columns this import created (`spalte`) if no row has a value in them any more (remove from VIEW_EXTRAS too); set Importe status 'zurückgenommen', 'Zurückgenommen am', Bericht (what was skipped). One `rewriteData_` call for all Daten changes. `handentfernt` entries stay (they are Eric's sale records). Rebuild Gruppen. Returns `{nr, deleted, kept, restored, skipped, message}`.
+- Only one import commit / undo at a time: if IMPORT_RUN is set and younger than 6 minutes -> German error "Gerade läuft schon ein Import oder Zurücknehmen."; while any import is 'unterbrochen', new commits are refused with a message pointing to "Fortsetzen" or "Zurücknehmen".
+
+## 7. Import UI (ImportUi.html, sidebar only)
+
+Contains `<div id="paneImport" class="panel hidden">…</div>`, its own `<style>` additions (reuse Ui.html classes where possible) and a `<script>` with functions prefixed `imp`. Entry: `impInit()` -> importState().
+Screens:
+1. Start: list of imports (Nr, Datum, Quelle, Modus, Status, counts). Actions: "Zurücknehmen" (aktiv), "Fortsetzen" + "Zurücknehmen" (unterbrochen). Banner when a draft exists: "Import in Arbeit: weitermachen / verwerfen". Button "Neuer Import". Small "Einstellungen" area: "Set-Zuordnung vorbelegen" (importSetsVorbelegen), hint that terms/sets are edited in the sheets "Import-Begriffe" and "Import-Sets", view-extras checkboxes (getUiConfig().extras, setViewExtras).
+2. Wizard (8 steps, Zurück/Weiter): 1 Quelle (link input + hint about Drive API for .xlsx) -> 2 Tab (list with row counts) -> 3 Vorlage (select: matching template preselected, or "Neue Vorlage") -> 4 Form (Liste / Checkliste / Raster + grid fields) -> 5 Zuordnung (Kopfzeile, erste Datenzeile, letzte Zeile (leer = bis zum Ende), one select per field with options "– keine –" and "A · <header>" ...; a small raw sample table helps) -> 6 Feste Werte und Zusatzspalten (lang default DE, cond, variant, version; each unmapped column: checkbox "übernehmen" + name input + "in der Sammlung zeigen") -> 7 Vorschau der ersten zehn Zeilen (table of extracted fields, skip reasons) -> 8 Vorlage speichern (name + Modus radio: Nur Neues (Standard) / Alles addieren / Mit Quelle abgleichen) -> "Erkennung starten".
+3. Erkennung: progress bar loop over importRecognizeStep() until done; counts.
+4. Prüfliste: one card per unclear row: original values, reason, candidate tiles (image, name, set · nr) to pick; "Neu suchen" (name/number/set inputs -> importReviewSearch, shows tiles or set picker like the Hinzufügen tab via getCardBySetNumber), "Als freie Karte", "Überspringen". Prefilled rows marked "Deine Wahl vom letzten Mal" with the choice highlighted; button "Alle übernehmen" (importReviewAcceptPrefilled). Progress "x von y erledigt". "Später weitermachen" just leaves (state is saved). "Weiter zur Vorschau" (allowed with open rows; they are not imported and listed as "Prüfliste offen").
+5. Vorschau: counts; sections "Schon von Hand erfasst" (per item radio Dieselbe Karte / Zusätzliches Exemplar), "Von dir entfernt" (per item checkbox "trotzdem übernehmen"), "Neu", "Weniger (Abgleich)", "Übersprungen". Buttons "Importieren" (importCommit) and "Abbrechen" (importDiscardDraft after confirm()).
+6. Zurücknehmen: importUndoPreview -> counts text like "70 Einträge werden gelöscht, 5 auf den alten Stand gesetzt, 2 von Hand geänderte zur Entscheidung"; per changed row radio "Behalten" / "Entfernen" (nothing preselected); "Zurücknehmen" enabled once all decided; then importUndo and back to list.
+All long-running calls show spinners; stale-response guards like Ui.html; errors in German via setMsg.
+
+## 8. API check additions (Code.gs apiPruefen, keep existing steps)
+- 10. Snowflake / Cardmarket versions: list cards named Pikachu in sets dpp and hgss1 (de/en) with localIds; report.
+- 11. Set abbreviations: for sv03.5, ex11, hgss2, dpp, hgssp, me01 (if exists), report `abbreviation`, `tcgOnline`, name (de/en).
+- 12. Promo numbers: first/last 8 localIds of dpp, hgssp and of any set whose id starts with 'mep' or name contains 'MEP'.
+- 13. Japanese: GET /ja/sets length and one /ja/cards/<id> result (or error).
+- 14. Drive API service available for .xlsx: typeof Drive !== 'undefined' and which version (Files.create exists -> v3).
+
+## 9. Tests (Node, mocks)
+Test dir: `/tmp/claude-0/-home-claude/0eeba375-81a8-5ec4-82f1-dd095acdc6e6/scratchpad/import-build/test/`.
+`harness2.js` loads a list of .gs files into one vm context (default: Code.gs + Import.gs if it exists) with mocks: everything from the old harness (scratchpad/test/harness.js) plus: Utilities.getUuid (deterministic counter), Utilities.computeDigest(DigestAlgorithm.MD5, text) (use node crypto, return signed byte array like Apps Script), Utilities.DigestAlgorithm, Utilities.Charset, Utilities.formatDate with pattern support for 'yyyy-MM-dd' and 'dd.MM.yyyy'; CacheService.getScriptCache (get/put/remove); MimeType.GOOGLE_SHEETS; DriveApp.getFileById(id) -> {getName, getMimeType, setTrashed}; Drive.Files.copy/create (v3 shape) returning {id}; SpreadsheetApp.openById(id) returning registered fake spreadsheets (source files) with sheets; Range.getDisplayValues, getRichTextValues (objects with getText/getLinkUrl), Sheet.getLastColumn, getDataRange, deleteRows, insertColumnsAfter, getMaxColumns, Range.setNumberFormat no-op; HtmlService.createTemplateFromFile/createHtmlOutputFromFile (minimal); fake tcgdex DB as in the old harness, extended per test file. Each test file is plain node with ok()/fail counts and exit code 1 on failure.
+
+## 10. Pokédex and collection sorting (added 2026-10-21, Code.gs section 10)
+Decisions (Eric, 2026-10-21): Pokédex lists all 1025 Pokémon with owned/missing; each row shows Nr., German name, distinct cards (groups with copies), copies, value; tag-team cards count for every Pokémon on them (sorting uses the first dexId); filters status (Alle/Fehlend/Vorhanden), generation 1-9, search (name de/en or number). Lives in two places: tab "Pokédex" in web app + sidebar (tap expands owned cards, button "In Sammlung öffnen" filters the Sammlung tab by dex) and sheet "Pokédex" (filters B4:D4, card picker I4).
+- dexId source: tcgdex `dexId` (full card only). Remembered per card ID in hidden sheet "Pokédex-Nummern" (Karten-ID | Pokédex-Nr. as text "25 644" | Abgerufen am), written by addCard, linkFreeGroup and the price run (priceTargets_ also fetches all-own-price cards until their dexId is known). Until then `dexFromName_` derives it from the German/English name (embedded PokeAPI species names, DEX_NAMES_DE/EN). Trainer/Energie (Kartentyp) never get one.
+- Hidden sheet "Pokédex-Daten", rewritten by rebuildPokedex_ at the end of every rebuildGroups_ (inside try/catch, never blocks saving): A:H one row per Pokémon (Nr., Name, Name englisch, Generation, Karten, Exemplare, Wert, Auswahl "#25 Pikachu"), J:S one row per Pokémon and owned group (Pokédex-Nr., Karte, Set, Nummer, Variante, Seltenheit, Anzahl, Preis, Kartenwert, Bild-URL).
+- Sheet "Pokédex": formulas dexListFormula_ (A6) and dexCardFormula_ (H6); onEdit on row 4 sets image row heights (applyDexRowHeights_).
+- Sheet "Seltenheiten" (visible, Seltenheit | Stufe): seeded once from RARITY_SEED (de + en tcgdex texts, 1 = häufig ... 9 = Hyperselten, empty = end), Eric may edit; syncRarities_ appends unknown rarities from Daten with empty Stufe.
+- searchCollection(query, setText, opts): opts {sort: set|dex|rarity|name|price|added, desc, dex}. Default direction per COLL_SORTS (set/dex/name ascending, rarity/price/added descending). 0-copy groups always last, groups without a sort value next-to-last, ties by set order (setOrder_). Result adds sort, desc, dex; groups carry `rarity` (and `dex` when dex is used).
+- getPokedex() -> {entries: [[nr, name, nameEn, gen, cards, copies, value]], gens}.
+- Ui.html: Sammlung tab has "Sortieren nach" + direction button (remembered in localStorage pkmSort/pkmSortDesc) and a removable dex chip; new tab Pokédex (web app and sidebar).
+- apiPruefen steps 15 (dexId of sample cards incl. a tag team) and 16 (/de and /en/rarities vs. sheet Seltenheiten).
+- The sheet "Sammlung" keeps its own four sort options; Pokédex-Nr./Seltenheit there were not requested.
+- Tests: test/test_pokedex.js.

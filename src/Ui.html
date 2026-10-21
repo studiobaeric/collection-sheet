@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --fg:#202124; --muted:#5f6368; --line:#dadce0; --accent:#c62828; --soft:#f1f3f4; --ok:#137333; --okbg:#e6f4ea; --err:#a50e0e; --errbg:#fce8e6; }
+  * { box-sizing: border-box; }
+  body { font-family: Roboto, Arial, sans-serif; margin: 0; color: var(--fg); background: #fff; font-size: 15px; }
+  .tabs { display: flex; position: sticky; top: 0; background: #fff; border-bottom: 1px solid var(--line); z-index: 5; }
+  .tabs button { flex: 1; padding: 14px 4px; border: 0; background: none; font-size: 15px; border-bottom: 3px solid transparent; cursor: pointer; color: var(--muted); }
+  .tabs button.active { border-color: var(--accent); color: var(--fg); font-weight: 600; }
+  .panel { padding: 12px; max-width: 760px; margin: 0 auto; }
+  .hidden { display: none !important; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  .btn { padding: 10px 14px; font-size: 15px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; min-height: 44px; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.small { min-height: 44px; min-width: 44px; padding: 6px 10px; font-weight: 600; }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .actions .btn { flex: 1; }
+  .msg { margin-top: 10px; padding: 10px; border-radius: 6px; background: var(--soft); font-size: 14px; }
+  .msg.err { background: var(--errbg); color: var(--err); }
+  .msg.ok { background: var(--okbg); color: var(--ok); }
+  .msg .btn { margin-top: 8px; }
+  .notes { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 12px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 6px; text-align: center; cursor: pointer; background: #fff; }
+  .tile:hover { border-color: var(--accent); }
+  .tile img { width: 100%; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 4px; }
+  .tile.set img { aspect-ratio: 2 / 1; padding: 6px; }
+  .tile .cap { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
+  .confirm img.big { width: 100%; max-width: 320px; display: block; margin: 0 auto; border-radius: 10px; background: var(--soft); aspect-ratio: 245 / 342; object-fit: contain; }
+  .confirm h2 { font-size: 18px; margin: 12px 0 2px; }
+  .confirm .meta { color: var(--muted); font-size: 14px; }
+  .confirm .price { font-size: 17px; margin-top: 8px; font-weight: 600; }
+  .warn { margin-top: 8px; padding: 8px; border-radius: 6px; background: #fff8e1; color: #8d6e00; font-size: 13px; }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 15px; }
+  .check input { width: 22px; height: 22px; }
+  .item { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .item img { width: 48px; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 3px; flex: none; }
+  .item .info { flex: 1; min-width: 0; min-height: 44px; }
+  .item .info.tap { cursor: pointer; }
+  .item .info .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .info .s { font-size: 12px; color: var(--muted); }
+  .item .ctl { display: flex; align-items: center; gap: 6px; flex: none; }
+  .item .cnt { min-width: 28px; text-align: center; font-weight: 600; font-size: 16px; }
+  .item.zero { opacity: .5; }
+  .chev { font-size: 10px; color: var(--muted); }
+  .undo { display: inline-block; font-size: 14px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 12px 16px 12px 0; margin: -8px 0; min-height: 44px; text-decoration: underline; }
+  .spin { color: var(--muted); font-size: 14px; margin-top: 10px; }
+  .gx { border-left: 3px solid var(--soft); margin: 2px 0 10px; padding: 0 0 4px 10px; }
+  .erow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .erow .einfo { flex: 1 1 140px; min-width: 0; font-size: 14px; }
+  .erow .einfo .x { font-size: 12px; color: var(--muted); }
+  .erow.zero .einfo { opacity: .5; }
+  .erow.sel { background: var(--soft); }
+  .erow .ctl { display: flex; gap: 6px; flex: none; }
+  .box { border: 1px solid var(--line); border-radius: 8px; padding: 2px 10px 10px; margin: 8px 0; }
+  .box h3 { font-size: 14px; margin: 10px 0 0; }
+  .choose { background: var(--soft); border-radius: 8px; padding: 8px 10px; margin: 4px 0 8px; }
+  .choose .t { font-weight: 600; }
+  .choose .btn.opt { display: block; width: 100%; text-align: left; margin-top: 6px; }
+  @media (max-width: 380px) { .tabs button { font-size: 13px; } }
+  .sortbar { display: flex; gap: 8px; align-items: flex-end; }
+  .sortbar > div { flex: 1; min-width: 0; }
+  .sortbar .btn { flex: none; font-size: 18px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--soft); border-radius: 18px; padding: 0 0 0 12px; margin-top: 10px; font-size: 14px; }
+  .chip button { border: 0; background: none; font-size: 20px; cursor: pointer; min-width: 44px; min-height: 40px; color: var(--muted); }
+  .seg { display: flex; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; background: #fff; padding: 10px 4px; font-size: 14px; cursor: pointer; min-height: 44px; color: var(--fg); }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .dex { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; min-height: 52px; }
+  .dex .nr { width: 46px; flex: none; color: var(--muted); font-size: 13px; }
+  .dex .info { flex: 1; min-width: 0; }
+  .dex .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dex .s { font-size: 12px; color: var(--muted); }
+  .dex.miss .t { color: #9aa0a6; font-weight: 400; }
+  .dexx { border-left: 3px solid var(--soft); margin: 2px 0 10px; padding: 0 0 4px 10px; }
+</style>
+</head>
+<body>
+<div class="tabs">
+  <button id="tabAdd" class="active" onclick="showTab('add')">Hinzufügen</button>
+  <button id="tabColl" onclick="showTab('coll')">Sammlung</button>
+  <button id="tabDex" onclick="showTab('dex')">Pokédex</button>
+  <button id="tabImport" class="hidden" onclick="showTab('import')">Import</button>
+</div>
+
+<!-- Hinzufügen -->
+<div id="paneAdd" class="panel">
+  <form id="searchForm" onsubmit="doSearch(event)">
+    <label for="fName">Name</label>
+    <input type="text" id="fName" autocomplete="off" placeholder="z. B. Glurak-ex" autofocus>
+    <div class="row">
+      <div>
+        <label for="fNumber">Nummer</label>
+        <input type="text" id="fNumber" autocomplete="off" placeholder="z. B. 025/165">
+      </div>
+      <div>
+        <label for="fSet">Set (optional)</label>
+        <input type="text" id="fSet" list="setList" autocomplete="off" placeholder="Set-Name">
+      </div>
+    </div>
+    <datalist id="setList"></datalist>
+    <datalist id="versionList"></datalist>
+    <div class="actions"><button class="btn primary" type="submit">Suchen</button></div>
+  </form>
+  <div id="addMsg"></div>
+  <div id="addResults"></div>
+</div>
+
+<!-- Sammlung -->
+<div id="paneColl" class="panel hidden">
+  <div class="row">
+    <div>
+      <label for="colQuery">Name oder Nummer</label>
+      <input type="text" id="colQuery" autocomplete="off" placeholder="z. B. Glurak 025/165" oninput="debouncedCollection()">
+    </div>
+    <div>
+      <label for="colSet">Set (optional)</label>
+      <input type="text" id="colSet" list="setList" autocomplete="off" oninput="debouncedCollection()">
+    </div>
+  </div>
+  <div class="sortbar">
+    <div>
+      <label for="colSort">Sortieren nach</label>
+      <select id="colSort" onchange="sortChanged()"></select>
+    </div>
+    <button class="btn small" id="colDir" type="button" onclick="toggleDir()">↑</button>
+  </div>
+  <div class="hint" id="colDirHint"></div>
+  <div id="colDex"></div>
+  <div id="collMsg"></div>
+  <div id="collResults"></div>
+</div>
+
+<!-- Pokédex -->
+<div id="paneDex" class="panel hidden">
+  <div class="seg" id="dexStatus">
+    <button type="button" id="dexAll" class="on" onclick="dexSetStatus('all')">Alle</button>
+    <button type="button" id="dexMissing" onclick="dexSetStatus('missing')">Fehlend</button>
+    <button type="button" id="dexOwned" onclick="dexSetStatus('owned')">Vorhanden</button>
+  </div>
+  <div class="row">
+    <div>
+      <label for="dexGen">Generation</label>
+      <select id="dexGen" onchange="renderDex()"></select>
+    </div>
+    <div>
+      <label for="dexQuery">Name oder Nummer</label>
+      <input type="text" id="dexQuery" autocomplete="off" placeholder="z. B. Pikachu oder 25" oninput="debouncedDex()">
+    </div>
+  </div>
+  <div id="dexMsg"></div>
+  <div id="dexSummary" class="notes"></div>
+  <div id="dexList"></div>
+</div>
+
+<script>
+var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
+var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
+  '<text x="122" y="178" font-size="24" text-anchor="middle" fill="#80868b" font-family="Arial">kein Bild</text></svg>');
+var VARIANT_LABELS = { normal: 'Normal', holo: 'Holo', reverse: 'Reverse Holo', firstEdition: '1. Edition' };
+var CONDITIONS = ['', 'MT', 'NM', 'EX', 'GD', 'LP', 'PL', 'PO'];
+var CONDITION_LABELS = { MT: 'Mint – perfekt', NM: 'Near Mint – fast perfekt', EX: 'Excellent – leichte Spuren', GD: 'Good – sichtbare Spuren', LP: 'Light Played – leicht bespielt', PL: 'Played – stark bespielt', PO: 'Poor – beschädigt' };
+// Kartensprachen [{code, label}], wird von getUiConfig() überschrieben
+var LANGS = [
+  { code: 'DE', label: 'Deutsch' }, { code: 'EN', label: 'Englisch' }, { code: 'FR', label: 'Französisch' },
+  { code: 'IT', label: 'Italienisch' }, { code: 'ES', label: 'Spanisch' }, { code: 'PT', label: 'Portugiesisch' },
+  { code: 'NL', label: 'Niederländisch' }, { code: 'PL', label: 'Polnisch' }, { code: 'JP', label: 'Japanisch' },
+  { code: 'KO', label: 'Koreanisch' }, { code: 'ZH', label: 'Chinesisch' }
+];
+var UI_CONFIG = { versions: [], extras: [], viewExtras: [] };
+var state = { lastQuery: null, lastRes: null, current: null, lastEid: null, lastKey: null, groups: [], open: {} };
+var searchGen = 0, collGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function cardImg(base, q) { return base ? base + '/' + q + '.webp' : PLACEHOLDER; }
+function imgTag(src, cls) { return '<img ' + (cls ? 'class="' + cls + '" ' : '') + 'loading="lazy" src="' + esc(src) + '" onerror="this.onerror=null;this.src=PLACEHOLDER">'; }
+function eur(n) { return n == null ? 'kein Preis' : n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }); }
+function errText(e) { return (e && e.message) ? e.message : String(e); }
+function call(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (resolve, reject) {
+    var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+    if (typeof r[fn] !== 'function') {
+      reject(new Error('Die Funktion „' + fn + '“ fehlt im Skript. Ist die Skriptdatei „Import“ im Apps-Script-Editor angelegt und gespeichert?'));
+      return;
+    }
+    r[fn].apply(r, args);
+  });
+}
+function setMsg(id, html, kind) { $(id).innerHTML = html ? '<div class="msg ' + (kind || '') + '">' + html + '</div>' : ''; }
+function spinner(id, text) { $(id).innerHTML = '<div class="spin">' + esc(text) + '</div>'; }
+
+// Auswahllisten (auch für ImportUi)
+function condOptions(sel) {
+  sel = sel || '';
+  var list = CONDITIONS.indexOf(sel) >= 0 ? CONDITIONS : CONDITIONS.concat([sel]);
+  return list.map(function (k) {
+    return '<option value="' + esc(k) + '"' + (k === sel ? ' selected' : '') + '>' +
+      (k ? esc(k) + (CONDITION_LABELS[k] ? ' · ' + esc(CONDITION_LABELS[k]) : '') : '– unbekannt –') + '</option>';
+  }).join('');
+}
+function langOptions(sel) {
+  sel = sel || 'DE';
+  var list = LANGS.slice();
+  if (!list.some(function (l) { return l.code === sel; })) list.push({ code: sel, label: sel });
+  return list.map(function (l) {
+    return '<option value="' + esc(l.code) + '"' + (l.code === sel ? ' selected' : '') + '>' + esc(l.code) + ' · ' + esc(l.label) + '</option>';
+  }).join('');
+}
+function variantOptions(sel) {
+  return Object.keys(VARIANT_LABELS).map(function (k) {
+    return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + esc(VARIANT_LABELS[k]) + '</option>';
+  }).join('');
+}
+/** "1,50", "1.50", "1.234,56 €" -> Zahl; leer -> null; Unsinn -> NaN */
+function parseEuro(s) {
+  var t = String(s == null ? '' : s).replace(/€/g, '').replace(/\s+/g, '');
+  if (!t) return null;
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g, '').replace(',', '.');
+  else t = t.replace(',', '.');
+  return /^\d*\.?\d+$/.test(t) ? Number(t) : NaN;
+}
+function euroText(n) { return n == null || n === '' ? '' : Number(n).toFixed(2).replace('.', ','); }
+/** Eigener Preis aus einem Feld: {ok, value (Zahl > 0 oder null)}; Fehler landet in msgId. */
+function readOwnPrice(fieldId, msgId) {
+  var v = parseEuro($(fieldId).value);
+  if (v === null) return { ok: true, value: null };
+  if (isNaN(v) || v <= 0) { setMsg(msgId, 'Eigener Preis: bitte einen Betrag wie 1,50 eingeben.', 'err'); return { ok: false }; }
+  return { ok: true, value: Math.round(v * 100) / 100 };
+}
+function qtyOf(v) { return Math.max(1, Math.floor(Number(v)) || 1); }
+
+function applyConfig(cfg) {
+  if (!cfg) return;
+  if (cfg.langs && cfg.langs.length) {
+    var langs = cfg.langs.filter(function (l) { return l && l.code; })
+      .map(function (l) { return { code: String(l.code), label: String(l.label || l.code) }; });
+    if (langs.length) { LANGS.length = 0; langs.forEach(function (l) { LANGS.push(l); }); }
+  }
+  if (cfg.conditions && cfg.conditions.length) {
+    var codes = [''];
+    cfg.conditions.forEach(function (c) {
+      var code = c && c.code ? String(c.code) : '';
+      if (!code || codes.indexOf(code) >= 0) return;
+      codes.push(code);
+      if (!CONDITION_LABELS[code] && c.label) CONDITION_LABELS[code] = String(c.label);
+    });
+    if (codes.length > 1) { CONDITIONS.length = 0; codes.forEach(function (k) { CONDITIONS.push(k); }); }
+  }
+  UI_CONFIG.versions = (cfg.versions || []).map(String).filter(Boolean);
+  UI_CONFIG.extras = (cfg.extras || []).map(String).filter(Boolean);
+  UI_CONFIG.viewExtras = (cfg.viewExtras || []).map(String).filter(Boolean);
+  fillVersionList();
+}
+/** getUiConfig neu laden (auch für ImportUi, z. B. nach einem Import mit neuen Zusatzspalten) */
+function loadUiConfig() {
+  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); return cfg; })
+    .catch(function () { return null; }); // mit den bisherigen Listen weiter
+}
+function fillVersionList() {
+  $('versionList').innerHTML = UI_CONFIG.versions.map(function (v) { return '<option value="' + esc(v) + '">'; }).join('');
+}
+function rememberVersion(v) {
+  v = String(v || '').trim();
+  if (v && UI_CONFIG.versions.indexOf(v) < 0) { UI_CONFIG.versions.push(v); fillVersionList(); }
+}
+
+function showTab(t) {
+  if (t === 'remove') t = 'coll';
+  if (t === 'import' && MODE !== 'sidebar') t = 'add'; // Import gibt es nur in der Seitenleiste
+  var tabs = { add: ['tabAdd', 'paneAdd'], coll: ['tabColl', 'paneColl'], dex: ['tabDex', 'paneDex'], 'import': ['tabImport', 'paneImport'] };
+  Object.keys(tabs).forEach(function (k) {
+    var b = $(tabs[k][0]), p = $(tabs[k][1]);
+    if (b) b.classList.toggle('active', k === t);
+    if (p) p.classList.toggle('hidden', k !== t);
+  });
+  if (t === 'coll') { loadCollection(); $('colQuery').focus(); }
+  else if (t === 'dex') loadDex();
+  else if (t === 'import') { if (typeof impInit === 'function') impInit(); }
+  else $('fName').focus();
+}
+
+// ---------- Hinzufügen ----------
+
+function doSearch(ev) {
+  if (ev) ev.preventDefault();
+  var q = { name: $('fName').value.trim(), number: $('fNumber').value.trim(), set: $('fSet').value.trim() };
+  state.lastQuery = q;
+  setMsg('addMsg', '');
+  spinner('addResults', 'Suche bei tcgdex …');
+  var gen = ++searchGen;
+  call('searchCards', q).then(function (res) { if (gen === searchGen) renderSearch(res); }).catch(function (e) {
+    if (gen !== searchGen) return;
+    $('addResults').innerHTML = '';
+    setMsg('addMsg', esc(errText(e)), 'err');
+  });
+}
+
+function notesHtml(notes) {
+  return notes && notes.length ? '<div class="notes">' + notes.map(esc).join('<br>') + '</div>' : '';
+}
+
+function freeButtonHtml() {
+  return '<div class="actions"><button class="btn" type="button" onclick="openFreeForm()">Als freie Karte speichern</button></div>' +
+    '<div class="hint">Für Karten, die tcgdex nicht kennt: ohne Bild und ohne automatischen Preis. Du kannst sie später in der Sammlung mit einer tcgdex-Karte verknüpfen.</div>';
+}
+
+function renderSearch(res) {
+  state.lastRes = res;
+  var box = $('addResults');
+  if (res.tooMany) { box.innerHTML = notesHtml(res.notes); return; }
+  if (res.stage === 'pickSet') { renderSetPicker(res); return; }
+  if (!res.cards || !res.cards.length) {
+    box.innerHTML = (notesHtml(res.notes) || '<div class="notes">Keine Karte gefunden.</div>') + freeButtonHtml();
+    return;
+  }
+  if (res.cards.length === 1) { openConfirm(res.cards[0].id, res.cards[0].lang, res.notes); return; }
+  var html = notesHtml(res.notes) + '<div class="notes">' + res.cards.length + ' Treffer – Karte antippen:</div><div class="grid">';
+  res.cards.forEach(function (c, i) {
+    html += '<div class="tile" onclick="pickCard(' + i + ')">' + imgTag(cardImg(c.image, 'low')) +
+      '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId) + ' · ' + esc(c.localId) +
+      (c.setSize ? '/' + esc(c.setSize) : '') + '</div></div>';
+  });
+  box.innerHTML = html + '</div>';
+  state.cards = res.cards;
+}
+
+function pickCard(i) { var c = state.cards[i]; openConfirm(c.id, c.lang, null); }
+
+function renderSetPicker(res) {
+  state.pickSets = res.sets || [];
+  state.pickNumber = res.number;
+  var html = notesHtml(res.notes) +
+    '<label for="setFilter">Set filtern</label><input type="text" id="setFilter" oninput="filterSets()" placeholder="Set-Name">' +
+    '<div class="notes" id="setHint"></div><div class="grid" id="setGrid"></div>' +
+    '<div class="notes">Set nicht dabei oder Nummer nicht gefunden?</div>' + freeButtonHtml();
+  $('addResults').innerHTML = html;
+  filterSets();
+}
+
+function filterSets() {
+  var t = ($('setFilter').value || '').trim().toLowerCase();
+  var anyPref = state.pickSets.some(function (s) { return s.preferred; });
+  var html = '', shown = 0;
+  state.pickSets.forEach(function (s, i) {
+    if (t) { if ((s.name + ' ' + s.nameEn + ' ' + s.id).toLowerCase().indexOf(t) < 0) return; }
+    else if (anyPref && !s.preferred) return;
+    shown++;
+    html += '<div class="tile set" onclick="pickSet(' + i + ')">' + imgTag(s.logo ? s.logo + '.webp' : PLACEHOLDER) +
+      '<div class="cap"><b>' + esc(s.name) + '</b><br>' + esc(s.id) + (s.official ? ' · ' + esc(s.official) + ' Karten' : '') + '</div></div>';
+  });
+  var hint = '';
+  if (!state.pickSets.length) hint = 'Keine Sets im Zwischenspeicher – bitte „Pokémon > Übersetzung und Sets aktualisieren“ ausführen.';
+  else if (!shown) hint = 'Kein Set passt.';
+  else if (!t && anyPref) hint = 'Vorauswahl passend zu deiner Eingabe – andere Sets über „Set filtern“ suchen.';
+  $('setHint').textContent = hint;
+  $('setGrid').innerHTML = html;
+}
+
+function pickSet(i) {
+  var s = state.pickSets[i];
+  var gen = searchGen;
+  spinner('addResults', 'Suche Nummer ' + state.pickNumber + ' in ' + s.name + ' …');
+  call('getCardBySetNumber', s.id, state.pickNumber).then(function (card) { if (gen === searchGen) renderConfirm(card, null); })
+    .catch(function (e) {
+      if (gen !== searchGen) return;
+      setMsg('addMsg', esc(errText(e)), 'err');
+      renderSetPicker({ sets: state.pickSets, number: state.pickNumber, notes: [] });
+    });
+}
+
+function openConfirm(id, lang, notes) {
+  var gen = searchGen;
+  spinner('addResults', 'Lade Karte …');
+  call('getCardDetail', id, lang).then(function (card) { if (gen === searchGen) renderConfirm(card, notes); })
+    .catch(function (e) { if (gen !== searchGen) return; $('addResults').innerHTML = ''; setMsg('addMsg', esc(errText(e)), 'err'); });
+}
+
+function renderConfirm(c, notes) {
+  state.current = c;
+  var html = notesHtml(notes) + '<div class="confirm">' + imgTag(cardImg(c.image, 'high'), 'big') +
+    '<h2>' + esc(c.name) + '</h2>' +
+    '<div class="meta">' + esc(c.setName) + ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') +
+    (c.rarity ? ' · ' + esc(c.rarity) : '') + ' · ' + esc(c.baseLabel) + '</div>' +
+    '<div class="price" id="cPrice"></div>';
+  if (c.lang === 'en') {
+    var nm = state.lastQuery && state.lastQuery.name;
+    html += '<div class="warn">Englische Ersatzdaten: Diese Karte gibt es bei tcgdex nicht auf Deutsch. ' +
+      (nm ? 'Gespeichert wird sie unter deinem eingegebenen Namen „' + esc(nm) + '“.'
+          : 'Gespeichert wird sie unter dem englischen Namen „' + esc(c.name) + '“.') + '</div>';
+  }
+  if (c.priceFromEn) html += '<div class="notes">Preis aus den englischen tcgdex-Daten derselben Karte.</div>';
+  if (c.canReverse) html += '<label class="check"><input type="checkbox" id="cReverse" onchange="variantChanged(\'reverse\')"> Reverse Holo</label>';
+  if (c.canFirstEdition) html += '<label class="check"><input type="checkbox" id="cFirst" onchange="variantChanged(\'first\')"> 1. Edition</label>';
+  html += '<div class="row"><div><label for="cCond">Zustand</label><select id="cCond">' + condOptions('') +
+    '</select></div><div><label for="cQty">Anzahl</label><input type="number" id="cQty" min="1" value="1" inputmode="numeric"></div></div>' +
+    '<div class="row"><div><label for="cLang">Sprache</label><select id="cLang">' + langOptions('DE') + '</select></div>' +
+    '<div><label for="cVersion">Sonderversion (optional)</label><input type="text" id="cVersion" list="versionList" autocomplete="off" placeholder="z. B. Snowflake"></div></div>' +
+    '<label for="cOwnPrice">Eigener Preis in EUR (optional)</label>' +
+    '<input type="text" id="cOwnPrice" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50">' +
+    '<div class="hint">Nur nötig, wenn tcgdex keinen Preis hat.</div>' +
+    '<div class="actions"><button class="btn" onclick="backToSearch()">Zurück</button>' +
+    '<button class="btn primary" id="cAdd" onclick="addCurrent()">Hinzufügen</button></div></div>';
+  $('addResults').innerHTML = html;
+  updatePrice();
+}
+
+function chosenVariant() {
+  if ($('cReverse') && $('cReverse').checked) return 'reverse';
+  if ($('cFirst') && $('cFirst').checked) return 'firstEdition';
+  return 'base';
+}
+
+function variantChanged(which) {
+  if (which === 'reverse' && $('cReverse').checked && $('cFirst')) $('cFirst').checked = false;
+  if (which === 'first' && $('cFirst').checked && $('cReverse')) $('cReverse').checked = false;
+  updatePrice();
+}
+
+function updatePrice() {
+  var c = state.current, v = chosenVariant();
+  var p = c.prices ? (v === 'reverse' ? c.prices.reverse : v === 'firstEdition' ? c.prices.firstEdition : c.prices.base) : null;
+  var label = v === 'base' ? c.baseLabel : VARIANT_LABELS[v];
+  $('cPrice').textContent = 'Trend: ' + eur(p) + ' (' + label + ')' + (v === 'firstEdition' && p != null ? ' – kein eigener 1.-Edition-Preis' : '') +
+    (c.priceUpdated ? ', Stand ' + c.priceUpdated : '');
+}
+
+function backToSearch() {
+  var r = state.lastRes;
+  setMsg('addMsg', '');
+  if (r && r.stage === 'pickSet') { renderSetPicker(r); return; }
+  if (r && r.cards && r.cards.length > 1) { renderSearch(r); return; }
+  if (r && !r.tooMany && (!r.cards || !r.cards.length)) { renderSearch(r); return; }
+  $('addResults').innerHTML = r ? notesHtml(r.notes) : '';
+  $('fName').focus();
+}
+
+function addCurrent() {
+  var c = state.current;
+  if (!c || $('cAdd').disabled) return;
+  var op = readOwnPrice('cOwnPrice', 'addMsg');
+  if (!op.ok) return;
+  setMsg('addMsg', '');
+  var req = {
+    id: c.id, lang: c.lang, variant: chosenVariant(), condition: $('cCond').value,
+    qty: qtyOf($('cQty').value), inputName: state.lastQuery ? state.lastQuery.name : '',
+    cardLang: $('cLang').value || 'DE', version: $('cVersion').value.trim(), ownPrice: op.value
+  };
+  $('cAdd').disabled = true;
+  var gen = searchGen;
+  call('addCard', req).then(function (res) { rememberVersion(req.version); addDone(res, gen); }).catch(function (e) {
+    if ($('cAdd')) $('cAdd').disabled = false;
+    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  });
+}
+
+/** Erfolg nach addCard / addFreeCard. gen: searchGen beim Absenden. */
+function addDone(res, gen) {
+  state.lastEid = res.eid || null;
+  state.lastKey = res.key || null;
+  setMsg('addMsg', esc(res.message) + (state.lastEid ? '<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>' : ''), 'ok');
+  if (gen !== searchGen) return; // inzwischen neu gesucht: deren Ergebnis stehen lassen
+  $('addResults').innerHTML = '';
+  $('searchForm').reset();
+  state.lastQuery = null;
+  state.lastRes = null;
+  $('fName').focus();
+}
+
+function againPlusOne(btn) {
+  var eid = state.lastEid;
+  if (!eid || (btn && btn.disabled)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Speichere …'; }
+  call('adjustEntry', eid, 1).then(function (res) {
+    if (eid !== state.lastEid) return; // inzwischen andere Karte hinzugefügt
+    setMsg('addMsg', 'Noch eine dazu, jetzt ' + esc(res.count) + ' Stück.<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>', 'ok');
+  }).catch(function (e) {
+    if (eid !== state.lastEid) return;
+    setMsg('addMsg', esc(errText(e)), 'err');
+  });
+}
+
+// Freie Karte (tcgdex kennt sie nicht)
+function openFreeForm() {
+  var q = state.lastQuery || {};
+  setMsg('addMsg', '');
+  $('addResults').innerHTML = '<form class="box" id="freeForm" onsubmit="saveFree(event)"><h3>Als freie Karte speichern</h3>' +
+    '<div class="hint">Ohne Bild und ohne automatischen Preis. Gib bei Bedarf einen eigenen Preis an.</div>' +
+    '<label for="frName">Name</label><input type="text" id="frName" autocomplete="off" value="' + esc(q.name) + '">' +
+    '<div class="row"><div><label for="frSet">Set</label><input type="text" id="frSet" list="setList" autocomplete="off" value="' + esc(q.set) + '"></div>' +
+    '<div><label for="frNumber">Nummer</label><input type="text" id="frNumber" autocomplete="off" value="' + esc(q.number) + '"></div></div>' +
+    '<div class="row"><div><label for="frVariant">Variante</label><select id="frVariant">' + variantOptions('normal') + '</select></div>' +
+    '<div><label for="frCond">Zustand</label><select id="frCond">' + condOptions('') + '</select></div></div>' +
+    '<div class="row"><div><label for="frLang">Sprache</label><select id="frLang">' + langOptions('DE') + '</select></div>' +
+    '<div><label for="frVersion">Sonderversion (optional)</label><input type="text" id="frVersion" list="versionList" autocomplete="off" placeholder="z. B. Snowflake"></div></div>' +
+    '<div class="row"><div><label for="frQty">Anzahl</label><input type="number" id="frQty" min="1" value="1" inputmode="numeric"></div>' +
+    '<div><label for="frOwnPrice">Eigener Preis in EUR (optional)</label><input type="text" id="frOwnPrice" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50"></div></div>' +
+    '<div class="actions"><button class="btn" type="button" onclick="backToSearch()">Zurück</button>' +
+    '<button class="btn primary" type="submit" id="frSave">Speichern</button></div></form>';
+  $('frName').focus();
+}
+
+function saveFree(ev) {
+  if (ev) ev.preventDefault();
+  if (!$('frSave') || $('frSave').disabled) return;
+  var name = $('frName').value.trim();
+  if (!name) { setMsg('addMsg', 'Bitte einen Namen eingeben.', 'err'); $('frName').focus(); return; }
+  var op = readOwnPrice('frOwnPrice', 'addMsg');
+  if (!op.ok) return;
+  setMsg('addMsg', '');
+  var req = {
+    name: name, setName: $('frSet').value.trim(), number: $('frNumber').value.trim(),
+    variant: $('frVariant').value || 'normal', condition: $('frCond').value, qty: qtyOf($('frQty').value),
+    cardLang: $('frLang').value || 'DE', version: $('frVersion').value.trim(), ownPrice: op.value
+  };
+  $('frSave').disabled = true;
+  var gen = searchGen;
+  call('addFreeCard', req).then(function (res) { rememberVersion(req.version); addDone(res, gen); }).catch(function (e) {
+    if ($('frSave')) $('frSave').disabled = false;
+    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  });
+}
+
+// ---------- Sammlung ----------
+
+var collTimer = null;
+var opSeq = 0, recentOps = []; // Ergebnisse, die nach dem Absenden einer Listensuche ankamen, auf die neue Liste übertragen
+function debouncedCollection() { clearTimeout(collTimer); collTimer = setTimeout(function () { loadCollection(); }, 400); }
+
+function noteOp(fn) {
+  recentOps.push({ seq: ++opSeq, fn: fn });
+  if (recentOps.length > 30) recentOps.shift();
+}
+
+/** okText: Erfolgsmeldung, die nach dem Neuladen gezeigt wird. */
+function loadCollection(okText) {
+  var gen = ++collGen;
+  var since = opSeq;
+  (state.groups || []).forEach(function (g) { clearTimeout(g.undoTimer); g.undo = null; });
+  spinner('collResults', 'Suche in der Sammlung …');
+  setMsg('collMsg', '');
+  drawCollDex();
+  call('searchCollection', $('colQuery').value, $('colSet').value, collOpts())
+    .then(function (res) {
+      if (gen !== collGen) return;
+      renderCollection(res);
+      recentOps.forEach(function (op) { if (op.seq > since) op.fn(); });
+      if (okText) setMsg('collMsg', esc(okText), 'ok');
+    })
+    .catch(function (e) { if (gen !== collGen) return; $('collResults').innerHTML = ''; setMsg('collMsg', esc(errText(e)), 'err'); });
+}
+
+function renderCollection(res) {
+  var groups = (res && res.groups) || [];
+  state.groups = groups;
+  if (!groups.length) { $('collResults').innerHTML = '<div class="notes">Nichts gefunden.</div>'; return; }
+  var html = res.total > groups.length ? '<div class="notes">' + esc(res.total) + ' Treffer, die ersten ' + groups.length + ' werden gezeigt.</div>' : '';
+  groups.forEach(function (g, i) {
+    g.rows = g.rows || [];
+    g.open = !!state.open[g.gkey];
+    html += '<div class="grp" id="g' + i + '"><div id="gh' + i + '"></div><div id="gc' + i + '"></div>' +
+      '<div class="gx hidden" id="gx' + i + '"><div id="gr' + i + '"></div><div id="ge' + i + '"></div><div id="gp' + i + '"></div><div id="gl' + i + '"></div></div></div>';
+  });
+  $('collResults').innerHTML = html;
+  groups.forEach(function (g, i) { draw(i, g, 'all'); });
+}
+
+/** Teile einer Gruppe neu zeichnen: h Kopf, c Auswahl, r Exemplare, e Bearbeiten, p Preis, l Verknüpfen. */
+function draw(i, g, parts) {
+  if (!state.groups || state.groups[i] !== g) return; // Gruppe gehört zu einer älteren Liste
+  var all = parts === 'all';
+  function put(id, fn) { if (all || parts.indexOf(id) >= 0) { var el = $('g' + id + i); if (el) el.innerHTML = fn(g, i); } }
+  put('h', headHtml);
+  put('c', chooserHtml);
+  var x = $('gx' + i);
+  if (x) x.classList.toggle('hidden', !g.open);
+  if (!g.open) return;
+  put('r', rowsHtml);
+  put('e', editHtml);
+  put('p', priceHtml);
+  put('l', linkHtml);
+}
+
+function isHand(r) { return r.origin ? r.origin === 'Hand' : !r.isImport; }
+function rowByEid(g, eid) { for (var k = 0; k < g.rows.length; k++) if (g.rows[k].eid === eid) return g.rows[k]; return null; }
+function copyObj(o) { var c = {}; Object.keys(o || {}).forEach(function (k) { c[k] = o[k]; }); return c; }
+function copyRow(r) { var c = copyObj(r); c.extras = copyObj(r.extras); return c; }
+function titleHtml(g) { return esc(g.name) + (g.version ? ' · ' + esc(g.version) : '') + (g.source === 'en-Ersatz' ? ' (EN)' : ''); }
+function rowLabel(r) {
+  return esc(r.count) + '× ' + esc(r.lang || 'DE') + (r.cond ? ' ' + esc(r.cond) : '') + ' · ' + esc(r.originLabel || (isHand(r) ? 'von Hand' : 'Import'));
+}
+function extrasHtml(r) {
+  var ex = r.extras || {};
+  return Object.keys(ex).filter(function (k) { return ex[k] != null && String(ex[k]) !== ''; })
+    .map(function (k) { return esc(k) + ': ' + esc(ex[k]); }).join(' · ');
+}
+function langPos(code) { for (var k = 0; k < LANGS.length; k++) if (LANGS[k].code === code) return k; return 999; }
+function condPos(code) { var p = CONDITIONS.indexOf(code); return p < 0 ? 999 : p; }
+/** "1× DE NM, 1× EN LP" wie in der Sammlung, aus den Exemplaren berechnet */
+function exemplareText(rows) {
+  var sums = {}, keys = [];
+  rows.forEach(function (r) {
+    var n = Number(r.count) || 0;
+    if (n <= 0) return;
+    var k = (r.lang || 'DE') + '|' + (r.cond || '');
+    if (!(k in sums)) { sums[k] = 0; keys.push(k); }
+    sums[k] += n;
+  });
+  keys.sort(function (a, b) {
+    var pa = a.split('|'), pb = b.split('|');
+    return (langPos(pa[0]) - langPos(pb[0])) || (pa[0] < pb[0] ? -1 : pa[0] > pb[0] ? 1 : 0) || (condPos(pa[1]) - condPos(pb[1]));
+  });
+  return keys.map(function (k) { var p = k.split('|'); return sums[k] + '× ' + p[0] + (p[1] ? ' ' + p[1] : ''); }).join(', ');
+}
+function sumCounts(rows) { return rows.reduce(function (s, r) { return s + (Number(r.count) || 0); }, 0); }
+
+function headHtml(g, i) {
+  var sub = [];
+  if (g.isFree) sub.push('freie Karte');
+  if (g.setName) sub.push(esc(g.setName));
+  if (g.localId) sub.push(esc(g.localId) + (g.setSize ? '/' + esc(g.setSize) : ''));
+  sub.push(esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant));
+  var p = g.price == null || g.price === '' ? NaN : Number(g.price);
+  if (!isNaN(p)) sub.push(esc(eur(p)) + (g.priceManual ? ' manuell' : ''));
+  if (g.exemplare) sub.push(esc(g.exemplare));
+  if (collSort.sort === 'rarity' && g.rarity) sub.push(esc(g.rarity));
+  if (collSort.sort === 'dex' && g.dex && g.dex.length) sub.push('#' + g.dex.map(esc).join(', #'));
+  return '<div class="item' + (g.count ? '' : ' zero') + '">' + imgTag(cardImg(g.image, 'low')) +
+    '<div class="info tap" role="button" tabindex="0" aria-expanded="' + (g.open ? 'true' : 'false') + '" onclick="toggleGroup(' + i + ')"' +
+    ' onkeydown="groupKey(event,this,' + i + ')">' +
+    '<div class="t">' + titleHtml(g) + '</div><div class="s">' + sub.join(' · ') +
+    ' <span class="chev">' + (g.open ? '▲' : '▼') + '</span></div>' +
+    (g.undo && !g.busy ? '<button class="undo" onclick="event.stopPropagation();undoGroup(' + i + ')">Rückgängig</button>' : '') + '</div>' +
+    '<div class="ctl"><button class="btn small" onclick="groupMinus(' + i + ')"' + (!g.count || g.busy ? ' disabled' : '') + '>−1</button>' +
+    '<span class="cnt">' + esc(g.count) + '</span>' +
+    '<button class="btn small" onclick="groupPlus(' + i + ')"' + (g.busy ? ' disabled' : '') + '>+1</button></div></div>';
+}
+
+function chooserHtml(g, i) {
+  var c = g.choose;
+  if (!c) return '';
+  var html = '<div class="choose"><div class="t">Welches Exemplar?</div>' +
+    (c.delta > 0 ? '<div class="hint">Die neue Karte zählt dann als von Hand erfasst.</div>' : '');
+  c.eids.forEach(function (eid, k) {
+    var r = rowByEid(g, eid);
+    if (r) html += '<button class="btn opt" onclick="pickChoice(' + i + ',' + k + ')"' + (g.busy ? ' disabled' : '') + '>' + rowLabel(r) + '</button>';
+  });
+  return html + '<button class="btn opt" onclick="closeChooser(' + i + ')">Abbrechen</button></div>';
+}
+
+function rowsHtml(g, i) {
+  if (!g.rows.length) return '<div class="notes">Keine Exemplare.</div>';
+  return g.rows.map(function (r, j) {
+    var ex = extrasHtml(r);
+    var editing = g.edit && g.edit.eid === r.eid;
+    return '<div class="erow' + (r.count ? '' : ' zero') + (editing ? ' sel' : '') + '"><div class="einfo">' + rowLabel(r) +
+      (ex ? '<div class="x">' + ex + '</div>' : '') + '</div><div class="ctl">' +
+      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',-1)"' + (!r.count || g.busy ? ' disabled' : '') + '>−1</button>' +
+      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',1)"' + (g.busy ? ' disabled' : '') + '>+1</button>' +
+      '<button class="btn small" onclick="openEdit(' + i + ',' + j + ')"' + (g.editBusy ? ' disabled' : '') + '>Bearbeiten</button></div></div>';
+  }).join('');
+}
+
+function toggleGroup(i) {
+  var g = state.groups[i];
+  if (!g) return;
+  g.open = !g.open;
+  if (g.open) state.open[g.gkey] = true; else delete state.open[g.gkey];
+  draw(i, g, 'all');
+}
+
+/** Enter oder Leertaste auf der Infozeile klappt auf und zu (nicht auf dem Rückgängig-Knopf darin) */
+function groupKey(ev, el, i) {
+  if (ev.target !== el || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+  ev.preventDefault();
+  toggleGroup(i);
+}
+
+// -1 / +1 auf der Gruppe
+function groupMinus(i) {
+  var g = state.groups[i];
+  if (!g || g.busy) return;
+  var rows = g.rows.filter(function (r) { return r.count > 0; });
+  if (!rows.length) return;
+  if (rows.length === 1) { g.choose = null; adjust(i, g, rows[0], -1); return; }
+  g.choose = { delta: -1, eids: rows.map(function (r) { return r.eid; }) }; // Kurz nachfragen
+  draw(i, g, 'c');
+}
+
+function groupPlus(i) {
+  var g = state.groups[i];
+  if (!g || g.busy || !g.rows.length) return;
+  var hand = g.rows.filter(isHand);
+  var direct = hand.length === 1 ? hand[0] : (!hand.length && g.rows.length === 1 ? g.rows[0] : null);
+  if (direct) { g.choose = null; adjust(i, g, direct, 1); return; }
+  g.choose = { delta: 1, eids: g.rows.map(function (r) { return r.eid; }) };
+  draw(i, g, 'c');
+}
+
+function pickChoice(i, k) {
+  var g = state.groups[i];
+  if (!g || !g.choose || g.busy) return;
+  var c = g.choose, r = rowByEid(g, c.eids[k]);
+  g.choose = null;
+  if (!r || (c.delta < 0 && !r.count)) { draw(i, g, 'c'); return; }
+  adjust(i, g, r, c.delta);
+}
+
+function closeChooser(i) { var g = state.groups[i]; if (g) { g.choose = null; draw(i, g, 'c'); } }
+
+function rowAdjust(i, j, delta) {
+  var g = state.groups[i];
+  if (!g || g.busy) return;
+  var r = g.rows[j];
+  if (!r || (delta < 0 && !r.count)) return;
+  g.choose = null;
+  adjust(i, g, r, delta);
+}
+
+/** Antwort von adjustEntry auf eine Gruppe anwenden (auch auf neu geladene Listen). */
+function applyAdjust(g, res, src) {
+  var r = rowByEid(g, res.eid);
+  if (!r && src && res.eid) {
+    if (res.eid === src.eid) r = copyRow(src);
+    else { // +1 auf eine Import-Zeile landet in der Zeile „von Hand“ (ggf. neu angelegt)
+      r = copyRow(src);
+      r.eid = res.eid; r.count = 0; r.origin = 'Hand'; r.originLabel = 'von Hand'; r.isImport = false; r.importNr = null;
+    }
+    var at = 0;
+    if (isHand(r)) { while (at < g.rows.length && isHand(g.rows[at])) at++; } else at = g.rows.length;
+    g.rows.splice(at, 0, r);
+  }
+  if (r && res.count != null) r.count = Number(res.count) || 0;
+  g.count = res.groupCount != null ? Number(res.groupCount) || 0 : sumCounts(g.rows);
+  g.exemplare = exemplareText(g.rows);
+}
+
+function applyRevert(g, res, token) {
+  var r = rowByEid(g, res.eid);
+  if (r && res.count != null) r.count = Number(res.count) || 0;
+  if (r && token && token.createdEid && token.createdEid === r.eid && !r.count) g.rows.splice(g.rows.indexOf(r), 1);
+  g.count = res.groupCount != null ? Number(res.groupCount) || 0 : sumCounts(g.rows);
+  g.exemplare = exemplareText(g.rows);
+}
+
+/** Dieselbe Gruppe in einer inzwischen neu geladenen Liste nachziehen */
+function syncOthers(g, fn, parts) {
+  (state.groups || []).forEach(function (x, j) {
+    if (x !== g && x.gkey === g.gkey && !x.busy) { fn(x); draw(j, x, typeof parts === 'function' ? parts(x) : parts); }
+  });
+}
+/** Nach einer Zähländerung: Kopf, Auswahl, Exemplare und ein offenes Bearbeiten-Formular (Werte stehen in g.edit) */
+function cntParts(x) { return x.edit ? 'hcre' : 'hcr'; }
+
+function adjust(i, g, row, delta) {
+  if (g.busy) return;
+  clearTimeout(g.undoTimer); g.undo = null; // alte Rückgängig-Option verwerfen
+  g.busy = true; draw(i, g, 'hcr');
+  var src = copyRow(row);
+  call('adjustEntry', row.eid, delta).then(function (res) {
+    g.busy = false;
+    var fn = function (x) { applyAdjust(x, res, src); };
+    fn(g);
+    if (res.applied && res.token) {
+      g.undo = res.token;
+      clearTimeout(g.undoTimer);
+      g.undoTimer = setTimeout(function () { g.undo = null; draw(i, g, 'h'); }, 5000);
+    }
+    draw(i, g, cntParts(g));
+    syncOthers(g, fn, cntParts);
+    noteOp(function () { syncOthers(g, fn, cntParts); });
+  }).catch(function (e) { g.busy = false; draw(i, g, 'hcr'); setMsg('collMsg', esc(errText(e)), 'err'); });
+}
+
+function undoGroup(i) {
+  var g = state.groups[i];
+  if (!g || !g.undo || g.busy) return;
+  var token = g.undo;
+  g.undo = null; clearTimeout(g.undoTimer);
+  g.busy = true; draw(i, g, 'hcr');
+  call('revertAdjust', token).then(function (res) {
+    g.busy = false;
+    var fn = function (x) { applyRevert(x, res, token); };
+    fn(g);
+    draw(i, g, cntParts(g));
+    syncOthers(g, fn, cntParts);
+    noteOp(function () { syncOthers(g, fn, cntParts); });
+  }).catch(function (e) { g.busy = false; draw(i, g, 'hcr'); setMsg('collMsg', esc(errText(e)), 'err'); });
+}
+
+// Bearbeiten (pro Exemplar-Zeile)
+function openEdit(i, j) {
+  var g = state.groups[i];
+  if (!g || g.editBusy) return;
+  var r = g.rows[j];
+  if (!r) return;
+  if (g.edit && g.edit.eid === r.eid) { g.edit = null; draw(i, g, 're'); return; }
+  var ex = r.extras || {};
+  var names = UI_CONFIG.extras.slice();
+  Object.keys(ex).forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
+  g.edit = {
+    eid: r.eid, cond: r.cond || '', lang: r.lang || 'DE', version: g.version || '', qty: r.count,
+    names: names, extras: names.map(function (n) { return ex[n] == null ? '' : String(ex[n]); })
+  };
+  draw(i, g, 're');
+}
+
+function editField(i, field, value) { var g = state.groups[i]; if (g && g.edit) g.edit[field] = value; }
+function editExtra(i, k, value) { var g = state.groups[i]; if (g && g.edit) g.edit.extras[k] = value; }
+function closeEdit(i) { var g = state.groups[i]; if (g && !g.editBusy) { g.edit = null; draw(i, g, 're'); } }
+
+function editHtml(g, i) {
+  var e = g.edit;
+  var r = e && rowByEid(g, e.eid);
+  if (!r) return '';
+  var html = '<div class="box"><h3>Bearbeiten: ' + rowLabel(r) + '</h3>' +
+    '<div class="row"><div><label for="eCond' + i + '">Zustand</label><select id="eCond' + i + '" onchange="editField(' + i + ',\'cond\',this.value)">' + condOptions(e.cond) + '</select></div>' +
+    '<div><label for="eLang' + i + '">Sprache</label><select id="eLang' + i + '" onchange="editField(' + i + ',\'lang\',this.value)">' + langOptions(e.lang) + '</select></div></div>' +
+    '<label for="eVer' + i + '">Sonderversion</label><input type="text" id="eVer' + i + '" list="versionList" autocomplete="off" placeholder="leer = keine" value="' + esc(e.version) + '" oninput="editField(' + i + ',\'version\',this.value)">';
+  e.names.forEach(function (n, k) {
+    html += '<label for="eX' + i + '_' + k + '">' + esc(n) + '</label><input type="text" id="eX' + i + '_' + k + '" autocomplete="off" value="' + esc(e.extras[k]) + '" oninput="editExtra(' + i + ',' + k + ',this.value)">';
+  });
+  if (r.count > 1) {
+    html += '<label for="eQty' + i + '">Wie viele davon?</label><input type="number" id="eQty' + i + '" min="1" max="' + esc(r.count) + '" value="' + esc(e.qty) + '" inputmode="numeric" oninput="editField(' + i + ',\'qty\',this.value)">' +
+      '<div class="hint">Von ' + esc(r.count) + ' Stück. Die übrigen bleiben, wie sie sind.</div>';
+  }
+  return html + '<div class="actions"><button class="btn" onclick="closeEdit(' + i + ')"' + (g.editBusy ? ' disabled' : '') + '>Abbrechen</button>' +
+    '<button class="btn primary" onclick="saveEdit(' + i + ')"' + (g.editBusy ? ' disabled' : '') + '>' + (g.editBusy ? 'Speichere …' : 'Speichern') + '</button></div></div>';
+}
+
+function saveEdit(i) {
+  var g = state.groups[i];
+  if (!g || !g.edit || g.editBusy) return;
+  var e = g.edit, r = rowByEid(g, e.eid);
+  if (!r) { g.edit = null; draw(i, g, 're'); return; }
+  var changes = {}, any = false;
+  if (e.cond !== (r.cond || '')) { changes.cond = e.cond; any = true; }
+  if (e.lang !== (r.lang || 'DE')) { changes.cardLang = e.lang; any = true; }
+  var ver = String(e.version || '').trim();
+  if (ver !== (g.version || '')) { changes.version = ver; any = true; }
+  var ex = {}, anyEx = false;
+  e.names.forEach(function (n, k) {
+    var v = String(e.extras[k] || '').trim();
+    var old = r.extras && r.extras[n] != null ? String(r.extras[n]) : '';
+    if (v !== old) { ex[n] = v; anyEx = true; }
+  });
+  if (anyEx) { changes.extras = ex; any = true; }
+  if (!any) { g.edit = null; draw(i, g, 're'); setMsg('collMsg', 'Nichts geändert.'); return; }
+  var qty = null; // null = alle
+  if (r.count > 1) {
+    qty = Math.floor(Number(e.qty));
+    if (!(qty >= 1 && qty <= r.count)) { setMsg('collMsg', 'Wie viele davon? Bitte eine Zahl von 1 bis ' + esc(r.count) + ' eingeben.', 'err'); return; }
+  } else if (r.count === 1) qty = 1;
+  setMsg('collMsg', '');
+  g.editBusy = true; draw(i, g, 're');
+  call('editEntry', e.eid, changes, qty).then(function (res) {
+    g.editBusy = false; g.edit = null;
+    rememberVersion(ver);
+    if (res && res.gkey) state.open[res.gkey] = true;
+    loadCollection('Gespeichert.');
+  }).catch(function (err) { g.editBusy = false; draw(i, g, 're'); setMsg('collMsg', esc(errText(err)), 'err'); });
+}
+
+// Eigener Preis (gilt für die ganze Gruppe)
+function priceHtml(g, i) {
+  if (g.priceText == null) g.priceText = euroText(g.ownPrice);
+  return '<div class="box"><label for="op' + i + '">Eigener Preis in EUR</label>' +
+    '<div class="row"><input type="text" id="op' + i + '" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50" value="' + esc(g.priceText) + '" oninput="priceInput(' + i + ',this.value)">' +
+    '<button class="btn" onclick="savePrice(' + i + ')"' + (g.priceBusy ? ' disabled' : '') + '>Speichern</button>' +
+    '<button class="btn" onclick="clearPrice(' + i + ')"' + (g.priceBusy || g.ownPrice == null ? ' disabled' : '') + '>Entfernen</button></div>' +
+    '<div class="hint">' + (g.ownPrice != null ? 'Gilt für alle Exemplare dieser Zeile. Der Preislauf ändert ihn nicht.' : 'Nur nötig, wenn tcgdex keinen Preis hat. Gilt für alle Exemplare dieser Zeile.') + '</div></div>';
+}
+
+function priceInput(i, v) { var g = state.groups[i]; if (g) g.priceText = v; }
+
+function savePrice(i) {
+  var g = state.groups[i];
+  if (!g || g.priceBusy) return;
+  var v = parseEuro(g.priceText);
+  if (v === null || isNaN(v) || v <= 0) { setMsg('collMsg', 'Bitte einen Preis größer als 0 eingeben, z. B. 1,50.', 'err'); return; }
+  sendPrice(i, g, Math.round(v * 100) / 100);
+}
+
+function clearPrice(i) {
+  var g = state.groups[i];
+  if (!g || g.priceBusy || g.ownPrice == null) return;
+  sendPrice(i, g, null);
+}
+
+function applyPrice(x, res) {
+  x.price = res.price == null || res.price === '' ? null : Number(res.price);
+  x.priceManual = !!res.priceManual;
+  x.ownPrice = x.priceManual ? x.price : null;
+  x.priceText = euroText(x.ownPrice);
+}
+
+function sendPrice(i, g, price) {
+  g.priceBusy = true; draw(i, g, 'p');
+  setMsg('collMsg', '');
+  call('setGroupOwnPrice', g.gkey, price).then(function (res) {
+    g.priceBusy = false;
+    var fn = function (x) { applyPrice(x, res); };
+    fn(g);
+    draw(i, g, 'hp');
+    syncOthers(g, fn, 'hp');
+    noteOp(function () { syncOthers(g, fn, 'hp'); });
+    setMsg('collMsg', price == null ? 'Eigener Preis entfernt.' : 'Eigener Preis gespeichert.', 'ok');
+  }).catch(function (e) { g.priceBusy = false; draw(i, g, 'p'); setMsg('collMsg', esc(errText(e)), 'err'); });
+}
+
+// Freie Karte mit tcgdex-Karte verknüpfen
+/** Variante der freien Karte übernehmen; Normal heißt: Grundvariante der tcgdex-Karte (z. B. Holo bei alten Holos) */
+function linkVariant(g) { return g.variant === 'reverse' || g.variant === 'firstEdition' || g.variant === 'holo' ? g.variant : 'base'; }
+
+function openLink(i) {
+  var g = state.groups[i];
+  if (!g || !g.isFree) return;
+  g.link = {
+    name: g.name || '', number: g.localId ? g.localId + (g.setSize ? '/' + g.setSize : '') : '', set: g.setName || '',
+    res: null, busy: false, busyText: '', msg: '', setFilter: '', gen: 0, query: null, linking: false
+  };
+  draw(i, g, 'l');
+}
+
+function closeLink(i) { var g = state.groups[i]; if (g && g.link && !g.link.linking) { g.link = null; draw(i, g, 'l'); } }
+function linkField(i, f, v) { var g = state.groups[i]; if (g && g.link) g.link[f] = v; }
+
+function linkHtml(g, i) {
+  if (!g.isFree) return '';
+  var L = g.link;
+  if (!L) return '<div class="actions"><button class="btn" onclick="openLink(' + i + ')">Mit tcgdex-Karte verknüpfen</button></div>';
+  return '<div class="box"><form onsubmit="linkSearch(event,' + i + ')"><h3>Mit tcgdex-Karte verknüpfen</h3>' +
+    '<label for="lkName' + i + '">Name</label><input type="text" id="lkName' + i + '" autocomplete="off" value="' + esc(L.name) + '" oninput="linkField(' + i + ',\'name\',this.value)">' +
+    '<div class="row"><div><label for="lkNum' + i + '">Nummer</label><input type="text" id="lkNum' + i + '" autocomplete="off" value="' + esc(L.number) + '" oninput="linkField(' + i + ',\'number\',this.value)"></div>' +
+    '<div><label for="lkSet' + i + '">Set (optional)</label><input type="text" id="lkSet' + i + '" list="setList" autocomplete="off" value="' + esc(L.set) + '" oninput="linkField(' + i + ',\'set\',this.value)"></div></div>' +
+    '<div class="actions"><button class="btn" type="button" onclick="closeLink(' + i + ')"' + (L.linking ? ' disabled' : '') + '>Abbrechen</button>' +
+    '<button class="btn primary" type="submit"' + (L.linking ? ' disabled' : '') + '>Suchen</button></div></form>' +
+    '<div id="lkRes' + i + '">' + linkResHtml(g, i) + '</div></div>';
+}
+
+function linkResHtml(g, i) {
+  var L = g.link, res = L.res;
+  var html = L.msg ? '<div class="msg err">' + esc(L.msg) + '</div>' : '';
+  if (L.busy) return html + '<div class="spin">' + esc(L.busyText || 'Suche bei tcgdex …') + '</div>';
+  if (!res) return html;
+  html += notesHtml(res.notes);
+  if (res.cards && res.cards.length) {
+    html += '<div class="notes">Karte antippen, um sie zu verknüpfen:</div><div class="grid">';
+    res.cards.forEach(function (c, k) {
+      html += '<div class="tile" role="button" onclick="linkPick(' + i + ',' + k + ')">' + imgTag(cardImg(c.image, 'low')) +
+        '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId) + ' · ' + esc(c.localId) +
+        (c.setSize ? '/' + esc(c.setSize) : '') + (c.lang === 'en' ? ' · englische Daten' : '') + '</div></div>';
+    });
+    return html + '</div>';
+  }
+  if (res.stage === 'pickSet') {
+    return html + '<label for="lkFilter' + i + '">Set filtern</label><input type="text" id="lkFilter' + i + '" autocomplete="off" placeholder="Set-Name" value="' + esc(L.setFilter) + '" oninput="linkFilter(' + i + ',this.value)">' +
+      '<div class="grid" id="lkSets' + i + '">' + linkSetsHtml(g, i) + '</div>';
+  }
+  if (!res.tooMany && !(res.notes && res.notes.length)) html += '<div class="notes">Keine Karte gefunden.</div>';
+  return html;
+}
+
+function linkSetsHtml(g, i) {
+  var L = g.link, sets = (L.res && L.res.sets) || [];
+  var t = String(L.setFilter || '').trim().toLowerCase();
+  var anyPref = sets.some(function (s) { return s.preferred; });
+  var html = '', shown = 0;
+  sets.forEach(function (s, k) {
+    if (shown >= 40) return;
+    if (t) { if ((s.name + ' ' + s.nameEn + ' ' + s.id).toLowerCase().indexOf(t) < 0) return; }
+    else if (anyPref && !s.preferred) return;
+    shown++;
+    html += '<div class="tile set" role="button" onclick="linkPickSet(' + i + ',' + k + ')">' + imgTag(s.logo ? s.logo + '.webp' : PLACEHOLDER) +
+      '<div class="cap"><b>' + esc(s.name) + '</b><br>' + esc(s.id) + (s.official ? ' · ' + esc(s.official) + ' Karten' : '') + '</div></div>';
+  });
+  return html || '<div class="notes">Kein Set passt.</div>';
+}
+
+function linkFilter(i, v) {
+  var g = state.groups[i];
+  if (!g || !g.link) return;
+  g.link.setFilter = v;
+  var el = $('lkSets' + i);
+  if (el && state.groups[i] === g) el.innerHTML = linkSetsHtml(g, i);
+}
+
+function linkSearch(ev, i) {
+  if (ev) ev.preventDefault();
+  var g = state.groups[i];
+  if (!g || !g.link || g.link.linking) return;
+  var L = g.link;
+  var q = { name: String(L.name || '').trim(), number: String(L.number || '').trim(), set: String(L.set || '').trim() };
+  var gen = L.gen = ++linkGen;
+  L.query = q; L.res = null; L.msg = ''; L.busy = true; L.busyText = 'Suche bei tcgdex …'; L.setFilter = '';
+  draw(i, g, 'l');
+  call('searchCards', q).then(function (res) {
+    if (g.link !== L || L.gen !== gen) return;
+    L.busy = false; L.res = res;
+    draw(i, g, 'l');
+  }).catch(function (e) {
+    if (g.link !== L || L.gen !== gen) return;
+    L.busy = false; L.msg = errText(e);
+    draw(i, g, 'l');
+  });
+}
+
+function linkPickSet(i, k) {
+  var g = state.groups[i];
+  if (!g || !g.link || g.link.linking) return;
+  var L = g.link, prev = L.res, s = prev && prev.sets && prev.sets[k];
+  if (!s) return;
+  var number = (L.query && L.query.number) || L.number;
+  var gen = L.gen = ++linkGen;
+  L.busy = true; L.msg = ''; L.busyText = 'Suche Nummer ' + number + ' in ' + s.name + ' …';
+  draw(i, g, 'l');
+  call('getCardBySetNumber', s.id, number).then(function (card) {
+    if (g.link !== L || L.gen !== gen) return;
+    L.busy = false; L.res = { stage: 'set', cards: [card], notes: [], sets: prev.sets, back: prev };
+    draw(i, g, 'l');
+  }).catch(function (e) {
+    if (g.link !== L || L.gen !== gen) return;
+    L.busy = false; L.msg = errText(e); L.res = prev;
+    draw(i, g, 'l');
+  });
+}
+
+function linkPick(i, k) {
+  var g = state.groups[i];
+  if (!g || !g.link || g.link.linking || g.link.busy) return;
+  var L = g.link, c = L.res && L.res.cards && L.res.cards[k];
+  if (!c) return;
+  L.linking = true; L.busy = true; L.msg = ''; L.busyText = 'Verknüpfe mit ' + c.name + ' …';
+  L.gen = ++linkGen; // laufende Suchen verwerfen
+  draw(i, g, 'l');
+  call('linkFreeGroup', g.gkey, c.id, c.lang, linkVariant(g)).then(function (res) {
+    delete state.open[g.gkey];
+    if (res && res.gkey) state.open[res.gkey] = true;
+    if (g.link === L) g.link = null;
+    loadCollection('Mit tcgdex-Karte verknüpft.');
+  }).catch(function (e) {
+    L.linking = false; L.busy = false; L.msg = errText(e);
+    draw(i, g, 'l');
+  });
+}
+
+// ---------- Sortierung der Sammlung ----------
+
+// [Schlüssel, Name, Standard absteigend, Text aufsteigend, Text absteigend]; Schlüssel wie COLL_SORTS in Code.gs
+var COLL_SORTS = [
+  ['set', 'Set', false, 'Älteste Sets zuerst', 'Neueste Sets zuerst'],
+  ['dex', 'Pokédex-Nr.', false, 'Nr. 1 zuerst, Trainer und Energie am Ende', 'Höchste Nr. zuerst, Trainer und Energie am Ende'],
+  ['rarity', 'Seltenheit', true, 'Häufigste zuerst', 'Seltenste zuerst'],
+  ['name', 'Name', false, 'A bis Z', 'Z bis A'],
+  ['price', 'Preis', true, 'Günstigste zuerst', 'Teuerste zuerst'],
+  ['added', 'Neueste', true, 'Zuerst erfasste zuerst', 'Zuletzt erfasste zuerst']
+];
+var collSort = { sort: 'set', desc: false, dex: null }; // dex: {nr, name}, nur Karten dieses Pokémon
+
+function sortDef(k) { for (var i = 0; i < COLL_SORTS.length; i++) if (COLL_SORTS[i][0] === k) return COLL_SORTS[i]; return null; }
+// Auswahl pro Gerät merken (ohne Speicher, z. B. privates Fenster, geht es auch)
+function memSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* egal */ } }
+function memGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function collOpts() { return { sort: collSort.sort, desc: collSort.desc, dex: collSort.dex ? collSort.dex.nr : null }; }
+
+function initSort() {
+  $('colSort').innerHTML = COLL_SORTS.map(function (o) { return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('');
+  var s = memGet('pkmSort'), d = memGet('pkmSortDesc');
+  if (s && sortDef(s)) { collSort.sort = s; collSort.desc = d == null ? sortDef(s)[2] : d === '1'; }
+  $('colSort').value = collSort.sort;
+  drawDir();
+}
+function drawDir() {
+  var def = sortDef(collSort.sort);
+  var text = collSort.desc ? def[4] : def[3];
+  $('colDir').textContent = collSort.desc ? '↓' : '↑';
+  $('colDir').title = 'Richtung umkehren';
+  $('colDir').setAttribute('aria-label', 'Richtung umkehren, jetzt: ' + text);
+  $('colDirHint').textContent = text;
+}
+function sortChanged() {
+  var def = sortDef($('colSort').value) || COLL_SORTS[0];
+  collSort.sort = def[0];
+  collSort.desc = def[2];
+  memSet('pkmSort', collSort.sort);
+  memSet('pkmSortDesc', collSort.desc ? '1' : '0');
+  drawDir();
+  loadCollection();
+}
+function toggleDir() {
+  collSort.desc = !collSort.desc;
+  memSet('pkmSortDesc', collSort.desc ? '1' : '0');
+  drawDir();
+  loadCollection();
+}
+function drawCollDex() {
+  var d = collSort.dex;
+  $('colDex').innerHTML = d ? '<div class="chip">Nur #' + esc(d.nr) + ' ' + esc(d.name) +
+    '<button type="button" onclick="clearCollDex()" aria-label="Pokédex-Filter entfernen">×</button></div>' : '';
+}
+function clearCollDex() { collSort.dex = null; loadCollection(); }
+
+// ---------- Pokédex ----------
+
+var DEX_GEN_ENDS = [151, 251, 386, 493, 649, 721, 809, 905, 1025];
+// entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]] von getPokedex()
+var dex = { entries: null, status: 'all', open: {}, cards: {} };
+var dexReq = 0, dexTimer = null, dexCardGen = 0;
+
+function initDex() {
+  var html = '<option value="">Alle</option>';
+  DEX_GEN_ENDS.forEach(function (end, i) {
+    var start = i ? DEX_GEN_ENDS[i - 1] + 1 : 1;
+    html += '<option value="' + (i + 1) + '">' + (i + 1) + ' (Nr. ' + start + ' bis ' + end + ')</option>';
+  });
+  $('dexGen').innerHTML = html;
+}
+function debouncedDex() { clearTimeout(dexTimer); dexTimer = setTimeout(renderDex, 250); }
+
+/** Liste bei jedem Öffnen neu holen (die Sammlung kann sich geändert haben); die alte bleibt bis dahin stehen. */
+function loadDex() {
+  var gen = ++dexReq;
+  if (!dex.entries) spinner('dexList', 'Lade Pokédex …');
+  setMsg('dexMsg', '');
+  call('getPokedex').then(function (res) {
+    if (gen !== dexReq) return;
+    dex.entries = (res && res.entries) || [];
+    dex.cards = {};
+    Object.keys(dex.open).forEach(function (k) {
+      var e = dexEntry(Number(k));
+      if (!e) delete dex.open[k];
+      else if (e[5] > 0) dexLoadCards(e);
+    });
+    renderDex();
+  }).catch(function (e) {
+    if (gen !== dexReq) return;
+    if (!dex.entries) $('dexList').innerHTML = '';
+    setMsg('dexMsg', esc(errText(e)), 'err');
+  });
+}
+
+function dexSetStatus(s) {
+  dex.status = s;
+  $('dexAll').classList.toggle('on', s === 'all');
+  $('dexMissing').classList.toggle('on', s === 'missing');
+  $('dexOwned').classList.toggle('on', s === 'owned');
+  renderDex();
+}
+
+function dexFiltered() {
+  var q = $('dexQuery').value.trim().toLowerCase();
+  var num = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : 0;
+  var gen = Number($('dexGen').value) || 0;
+  return (dex.entries || []).filter(function (e) {
+    var own = e[5] > 0;
+    if ((dex.status === 'owned' && !own) || (dex.status === 'missing' && own)) return false;
+    if (gen && e[3] !== gen) return false;
+    if (!q) return true;
+    if (num) return e[0] === num;
+    return String(e[1]).toLowerCase().indexOf(q) >= 0 || String(e[2]).toLowerCase().indexOf(q) >= 0;
+  });
+}
+
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+function dexNr(n) { return '#' + ('00' + n).slice(-3); }
+
+function renderDex() {
+  if (!dex.entries) return;
+  var gen = Number($('dexGen').value) || 0;
+  var base = dex.entries.filter(function (e) { return !gen || e[3] === gen; });
+  var owned = base.filter(function (e) { return e[5] > 0; }).length;
+  $('dexSummary').textContent = 'Vorhanden: ' + owned + ' von ' + base.length + (gen ? ' in Generation ' + gen : '') + '.';
+  var list = dexFiltered();
+  if (!list.length) { $('dexList').innerHTML = '<div class="notes">Kein Pokémon gefunden.</div>'; return; }
+  $('dexList').innerHTML = list.map(function (e) {
+    var nr = e[0], own = e[5] > 0, open = !!dex.open[nr];
+    var sub = own ? plural(e[4], 'Karte', 'Karten') + ' · ' + plural(e[5], 'Exemplar', 'Exemplare') + ' · ' + eur(e[6]) : 'fehlt noch';
+    return '<div class="dex' + (own ? '' : ' miss') + '" role="button" tabindex="0" aria-expanded="' + open + '"' +
+      ' onclick="dexToggle(' + nr + ')" onkeydown="dexKey(event,' + nr + ')">' +
+      '<span class="nr">' + dexNr(nr) + '</span><div class="info"><div class="t">' + esc(e[1]) + '</div><div class="s">' + esc(sub) +
+      '</div></div><span class="chev">' + (open ? '▲' : '▼') + '</span></div>' +
+      '<div class="dexx' + (open ? '' : ' hidden') + '" id="dx' + nr + '">' + (open ? dexCardsHtml(e) : '') + '</div>';
+  }).join('');
+}
+
+function dexEntry(nr) {
+  var list = dex.entries || [];
+  for (var i = 0; i < list.length; i++) if (list[i][0] === nr) return list[i];
+  return null;
+}
+function dexKey(ev, nr) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  ev.preventDefault();
+  dexToggle(nr);
+}
+
+function dexToggle(nr) {
+  var e = dexEntry(nr);
+  if (!e) return;
+  if (dex.open[nr]) delete dex.open[nr]; else dex.open[nr] = true;
+  if (dex.open[nr] && e[5] > 0 && !dex.cards[nr]) dexLoadCards(e);
+  renderDex();
+}
+
+function dexLoadCards(e) {
+  var nr = e[0], gen = ++dexCardGen;
+  dex.cards[nr] = { busy: true, gen: gen };
+  call('searchCollection', '', '', { dex: nr, sort: 'set', desc: false }).then(function (res) {
+    var c = dex.cards[nr];
+    if (!c || c.gen !== gen) return;
+    dex.cards[nr] = { groups: ((res && res.groups) || []).filter(function (g) { return g.count > 0; }), total: res ? res.total : 0 };
+    dexRedraw(nr);
+  }).catch(function (err) {
+    var c = dex.cards[nr];
+    if (!c || c.gen !== gen) return;
+    dex.cards[nr] = { error: errText(err) };
+    dexRedraw(nr);
+  });
+}
+function dexRedraw(nr) {
+  var box = $('dx' + nr), e = dexEntry(nr);
+  if (box && e && dex.open[nr]) box.innerHTML = dexCardsHtml(e);
+}
+
+function dexCardsHtml(e) {
+  var nr = e[0];
+  if (!(e[5] > 0)) {
+    return '<div class="notes">Noch keine Karte von ' + esc(e[1]) + '.</div>' +
+      '<div class="actions"><button class="btn" type="button" onclick="dexAdd(' + nr + ')">Karte von ' + esc(e[1]) + ' suchen</button></div>';
+  }
+  var c = dex.cards[nr];
+  if (!c || c.busy) return '<div class="spin">Lade Karten …</div>';
+  if (c.error) return '<div class="msg err">' + esc(c.error) + '</div>';
+  var html = c.groups.map(function (g) {
+    var sub = [];
+    if (g.setName) sub.push(esc(g.setName));
+    if (g.localId) sub.push(esc(g.localId) + (g.setSize ? '/' + esc(g.setSize) : ''));
+    sub.push(esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant));
+    if (g.rarity) sub.push(esc(g.rarity));
+    var p = g.price == null || g.price === '' ? NaN : Number(g.price);
+    return '<div class="item">' + imgTag(cardImg(g.image, 'low')) + '<div class="info"><div class="t">' + titleHtml(g) + '</div>' +
+      '<div class="s">' + sub.join(' · ') + '</div><div class="s">' + esc(g.count) + '× · ' +
+      (isNaN(p) ? 'kein Preis' : esc(eur(p)) + (g.priceManual ? ' manuell' : '')) + '</div></div></div>';
+  }).join('');
+  if (!c.groups.length) html = '<div class="notes">Keine Karten gefunden.</div>';
+  else if (c.total > c.groups.length) html += '<div class="notes">Weitere Karten in der Sammlung.</div>';
+  return html + '<div class="actions"><button class="btn" type="button" onclick="dexOpenColl(' + nr + ')">In Sammlung öffnen</button></div>';
+}
+
+/** Tab Sammlung, gefiltert auf dieses Pokémon (Suche und Set werden geleert). */
+function dexOpenColl(nr) {
+  var e = dexEntry(nr);
+  if (!e) return;
+  collSort.dex = { nr: nr, name: e[1] };
+  $('colQuery').value = '';
+  $('colSet').value = '';
+  showTab('coll');
+}
+
+/** Fehlendes Pokémon: Tab Hinzufügen mit dem Namen im Suchfeld. */
+function dexAdd(nr) {
+  var e = dexEntry(nr);
+  if (!e) return;
+  showTab('add');
+  $('fName').value = e[1];
+  $('fNumber').value = '';
+  $('fSet').value = '';
+}
+
+// ---------- Start ----------
+
+if (MODE === 'sidebar') $('tabImport').classList.remove('hidden');
+initSort();
+initDex();
+call('getSetSuggestions').then(function (names) {
+  $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
+}).catch(function () { /* ohne Vorschläge weiter */ });
+loadUiConfig();
+</script>
+<?!= include('ImportUi') ?>
+</body>
+</html>

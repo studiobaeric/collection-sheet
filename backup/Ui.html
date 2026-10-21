@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --fg:#202124; --muted:#5f6368; --line:#dadce0; --accent:#c62828; --soft:#f1f3f4; --ok:#137333; --okbg:#e6f4ea; --err:#a50e0e; --errbg:#fce8e6; }
+  * { box-sizing: border-box; }
+  body { font-family: Roboto, Arial, sans-serif; margin: 0; color: var(--fg); background: #fff; font-size: 15px; }
+  .tabs { display: flex; position: sticky; top: 0; background: #fff; border-bottom: 1px solid var(--line); z-index: 5; }
+  .tabs button { flex: 1; padding: 14px 8px; border: 0; background: none; font-size: 15px; border-bottom: 3px solid transparent; cursor: pointer; color: var(--muted); }
+  .tabs button.active { border-color: var(--accent); color: var(--fg); font-weight: 600; }
+  .panel { padding: 12px; max-width: 760px; margin: 0 auto; }
+  .hidden { display: none !important; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  .btn { padding: 10px 14px; font-size: 15px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; min-height: 44px; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.small { min-height: 40px; min-width: 44px; padding: 6px 10px; font-weight: 600; }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .actions .btn { flex: 1; }
+  .msg { margin-top: 10px; padding: 10px; border-radius: 6px; background: var(--soft); font-size: 14px; }
+  .msg.err { background: var(--errbg); color: var(--err); }
+  .msg.ok { background: var(--okbg); color: var(--ok); }
+  .msg .btn { margin-top: 8px; }
+  .notes { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 12px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 6px; text-align: center; cursor: pointer; background: #fff; }
+  .tile:hover { border-color: var(--accent); }
+  .tile img { width: 100%; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 4px; }
+  .tile.set img { aspect-ratio: 2 / 1; padding: 6px; }
+  .tile .cap { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
+  .confirm img.big { width: 100%; max-width: 320px; display: block; margin: 0 auto; border-radius: 10px; background: var(--soft); aspect-ratio: 245 / 342; object-fit: contain; }
+  .confirm h2 { font-size: 18px; margin: 12px 0 2px; }
+  .confirm .meta { color: var(--muted); font-size: 14px; }
+  .confirm .price { font-size: 17px; margin-top: 8px; font-weight: 600; }
+  .warn { margin-top: 8px; padding: 8px; border-radius: 6px; background: #fff8e1; color: #8d6e00; font-size: 13px; }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 15px; }
+  .check input { width: 22px; height: 22px; }
+  .item { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .item img { width: 48px; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 3px; flex: none; }
+  .item .info { flex: 1; min-width: 0; }
+  .item .info .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .info .s { font-size: 12px; color: var(--muted); }
+  .item .ctl { display: flex; align-items: center; gap: 6px; flex: none; }
+  .item .cnt { min-width: 28px; text-align: center; font-weight: 600; font-size: 16px; }
+  .item.zero { opacity: .5; }
+  .undo { display: inline-block; font-size: 14px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 12px 16px 12px 0; margin: -8px 0; text-decoration: underline; }
+  .spin { color: var(--muted); font-size: 14px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="tabs">
+  <button id="tabAdd" class="active" onclick="showTab('add')">Hinzufügen</button>
+  <button id="tabRemove" onclick="showTab('remove')">Entfernen</button>
+</div>
+
+<!-- Hinzufügen -->
+<div id="paneAdd" class="panel">
+  <form id="searchForm" onsubmit="doSearch(event)">
+    <label for="fName">Name</label>
+    <input type="text" id="fName" autocomplete="off" placeholder="z. B. Glurak-ex" autofocus>
+    <div class="row">
+      <div>
+        <label for="fNumber">Nummer</label>
+        <input type="text" id="fNumber" autocomplete="off" placeholder="z. B. 025/165">
+      </div>
+      <div>
+        <label for="fSet">Set (optional)</label>
+        <input type="text" id="fSet" list="setList" autocomplete="off" placeholder="Set-Name">
+      </div>
+    </div>
+    <datalist id="setList"></datalist>
+    <div class="actions"><button class="btn primary" type="submit">Suchen</button></div>
+  </form>
+  <div id="addMsg"></div>
+  <div id="addResults"></div>
+</div>
+
+<!-- Entfernen -->
+<div id="paneRemove" class="panel hidden">
+  <div class="row">
+    <div>
+      <label for="rQuery">Name oder Nummer</label>
+      <input type="text" id="rQuery" autocomplete="off" placeholder="z. B. Glurak 025/165" oninput="debouncedCollection()">
+    </div>
+    <div>
+      <label for="rSet">Set (optional)</label>
+      <input type="text" id="rSet" list="setList" autocomplete="off" oninput="debouncedCollection()">
+    </div>
+  </div>
+  <div id="removeMsg"></div>
+  <div id="removeResults"></div>
+</div>
+
+<script>
+var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
+  '<text x="122" y="178" font-size="24" text-anchor="middle" fill="#80868b" font-family="Arial">kein Bild</text></svg>');
+var VARIANT_LABELS = { normal: 'Normal', holo: 'Holo', reverse: 'Reverse Holo', firstEdition: '1. Edition' };
+var CONDITIONS = ['', 'MT', 'NM', 'EX', 'GD', 'LP', 'PL', 'PO'];
+var CONDITION_LABELS = { MT: 'Mint – perfekt', NM: 'Near Mint – fast perfekt', EX: 'Excellent – leichte Spuren', GD: 'Good – sichtbare Spuren', LP: 'Light Played – leicht bespielt', PL: 'Played – stark bespielt', PO: 'Poor – beschädigt' };
+var state = { lastQuery: null, lastRes: null, current: null, lastKey: null };
+var searchGen = 0, collGen = 0; // nur die Antwort auf die neueste Anfrage zählt
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function cardImg(base, q) { return base ? base + '/' + q + '.webp' : PLACEHOLDER; }
+function imgTag(src, cls) { return '<img ' + (cls ? 'class="' + cls + '" ' : '') + 'loading="lazy" src="' + esc(src) + '" onerror="this.onerror=null;this.src=PLACEHOLDER">'; }
+function eur(n) { return n == null ? 'kein Preis' : n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }); }
+function errText(e) { return (e && e.message) ? e.message : String(e); }
+function call(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (resolve, reject) {
+    var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+    r[fn].apply(r, args);
+  });
+}
+function setMsg(id, html, kind) { $(id).innerHTML = html ? '<div class="msg ' + (kind || '') + '">' + html + '</div>' : ''; }
+function spinner(id, text) { $(id).innerHTML = '<div class="spin">' + esc(text) + '</div>'; }
+
+function showTab(t) {
+  $('tabAdd').classList.toggle('active', t === 'add');
+  $('tabRemove').classList.toggle('active', t === 'remove');
+  $('paneAdd').classList.toggle('hidden', t !== 'add');
+  $('paneRemove').classList.toggle('hidden', t !== 'remove');
+  if (t === 'remove') { loadCollection(); $('rQuery').focus(); } else { $('fName').focus(); }
+}
+
+// ---------- Hinzufügen ----------
+
+function doSearch(ev) {
+  if (ev) ev.preventDefault();
+  var q = { name: $('fName').value.trim(), number: $('fNumber').value.trim(), set: $('fSet').value.trim() };
+  state.lastQuery = q;
+  setMsg('addMsg', '');
+  spinner('addResults', 'Suche bei tcgdex …');
+  var gen = ++searchGen;
+  call('searchCards', q).then(function (res) { if (gen === searchGen) renderSearch(res); }).catch(function (e) {
+    if (gen !== searchGen) return;
+    $('addResults').innerHTML = '';
+    setMsg('addMsg', esc(errText(e)), 'err');
+  });
+}
+
+function notesHtml(notes) {
+  return notes && notes.length ? '<div class="notes">' + notes.map(esc).join('<br>') + '</div>' : '';
+}
+
+function renderSearch(res) {
+  state.lastRes = res;
+  var box = $('addResults');
+  if (res.tooMany) { box.innerHTML = notesHtml(res.notes); return; }
+  if (res.stage === 'pickSet') { renderSetPicker(res); return; }
+  if (!res.cards || !res.cards.length) { box.innerHTML = notesHtml(res.notes) || '<div class="notes">Keine Karte gefunden.</div>'; return; }
+  if (res.cards.length === 1) { openConfirm(res.cards[0].id, res.cards[0].lang, res.notes); return; }
+  var html = notesHtml(res.notes) + '<div class="notes">' + res.cards.length + ' Treffer – Karte antippen:</div><div class="grid">';
+  res.cards.forEach(function (c, i) {
+    html += '<div class="tile" onclick="pickCard(' + i + ')">' + imgTag(cardImg(c.image, 'low')) +
+      '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId) + ' · ' + esc(c.localId) +
+      (c.setSize ? '/' + esc(c.setSize) : '') + '</div></div>';
+  });
+  box.innerHTML = html + '</div>';
+  state.cards = res.cards;
+}
+
+function pickCard(i) { var c = state.cards[i]; openConfirm(c.id, c.lang, null); }
+
+function renderSetPicker(res) {
+  state.pickSets = res.sets || [];
+  state.pickNumber = res.number;
+  var html = notesHtml(res.notes) +
+    '<label for="setFilter">Set filtern</label><input type="text" id="setFilter" oninput="filterSets()" placeholder="Set-Name">' +
+    '<div class="notes" id="setHint"></div><div class="grid" id="setGrid"></div>';
+  $('addResults').innerHTML = html;
+  filterSets();
+}
+
+function filterSets() {
+  var t = ($('setFilter').value || '').trim().toLowerCase();
+  var anyPref = state.pickSets.some(function (s) { return s.preferred; });
+  var html = '', shown = 0;
+  state.pickSets.forEach(function (s, i) {
+    if (t) { if ((s.name + ' ' + s.nameEn + ' ' + s.id).toLowerCase().indexOf(t) < 0) return; }
+    else if (anyPref && !s.preferred) return;
+    shown++;
+    html += '<div class="tile set" onclick="pickSet(' + i + ')">' + imgTag(s.logo ? s.logo + '.webp' : PLACEHOLDER) +
+      '<div class="cap"><b>' + esc(s.name) + '</b><br>' + esc(s.id) + (s.official ? ' · ' + esc(s.official) + ' Karten' : '') + '</div></div>';
+  });
+  var hint = '';
+  if (!state.pickSets.length) hint = 'Keine Sets im Zwischenspeicher – bitte „Pokémon > Übersetzung und Sets aktualisieren“ ausführen.';
+  else if (!shown) hint = 'Kein Set passt.';
+  else if (!t && anyPref) hint = 'Vorauswahl passend zu deiner Eingabe – andere Sets über „Set filtern“ suchen.';
+  $('setHint').textContent = hint;
+  $('setGrid').innerHTML = html;
+}
+
+function pickSet(i) {
+  var s = state.pickSets[i];
+  var gen = searchGen;
+  spinner('addResults', 'Suche Nummer ' + state.pickNumber + ' in ' + s.name + ' …');
+  call('getCardBySetNumber', s.id, state.pickNumber).then(function (card) { if (gen === searchGen) renderConfirm(card, null); })
+    .catch(function (e) {
+      if (gen !== searchGen) return;
+      setMsg('addMsg', esc(errText(e)), 'err');
+      renderSetPicker({ sets: state.pickSets, number: state.pickNumber, notes: [] });
+    });
+}
+
+function openConfirm(id, lang, notes) {
+  var gen = searchGen;
+  spinner('addResults', 'Lade Karte …');
+  call('getCardDetail', id, lang).then(function (card) { if (gen === searchGen) renderConfirm(card, notes); })
+    .catch(function (e) { if (gen !== searchGen) return; $('addResults').innerHTML = ''; setMsg('addMsg', esc(errText(e)), 'err'); });
+}
+
+function renderConfirm(c, notes) {
+  state.current = c;
+  var html = notesHtml(notes) + '<div class="confirm">' + imgTag(cardImg(c.image, 'high'), 'big') +
+    '<h2>' + esc(c.name) + '</h2>' +
+    '<div class="meta">' + esc(c.setName) + ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') +
+    (c.rarity ? ' · ' + esc(c.rarity) : '') + ' · ' + esc(c.baseLabel) + '</div>' +
+    '<div class="price" id="cPrice"></div>';
+  if (c.lang === 'en') {
+    var nm = state.lastQuery && state.lastQuery.name;
+    html += '<div class="warn">Englische Ersatzdaten: Diese Karte gibt es bei tcgdex nicht auf Deutsch. ' +
+      (nm ? 'Gespeichert wird sie unter deinem eingegebenen Namen „' + esc(nm) + '“.'
+          : 'Gespeichert wird sie unter dem englischen Namen „' + esc(c.name) + '“.') + '</div>';
+  }
+  if (c.priceFromEn) html += '<div class="notes">Preis aus den englischen tcgdex-Daten derselben Karte.</div>';
+  if (c.canReverse) html += '<label class="check"><input type="checkbox" id="cReverse" onchange="variantChanged(\'reverse\')"> Reverse Holo</label>';
+  if (c.canFirstEdition) html += '<label class="check"><input type="checkbox" id="cFirst" onchange="variantChanged(\'first\')"> 1. Edition</label>';
+  html += '<div class="row"><div><label for="cCond">Zustand</label><select id="cCond">' +
+    CONDITIONS.map(function (k) { return '<option value="' + k + '">' + (k ? k + ' · ' + CONDITION_LABELS[k] : '– unbekannt –') + '</option>'; }).join('') +
+    '</select></div><div><label for="cQty">Anzahl</label><input type="number" id="cQty" min="1" value="1" inputmode="numeric"></div></div>' +
+    '<div class="actions"><button class="btn" onclick="backToSearch()">Zurück</button>' +
+    '<button class="btn primary" id="cAdd" onclick="addCurrent()">Hinzufügen</button></div></div>';
+  $('addResults').innerHTML = html;
+  updatePrice();
+}
+
+function chosenVariant() {
+  if ($('cReverse') && $('cReverse').checked) return 'reverse';
+  if ($('cFirst') && $('cFirst').checked) return 'firstEdition';
+  return 'base';
+}
+
+function variantChanged(which) {
+  if (which === 'reverse' && $('cReverse').checked && $('cFirst')) $('cFirst').checked = false;
+  if (which === 'first' && $('cFirst').checked && $('cReverse')) $('cReverse').checked = false;
+  updatePrice();
+}
+
+function updatePrice() {
+  var c = state.current, v = chosenVariant();
+  var p = c.prices ? (v === 'reverse' ? c.prices.reverse : v === 'firstEdition' ? c.prices.firstEdition : c.prices.base) : null;
+  var label = v === 'base' ? c.baseLabel : VARIANT_LABELS[v];
+  $('cPrice').textContent = 'Trend: ' + eur(p) + ' (' + label + ')' + (v === 'firstEdition' && p != null ? ' – kein eigener 1.-Edition-Preis' : '') +
+    (c.priceUpdated ? ', Stand ' + c.priceUpdated : '');
+}
+
+function backToSearch() {
+  var r = state.lastRes;
+  setMsg('addMsg', '');
+  if (r && r.stage === 'pickSet') { renderSetPicker(r); return; }
+  if (r && r.cards && r.cards.length > 1) { renderSearch(r); return; }
+  $('addResults').innerHTML = r ? notesHtml(r.notes) : '';
+  $('fName').focus();
+}
+
+function addCurrent() {
+  var c = state.current;
+  $('cAdd').disabled = true;
+  var req = {
+    id: c.id, lang: c.lang, variant: chosenVariant(), condition: $('cCond').value,
+    qty: $('cQty').value, inputName: state.lastQuery ? state.lastQuery.name : ''
+  };
+  call('addCard', req).then(function (res) {
+    state.lastKey = res.key;
+    setMsg('addMsg', esc(res.message) + '<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>', 'ok');
+    $('addResults').innerHTML = '';
+    $('searchForm').reset();
+    state.lastQuery = null;
+    state.lastRes = null;
+    $('fName').focus();
+  }).catch(function (e) {
+    $('cAdd').disabled = false;
+    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  });
+}
+
+function againPlusOne(btn) {
+  var key = state.lastKey;
+  if (!key || (btn && btn.disabled)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Speichere …'; }
+  call('adjustCount', key, 1).then(function (res) {
+    if (key !== state.lastKey) return; // inzwischen andere Karte hinzugefügt
+    setMsg('addMsg', 'Noch eine dazu, jetzt ' + res.count + ' Stück.<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>', 'ok');
+  }).catch(function (e) {
+    if (key !== state.lastKey) return;
+    setMsg('addMsg', esc(errText(e)), 'err');
+  });
+}
+
+// ---------- Entfernen ----------
+
+var collTimer = null, undoTimers = {};
+function debouncedCollection() { clearTimeout(collTimer); collTimer = setTimeout(loadCollection, 400); }
+
+function loadCollection() {
+  var gen = ++collGen;
+  Object.keys(undoTimers).forEach(function (k) { clearTimeout(undoTimers[k]); });
+  undoTimers = {};
+  spinner('removeResults', 'Suche in der Sammlung …');
+  setMsg('removeMsg', '');
+  call('searchCollection', $('rQuery').value, $('rSet').value)
+    .then(function (res) { if (gen === collGen) renderCollection(res); })
+    .catch(function (e) { if (gen !== collGen) return; $('removeResults').innerHTML = ''; setMsg('removeMsg', esc(errText(e)), 'err'); });
+}
+
+function renderCollection(res) {
+  state.items = res.items;
+  if (!res.items.length) { $('removeResults').innerHTML = '<div class="notes">Nichts gefunden.</div>'; return; }
+  var html = res.total > res.items.length ? '<div class="notes">' + res.total + ' Treffer, die ersten ' + res.items.length + ' werden gezeigt.</div>' : '';
+  res.items.forEach(function (it, i) { html += '<div id="it' + i + '">' + itemHtml(it, i) + '</div>'; });
+  $('removeResults').innerHTML = html;
+}
+
+function itemHtml(it, i) {
+  var sub = esc(it.setName) + ' · ' + esc(it.localId) + (it.setSize ? '/' + esc(it.setSize) : '') + ' · ' + esc(it.variantLabel) +
+    (it.cond ? ' · ' + esc(it.cond) : '') + (it.price != null ? ' · ' + eur(it.price) : '');
+  return '<div class="item' + (it.count === 0 ? ' zero' : '') + '">' + imgTag(cardImg(it.image, 'low')) +
+    '<div class="info"><div class="t">' + esc(it.name) + (it.source === 'en-Ersatz' ? ' (EN)' : '') + '</div><div class="s">' + sub + '</div>' +
+    (it.undo && !it.busy ? '<button class="undo" onclick="undo(' + i + ')">Rückgängig</button>' : '') + '</div>' +
+    '<div class="ctl"><button class="btn small" onclick="change(' + i + ',-1)"' + (it.count === 0 || it.busy ? ' disabled' : '') + '>−1</button>' +
+    '<span class="cnt">' + it.count + '</span>' +
+    '<button class="btn small" onclick="change(' + i + ',1)"' + (it.busy ? ' disabled' : '') + '>+1</button></div></div>';
+}
+
+function redraw(i, it) {
+  var cur = state.items && state.items[i];
+  if (!cur || (it && cur !== it)) return; // Zeile gehört zu einer älteren Liste
+  var el = $('it' + i);
+  if (el) el.innerHTML = itemHtml(cur, i);
+}
+
+// Liste inzwischen neu geladen? Denselben Eintrag dort nachziehen
+function syncKey(it) {
+  (state.items || []).forEach(function (x, j) {
+    if (x !== it && x.key === it.key && !x.busy) { x.count = it.count; redraw(j, x); }
+  });
+}
+
+function change(i, delta) {
+  var it = state.items[i];
+  if (!it || it.busy) return;
+  it.undo = null; clearTimeout(undoTimers[i]); // alte Rückgängig-Option verwerfen
+  it.busy = true; redraw(i, it);
+  call('adjustCount', it.key, delta).then(function (res) {
+    it.busy = false; it.count = res.count;
+    syncKey(it);
+    if (res.applied) {
+      it.undo = -res.applied;
+      clearTimeout(undoTimers[i]);
+      undoTimers[i] = setTimeout(function () { it.undo = null; redraw(i, it); }, 5000);
+    }
+    redraw(i, it);
+  }).catch(function (e) { it.busy = false; redraw(i, it); setMsg('removeMsg', esc(errText(e)), 'err'); });
+}
+
+function undo(i) {
+  var it = state.items[i];
+  if (!it || !it.undo || it.busy) return;
+  var d = it.undo;
+  it.undo = null; clearTimeout(undoTimers[i]);
+  it.busy = true; redraw(i, it);
+  call('adjustCount', it.key, d).then(function (res) { it.busy = false; it.count = res.count; syncKey(it); redraw(i, it); })
+    .catch(function (e) { it.busy = false; redraw(i, it); setMsg('removeMsg', esc(errText(e)), 'err'); });
+}
+
+// ---------- Start ----------
+
+call('getSetSuggestions').then(function (names) {
+  $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
+}).catch(function () { /* ohne Vorschläge weiter */ });
+</script>
+</body>
+</html>

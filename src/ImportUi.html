@@ -1,0 +1,1819 @@
+<style>
+  /* Import-Tab (nur Seitenleiste). Nutzt die Klassen aus Ui.html, hier nur Ergänzungen mit imp-Präfix. */
+  #paneImport h2 { font-size: 17px; margin: 6px 0 2px; }
+  #paneImport h3 { font-size: 15px; margin: 16px 0 4px; }
+  .imp-sub { font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .imp-banner { border: 1px solid #f2c94c; background: #fff8e1; border-radius: 8px; padding: 10px; margin: 8px 0; }
+  .imp-imp .imp-head { margin-top: 10px; }
+  .imp-st { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--soft); color: var(--muted); }
+  .imp-st.ok { background: var(--okbg); color: var(--ok); }
+  .imp-st.warn { background: #fff8e1; color: #8d6e00; }
+  .imp-st.run { background: #e8f0fe; color: #1a5fb4; }
+  .imp-steps { display: flex; gap: 4px; margin: 6px 0 10px; }
+  .imp-steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+  .imp-steps span.on { background: var(--accent); }
+  .imp-opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; margin: 0; min-height: 44px; cursor: pointer; font-size: 15px; color: var(--fg); }
+  .imp-opt input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; }
+  .imp-opt .hint { margin-top: 2px; }
+  .imp-scroll { overflow-x: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .imp-tbl { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+  .imp-tbl th, .imp-tbl td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+  .imp-tbl th { background: var(--soft); color: var(--muted); font-weight: 600; }
+  .imp-tbl tr.imp-hr td { background: #e8f0fe; font-weight: 600; }
+  .imp-tbl tr.imp-skip td { color: var(--muted); }
+  .imp-bar { height: 10px; background: var(--soft); border-radius: 5px; overflow: hidden; margin: 12px 0 6px; }
+  .imp-bar div { height: 100%; background: var(--accent); }
+  .tile.imp-chosen { border: 2px solid var(--accent); background: #fdecea; }
+  .btn.imp-on { border-color: var(--accent); background: #fdecea; font-weight: 600; }
+  .imp-badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--soft); color: var(--muted); margin-left: 6px; }
+  .imp-badge.last { background: #e8f0fe; color: #1a5fb4; }
+  .imp-badge.done { background: var(--okbg); color: var(--ok); }
+  .box.imp-done { border-color: #a8dab5; }
+  .imp-pick { margin-top: 6px; font-size: 14px; }
+  .imp-link { background: none; border: 0; color: var(--accent); text-decoration: underline; cursor: pointer; padding: 10px 0; min-height: 44px; font-size: 14px; }
+  .imp-link:disabled { opacity: .35; cursor: default; }
+  .imp-rv .actions .btn { flex: 1 1 120px; }
+</style>
+
+<!-- Import (nur Seitenleiste; im Web-Modus bleibt der Bereich versteckt) -->
+<div id="paneImport" class="panel hidden">
+  <div id="impMsg"></div>
+  <div id="impMain"></div>
+</div>
+
+<script>
+// =========================================================================
+// Import-Tab. Alle Namen beginnen mit imp, damit nichts mit Ui.html kollidiert.
+// Beim Laden passiert nichts: erst impInit() (aus showTab('import')) fragt importState() ab.
+// Genutzte Helfer aus Ui.html: $, esc, call, setMsg, spinner, imgTag, cardImg, eur, errText, notesHtml,
+// langOptions, CONDITIONS, CONDITION_LABELS, VARIANT_LABELS, PLACEHOLDER, loadUiConfig.
+// =========================================================================
+
+var impInitCalls = 0;   // wie oft der Import-Tab geöffnet wurde
+var impGen = 0;         // Ansicht-Generation: nur Antworten zur aktuellen Ansicht zählen
+var impPrevGen = 0;     // Vorschau der ersten zehn Zeilen (Schritt 7)
+var impSetGen = 0;      // Einstellungen: Zusatzspalten laden
+var impSearchGen = 0;   // Prüfliste: Neu suchen
+var impBusy = false;    // Doppelklick-Schutz: eine schreibende Anfrage zur Zeit
+var impS = {
+  screen: '', st: null, wiz: null, erk: null, rv: null, rvSeen: false, pv: null, ud: null,
+  set: { open: false, cfg: null, sel: {}, loading: false, err: '' }
+};
+var impFields = ['name', 'number', 'set', 'qty', 'check', 'variant', 'cond', 'lang', 'version', 'price', 'priceDate', 'cmLink', 'tcgdexId'];
+var impFieldLabels = {
+  name: 'Name', number: 'Nummer', set: 'Set', qty: 'Anzahl', check: 'Vorhanden (Haken)', variant: 'Variante',
+  cond: 'Zustand', lang: 'Sprache', version: 'Sonderversion', price: 'Preis', priceDate: 'Preisdatum',
+  cmLink: 'Cardmarket-Link', tcgdexId: 'tcgdex-ID'
+};
+var impFieldHints = {
+  qty: 'Leer heißt 1 Stück.',
+  check: 'x, ✓, ja oder WAHR zählen als vorhanden.',
+  cmLink: 'Links zu Cardmarket helfen beim Erkennen.',
+  price: 'Wird nur genommen, wenn tcgdex keinen Preis hat.'
+};
+var impModes = [
+  { code: 'neu', label: 'Nur Neues', text: 'Übernimmt nur, was seit dem letzten Import dieser Tabelle dazugekommen ist.' },
+  { code: 'alle', label: 'Alles addieren', text: 'Zählt alle Karten der Tabelle noch einmal zur Sammlung dazu.' },
+  { code: 'abgleich', label: 'Mit Quelle abgleichen', text: 'Wie Nur Neues. Was in der Tabelle weniger geworden ist, wird auch in der Sammlung weniger. Von Hand erfasste Karten bleiben immer.' }
+];
+var impStepTitles = ['Quelle', 'Tab', 'Vorlage', 'Form', 'Zuordnung', 'Feste Werte und Zusatzspalten', 'Vorschau', 'Vorlage speichern'];
+var impStageLabels = { tab: 'Tab wählen', zuordnung: 'Spalten zuordnen', erkennung: 'Erkennung', pruefung: 'Prüfliste', vorschau: 'Vorschau' };
+var impSkipLabels = { summe: 'Summenzeile, wird übersprungen', leer: 'leer, wird übersprungen', nichtAngehakt: 'nicht angehakt' };
+// Feste Spalten im Blatt "Daten": so darf keine Zusatzspalte heißen
+var impFixedHeaders = ['Schlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer', 'Nummer normalisiert',
+  'Setgröße', 'Name', 'Name englisch', 'Quelle', 'Variante', 'Zustand', 'Anzahl', 'Trendpreis (EUR)', 'Preisstand', 'Bild-URL',
+  'Seltenheit', 'Kartentyp', 'Illustrator', 'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar', 'Eintrag-ID', 'Sprache',
+  'Sonderversion', 'Eigener Preis (EUR)', 'Eigener Preis Stand', 'Herkunft', 'Quellzeile'];
+
+// ---------- kleine Helfer ----------
+
+function impCopy(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+function impN(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+/** Ganze Zahl >= 0, sonst def */
+function impInt(v, def) { var n = parseInt(v, 10); return isFinite(n) && n >= 0 ? n : def; }
+/** Spalte 0-basiert aus Zahl, Zahltext oder Buchstaben ("C" -> 2); sonst -1 */
+function impColIdx(x) {
+  if (x === null || x === undefined || x === '') return -1;
+  if (typeof x === 'number') return isFinite(x) && x >= 0 ? Math.floor(x) : -1;
+  var s = String(x).trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  if (/^[A-Za-z]{1,3}$/.test(s)) {
+    return s.toUpperCase().split('').reduce(function (n, ch) { return n * 26 + ch.charCodeAt(0) - 64; }, 0) - 1;
+  }
+  return -1;
+}
+function impColLetter(c) {
+  var s = '', n = Number(c) + 1;
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+/** "1 Zeile" / "3 Zeilen" */
+function impPl(n, one, many) { n = impN(n); return n + ' ' + (n === 1 ? one : many); }
+/** 'yyyy-MM-dd ...' -> 'dd.MM.yyyy ...' */
+function impDate(s) {
+  var t = String(s == null ? '' : s);
+  var m = t.match(/^(\d{4})-(\d{2})-(\d{2})(.*)$/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] + m[4] : t;
+}
+/** Betrag mit Vorzeichen, z. B. "+12,50 €"; leer, wenn keine Zahl */
+function impSigned(n) {
+  if (n === null || n === undefined || n === '' || isNaN(Number(n))) return '';
+  n = Math.round(Number(n) * 100) / 100;
+  return (n > 0 ? '+' : n < 0 ? '−' : '') + eur(Math.abs(n));
+}
+function impModeCode(m) {
+  for (var k = 0; k < impModes.length; k++) if (impModes[k].code === m || impModes[k].label === m) return impModes[k].code;
+  return 'neu';
+}
+function impModeLabel(m) {
+  for (var k = 0; k < impModes.length; k++) if (impModes[k].code === m || impModes[k].label === m) return impModes[k].label;
+  return m ? String(m) : 'Nur Neues';
+}
+/**
+ * Fehlertext auf Deutsch. Server-Fehler sind schon deutsch und bleiben, wie sie sind, auch wenn sie
+ * eine englische Ursache in Klammern nennen („Der Import wurde unterbrochen (Service … timed out …)“).
+ * Nur Meldungen, die mit einem englischen Fehler anfangen, werden übersetzt.
+ */
+function impErrText(e) {
+  var t = String(errText(e) || '').replace(/^\s*(Exception|Error|ScriptError):\s*/i, '');
+  if (/^(exceeded maximum execution time|maximale ausführungszeit)/i.test(t)) {
+    return 'Das hat zu lange gedauert (Apps Script erlaubt höchstens 6 Minuten). Der Stand ist gespeichert, bitte versuche es noch einmal.';
+  }
+  if (/^(networkerror|network error|failed to fetch|typeerror: failed to fetch|load failed|timed out|timeout|request timed out)/i.test(t)) {
+    return 'Keine Verbindung zum Server. Bitte prüfe die Internetverbindung und versuche es noch einmal.';
+  }
+  if (/^(service .{0,80}(timed out|unavailable)|service error|lock timeout|could not obtain lock|we're sorry, a server error)/i.test(t)) {
+    return 'Google Tabellen hat gerade zu lange gebraucht. Bitte versuche es gleich noch einmal.';
+  }
+  return t;
+}
+
+// ---------- Ansicht, Sperre, Spinner ----------
+
+/** Neue Ansicht: ältere Antworten verfallen. Liefert die neue Generation. */
+function impGo(screen) {
+  impS.screen = screen;
+  impGen++;
+  impBusy = false;
+  setMsg('impMsg', '');
+  return impGen;
+}
+
+/** Knöpfe und Felder im Import-Tab sperren, solange eine Anfrage läuft (Doppelklick-Schutz). */
+function impSetBusy(on) {
+  impBusy = !!on;
+  var pane = $('paneImport');
+  if (!pane) return;
+  var els = pane.querySelectorAll(on ? 'button, input, select' : '[data-imp-off]');
+  for (var k = 0; k < els.length; k++) {
+    var el = els[k];
+    if (on) {
+      if (!el.disabled) { el.disabled = true; el.setAttribute('data-imp-off', '1'); }
+    } else {
+      el.disabled = false;
+      el.removeAttribute('data-imp-off');
+    }
+  }
+}
+
+/** Spinner unter den Knöpfen der Ansicht (impAct), sonst im ganzen Bereich */
+function impSpin(text, where) {
+  var id = where && $(where) ? where : ($('impAct') ? 'impAct' : 'impMain');
+  spinner(id, text);
+}
+
+function impErr(e, where) {
+  var id = where && $(where) ? where : ($('impAct') ? 'impAct' : 'impMsg');
+  setMsg(id, esc(impErrText(e)), 'err');
+}
+
+/**
+ * Serveraufruf aus einer Ansicht: sperrt Knöpfe, zeigt den Spinner (in where oder impAct),
+ * verwirft Antworten, wenn die Ansicht inzwischen gewechselt hat. false, wenn schon etwas läuft.
+ */
+function impAsk(fn, args, spin, onOk, onErr, where) {
+  if (impBusy) return false;
+  var gen = impGen;
+  impSetBusy(true);
+  if (spin) impSpin(spin, where);
+  var clear = function () {
+    var id = where && $(where) ? where : 'impAct';
+    if ($(id)) $(id).innerHTML = '';
+  };
+  call.apply(null, [fn].concat(args || [])).then(function (res) {
+    if (gen !== impGen) return;
+    impSetBusy(false);
+    clear();
+    onOk(res);
+  }, function (e) {
+    if (gen !== impGen) return;
+    impSetBusy(false);
+    clear();
+    if (onErr) onErr(e); else impErr(e, where);
+  });
+  return true;
+}
+
+/** Fehler beim Laden einer ganzen Ansicht: Text und Knöpfe statt Inhalt */
+function impLoadFailed(e, retry) {
+  $('impMain').innerHTML = '<div class="msg err">' + esc(impErrText(e)) + '</div><div class="actions">' +
+    (retry ? '<button class="btn" onclick="' + retry + '">Nochmal versuchen</button>' : '') +
+    '<button class="btn" onclick="impLoadStart()">Zur Übersicht</button></div>';
+}
+
+// ---------- Einstieg ----------
+
+/**
+ * Aus showTab('import'). Beim ersten Mal und auf der Übersicht: importState() laden.
+ * Mitten im Assistenten, in der Prüfliste usw. bleibt die Ansicht, wie sie ist.
+ */
+function impInit() {
+  impInitCalls++;
+  if (impBusy) return;
+  if (impS.screen && impS.screen !== 'start') return;
+  impLoadStart();
+}
+
+// ---------- 1. Übersicht ----------
+
+function impLoadStart(okText) {
+  var gen = impGo('start');
+  if (okText) setMsg('impMsg', esc(okText), 'ok');
+  spinner('impMain', 'Lade die Importe …');
+  call('importState').then(function (st) {
+    if (gen !== impGen) return;
+    impS.st = st || {};
+    impRenderStart();
+  }, function (e) {
+    if (gen !== impGen) return;
+    $('impMain').innerHTML = '<div class="msg err">' + esc(impErrText(e)) + '</div>' +
+      '<div class="actions"><button class="btn" onclick="impLoadStart()">Nochmal laden</button></div>';
+  });
+}
+
+/**
+ * Der Entwurf für das Banner „Import in Arbeit“. null, wenn der Entwurf zu einem abgebrochenen
+ * Import gehört (committingNr ist in der Liste unterbrochen oder läuft): dort helfen nur
+ * „Fortsetzen“ oder „Zurücknehmen“ in der Liste, „Weitermachen“ würde nur einen Fehler zeigen.
+ */
+function impLiveDraft(st) {
+  var d = st && st.draft;
+  if (!d) return null;
+  if (d.committingNr != null && d.committingNr !== '') {
+    var list = st.imports || [];
+    for (var k = 0; k < list.length; k++) {
+      if (Number(list[k].nr) === Number(d.committingNr) && (list[k].status === 'unterbrochen' || list[k].status === 'läuft')) return null;
+    }
+  }
+  return d;
+}
+
+function impRenderStart() {
+  var st = impS.st || {};
+  var html = '';
+  if (st.needsSetup) html += '<div class="warn">Die Import-Blätter fehlen noch. Bitte einmal „Pokémon &gt; Einrichtung“ ausführen.</div>';
+  if (st.busy) {
+    var b = st.busy;
+    html += '<div class="warn">' + (b.phase === 'undo' ? 'Gerade wird Import ' + esc(b.nr) + ' zurückgenommen.' :
+      b.phase === 'resume' ? 'Gerade wird Import ' + esc(b.nr) + ' fortgesetzt.' : 'Gerade läuft Import ' + esc(b.nr) + '.') +
+      ' Bitte kurz warten.<div class="actions"><button class="btn" onclick="impRefresh()">Aktualisieren</button></div></div>';
+  }
+  var d = impLiveDraft(st);
+  if (d) {
+    html += '<div class="imp-banner"><b>Import in Arbeit:</b> ' + esc(d.sourceName || 'Tabelle') + (d.tab ? ' · Tab ' + esc(d.tab) : '') +
+      '<div class="imp-sub">Stand: ' + esc(impStageLabels[d.stage] || d.stage || '') + (d.stage === 'erkennung' && d.total ?
+        ' (' + esc(impN(d.recognizePos)) + ' von ' + esc(impN(d.total)) + ')' : '') + ' · ' + esc(impModeLabel(d.mode)) + '</div>' +
+      '<div class="actions"><button class="btn primary" onclick="impResumeDraft()">Weitermachen</button>' +
+      '<button class="btn" onclick="impDiscard(\'banner\')">Verwerfen</button></div></div>';
+  }
+  html += '<div class="actions"><button class="btn' + (d ? '' : ' primary') + '" onclick="impNewImport()">Neuer Import</button></div>' +
+    '<div id="impAct"></div>';
+  html += '<h3>Bisherige Importe</h3>';
+  var list = st.imports || [];
+  if (!list.length) html += '<div class="notes">Noch keine Importe.</div>';
+  list.forEach(function (imp, k) { html += impImportHtml(imp, k); });
+  html += '<div id="impSet">' + impSettingsHtml() + '</div>';
+  $('impMain').innerHTML = html;
+  if (impS.set.open) impLoadVx(); // Zusatzspalten frisch laden (ein Import kann neue angelegt haben)
+}
+
+function impRefresh() { if (!impBusy) impLoadStart(); }
+
+function impImportHtml(imp, k) {
+  var s = String(imp.status || '');
+  var cls = s === 'aktiv' ? 'ok' : s === 'unterbrochen' ? 'warn' : s === 'läuft' ? 'run' : '';
+  var c = imp.counts || {};
+  var bits = [];
+  if (impN(c.neu)) bits.push(impN(c.neu) + ' neu');
+  if (impN(c.mehr)) bits.push(impN(c.mehr) + ' mehr');
+  if (impN(c.weniger)) bits.push(impN(c.weniger) + ' weniger');
+  if (impN(c.uebersprungen)) bits.push(impN(c.uebersprungen) + ' übersprungen');
+  if (impN(c.pruefOffen)) bits.push(impN(c.pruefOffen) + ' in der Prüfliste offen');
+  var val = impSigned(imp.valueChange);
+  var acts = '';
+  if (s === 'aktiv') acts = '<button class="btn" onclick="impOpenUndo(' + k + ')">Zurücknehmen</button>';
+  else if (s === 'unterbrochen') {
+    acts = '<button class="btn primary" onclick="impResumeImport(' + k + ')">Fortsetzen</button>' +
+      '<button class="btn" onclick="impOpenUndo(' + k + ')">Zurücknehmen</button>';
+  }
+  return '<div class="box imp-imp" id="impImp' + k + '"><div class="imp-head"><b>Import ' + esc(imp.nr) + '</b>' +
+    (imp.date ? ' · ' + esc(impDate(imp.date)) : '') + ' <span class="imp-st ' + cls + '">' + esc(s) + '</span></div>' +
+    '<div class="imp-sub">' + esc(imp.sourceName || imp.sourceId || 'Tabelle') + (imp.tab ? ' · Tab ' + esc(imp.tab) : '') +
+    ' · ' + esc(impModeLabel(imp.mode)) + '</div>' +
+    '<div class="imp-sub">' + (bits.length ? esc(bits.join(', ')) : 'nichts übernommen') + (val ? ' · Wert ' + esc(val) : '') + '</div>' +
+    (s === 'unterbrochen' ? '<div class="hint">Dieser Import wurde nicht fertig. Du kannst ihn fortsetzen oder zurücknehmen.</div>' : '') +
+    (s === 'läuft' ? '<div class="hint">Läuft gerade.</div>' : '') +
+    (imp.undoneAt ? '<div class="imp-sub">zurückgenommen am ' + esc(impDate(imp.undoneAt)) + '</div>' : '') +
+    (acts ? '<div class="actions">' + acts + '</div>' : '') + '</div>';
+}
+
+function impNewImport() {
+  if (impBusy) return;
+  var d = impLiveDraft(impS.st);
+  if (d && !window.confirm('Es gibt schon einen Import in Arbeit (' + (d.sourceName || 'Tabelle') + '). ' +
+    'Er wird verworfen, sobald du eine andere Tabelle öffnest. Trotzdem neu anfangen?')) return;
+  impS.wiz = impNewWiz();
+  impGo('wiz');
+  impRenderWiz();
+}
+
+/** Entwurf verwerfen (Banner) oder Import abbrechen (Vorschau), jeweils nach Rückfrage */
+function impDiscard(where) {
+  if (impBusy) return;
+  var q = where === 'preview' ?
+    'Import abbrechen? Zuordnung, Erkennung und Prüfliste werden verworfen, es wird nichts übernommen. Deine Antworten aus der Prüfliste und gespeicherte Vorlagen bleiben.' :
+    'Den Import in Arbeit verwerfen? Zuordnung, Erkennung und Prüfliste gehen verloren. Deine Antworten aus der Prüfliste und gespeicherte Vorlagen bleiben.';
+  if (!window.confirm(q)) return;
+  impAsk('importDiscardDraft', [], 'Verwerfe …', function () {
+    impLoadStart(where === 'preview' ? 'Import abgebrochen. Es wurde nichts übernommen.' : 'Der Import in Arbeit ist verworfen.');
+  });
+}
+
+/** Unterbrochenen Import zu Ende bringen */
+function impResumeImport(k) {
+  var imp = impS.st && impS.st.imports && impS.st.imports[k];
+  if (!imp || impBusy) return;
+  impAsk('importResume', [imp.nr], 'Setze Import ' + imp.nr + ' fort …', function (res) {
+    res = res || {};
+    loadUiConfig();
+    impLoadStart(res.message || ('Import ' + imp.nr + ' ist fertig.'));
+  });
+}
+
+/** Banner "Import in Arbeit": an der gespeicherten Stelle weitermachen */
+function impResumeDraft() {
+  var d = impLiveDraft(impS.st);
+  if (!d || impBusy) return;
+  if (d.stage === 'erkennung') {
+    impS.erk = { total: impN(d.total), pos: impN(d.recognizePos), counts: null, skipped: d.skipped || null, err: '', running: false };
+    impGo('erk');
+    impErkStep();
+    return;
+  }
+  if (d.stage === 'pruefung') { impOpenReview(); return; }
+  if (d.stage === 'vorschau') { impOpenPreview(); return; }
+  // 'tab' oder 'zuordnung': zurück in den Assistenten
+  var w = impNewWiz();
+  w.url = d.sourceUrl || d.sourceId || '';
+  w.mode = impModeCode(d.mode);
+  w.source = { sourceId: d.sourceId, sourceName: d.sourceName, kind: d.kind, tabs: d.tabs && d.tabs.length ? d.tabs : null };
+  impS.wiz = w;
+  impGo('wiz');
+  if (d.stage === 'zuordnung' && d.tab) {
+    w.srcUrl = w.source.tabs ? w.url : null; // ohne Tab-Liste öffnet Schritt 1 die Datei neu
+    w.tab = d.tab;
+    w.step = 2;
+    impRenderWiz();
+    impLoadTab(d.tab, d);
+    return;
+  }
+  if (w.source.tabs) {
+    w.srcUrl = w.url;
+    w.step = 2;
+    impRenderWiz();
+    return;
+  }
+  // Tab-Liste nicht gespeichert: Datei noch einmal öffnen
+  w.source = null;
+  w.step = 1;
+  impRenderWiz();
+  impWizNext();
+}
+
+// ---------- Einstellungen ----------
+
+function impSettingsHtml() {
+  var S = impS.set;
+  if (!S.open) return '<button class="imp-link" onclick="impToggleSettings()">Einstellungen ▼</button>';
+  return '<div class="box"><button class="imp-link" onclick="impToggleSettings()">Einstellungen ▲</button>' +
+    '<h3>Begriffe und Sets</h3>' +
+    '<div class="hint">Wörter wie „Rev Holo“ oder „Near Mint“ trägst du im Blatt „Import-Begriffe“ ein, Setnamen und Kürzel aus ' +
+    'Cardmarket-Links im Blatt „Import-Sets“. Beide Blätter kannst du direkt bearbeiten.</div>' +
+    '<div class="actions"><button class="btn" onclick="impSetsPrefill()">Set-Zuordnung vorbelegen</button></div>' +
+    '<div class="hint">Trägt alle Sets aus dem Zwischenspeicher mit ihren Kürzeln in „Import-Sets“ ein. Deine eigenen Zeilen (Herkunft „Hand“) bleiben.</div>' +
+    '<h3>Zusatzspalten in der Sammlung</h3><div id="impVx">' + impVxHtml() + '</div>' +
+    '<div id="impSetMsg"></div></div>';
+}
+
+function impToggleSettings() {
+  var S = impS.set;
+  S.open = !S.open;
+  if ($('impSet')) $('impSet').innerHTML = impSettingsHtml();
+  if (S.open) impLoadVx();
+}
+
+function impVxHtml() {
+  var S = impS.set;
+  if (S.loading) return '<div class="spin">Lade die Zusatzspalten …</div>';
+  if (S.err) return '<div class="msg err">' + esc(S.err) + '</div><div class="actions"><button class="btn" onclick="impLoadVx()">Nochmal laden</button></div>';
+  if (!S.cfg) return '';
+  var ex = S.cfg.extras;
+  if (!ex.length) return '<div class="notes">Noch keine Zusatzspalten. Sie entstehen beim Import im Schritt „Feste Werte und Zusatzspalten“.</div>';
+  var html = '<div class="hint">Welche Zusatzspalten soll das Blatt „Sammlung“ zeigen?</div>';
+  ex.forEach(function (n, k) {
+    html += '<label class="check"><input type="checkbox" id="impVx' + k + '" onchange="impVxPick(' + k + ',this.checked)"' +
+      (S.sel[n] ? ' checked' : '') + '> ' + esc(n) + '</label>';
+  });
+  return html + '<div class="actions"><button class="btn" onclick="impVxSave()">Anzeige speichern</button></div>';
+}
+
+function impDrawVx() { if ($('impVx')) $('impVx').innerHTML = impVxHtml(); }
+
+/** Zusatzspalten über getUiConfig laden (eigene Generation, damit nur die neueste Antwort zählt) */
+function impLoadVx() {
+  var S = impS.set, gen = ++impSetGen;
+  S.loading = true; S.err = '';
+  impDrawVx();
+  call('getUiConfig').then(function (cfg) {
+    if (gen !== impSetGen) return;
+    S.loading = false;
+    cfg = cfg || {};
+    S.cfg = {
+      extras: (cfg.extras || []).map(String).filter(Boolean),
+      viewExtras: (cfg.viewExtras || []).map(String).filter(Boolean)
+    };
+    S.sel = {};
+    S.cfg.viewExtras.forEach(function (n) { S.sel[n] = true; });
+    impDrawVx();
+  }, function (e) {
+    if (gen !== impSetGen) return;
+    S.loading = false; S.err = impErrText(e);
+    impDrawVx();
+  });
+}
+
+function impVxPick(k, on) {
+  var S = impS.set, n = S.cfg && S.cfg.extras[k];
+  if (n != null) S.sel[n] = !!on;
+}
+
+function impVxSave() {
+  var S = impS.set;
+  if (!S.cfg || impBusy) return;
+  var names = S.cfg.extras.filter(function (n) { return S.sel[n]; });
+  impAsk('setViewExtras', [names], 'Speichere …', function (res) {
+    var kept = ((res && res.viewExtras) || names).map(String);
+    S.cfg.viewExtras = kept;
+    S.sel = {};
+    kept.forEach(function (n) { S.sel[n] = true; });
+    impDrawVx();
+    setMsg('impSetMsg', kept.length ? 'Gespeichert. Die Sammlung zeigt jetzt: ' + kept.map(esc).join(', ') + '.' :
+      'Gespeichert. Die Sammlung zeigt keine Zusatzspalten.', 'ok');
+    loadUiConfig();
+  }, null, 'impSetMsg');
+}
+
+function impSetsPrefill() {
+  impAsk('importSetsVorbelegen', [], 'Belege die Set-Zuordnung vor … das kann eine Minute dauern.', function (text) {
+    setMsg('impSetMsg', esc(text || 'Fertig.'), 'ok');
+  }, null, 'impSetMsg');
+}
+
+// ---------- 2. Assistent (8 Schritte) ----------
+
+function impNewWiz() {
+  return {
+    step: 1, url: '', srcUrl: null, source: null, tab: '', info: null, tplChoice: '', cfg: null, ex: null,
+    preview: null, previewKey: null, saveName: '', mode: 'neu'
+  };
+}
+
+/** Standard-Einstellungen aus guessLayout_ (wie quDefaultCfg_ auf dem Server) */
+function impDefaultCfg(guess) {
+  guess = guess || {};
+  var cols = {};
+  impFields.forEach(function (f) { cols[f] = impColIdx(guess.cols ? guess.cols[f] : -1); });
+  var hr = impInt(guess.headerRow, 1);
+  return impNormCfg({
+    form: cols.check >= 0 ? 'checkliste' : 'liste',
+    headerRow: hr, firstRow: impInt(guess.firstRow, 0) || hr + 1, lastRow: 0, cols: cols,
+    fixed: { lang: 'DE', cond: '', variant: '', version: '' }, extras: [],
+    grid: { startRow: hr ? hr + 1 : 1, startCol: 0, blockRows: 2, blockCols: 1, gapRows: 0, gapCols: 0, perRow: 0, cells: { name: [0, 0], number: [1, 0] } }
+  });
+}
+
+/** Einstellungen vollständig machen (Vorlagen und Entwürfe können lückenhaft sein) */
+function impNormCfg(cfg) {
+  cfg = impCopy(cfg) || {};
+  var out = { form: ['liste', 'checkliste', 'raster'].indexOf(cfg.form) >= 0 ? cfg.form : 'liste' };
+  out.headerRow = impInt(cfg.headerRow, 1);
+  out.firstRow = impInt(cfg.firstRow, 0) || out.headerRow + 1;
+  out.lastRow = impInt(cfg.lastRow, 0);
+  out.cols = {};
+  impFields.forEach(function (f) { out.cols[f] = impColIdx(cfg.cols ? cfg.cols[f] : -1); });
+  var fx = cfg.fixed || {};
+  out.fixed = {
+    lang: fx.lang == null || fx.lang === '' ? 'DE' : String(fx.lang), cond: String(fx.cond || ''),
+    variant: String(fx.variant || ''), version: String(fx.version || '')
+  };
+  out.extras = [];
+  (Array.isArray(cfg.extras) ? cfg.extras : []).forEach(function (x) {
+    if (!x || !String(x.name || '').trim()) return;
+    var o = { col: impColIdx(x.col), name: String(x.name).trim(), show: x.show === true || x.show === 'true' };
+    if (Array.isArray(x.cell) && x.cell.length >= 2) o.cell = [impInt(x.cell[0], 0), Math.max(0, impColIdx(x.cell[1]))];
+    if (o.col >= 0 || o.cell) out.extras.push(o);
+  });
+  var g = cfg.grid || {};
+  out.grid = {
+    startRow: Math.max(1, impInt(g.startRow, out.headerRow + 1)), startCol: Math.max(0, impColIdx(g.startCol)),
+    blockRows: Math.max(1, impInt(g.blockRows, 2)), blockCols: Math.max(1, impInt(g.blockCols, 1)),
+    gapRows: impInt(g.gapRows, 0), gapCols: impInt(g.gapCols, 0), perRow: impInt(g.perRow, 0), cells: {}
+  };
+  if (g.cells && typeof g.cells === 'object') {
+    impFields.forEach(function (f) {
+      var p = g.cells[f];
+      if (Array.isArray(p) && p.length >= 2) out.grid.cells[f] = [impInt(p[0], 0), Math.max(0, impColIdx(p[1]))];
+    });
+  } else {
+    out.grid.cells = { name: [0, 0], number: [1, 0] };
+  }
+  return out;
+}
+
+/** cfg für den Server: Zusatzspalten aus Schritt 6 übernommen, alles vollständig */
+function impCfgOut() {
+  impApplyExtras();
+  return impNormCfg(impS.wiz.cfg);
+}
+
+function impDefaultName() {
+  var w = impS.wiz;
+  var n = ((w.source && w.source.sourceName) || 'Import') + (w.tab ? ' · ' + w.tab : '');
+  return n.replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+function impTplByName(name) {
+  var w = impS.wiz, list = (w && w.info && w.info.templates) || [];
+  if (!name) return null;
+  for (var k = 0; k < list.length; k++) if (list[k].name === name) return list[k];
+  return null;
+}
+
+function impNCols() {
+  var info = (impS.wiz && impS.wiz.info) || {};
+  var n = impN(info.nCols);
+  (info.sample || []).forEach(function (r) { n = Math.max(n, (r || []).length); });
+  return n;
+}
+
+/** Text einer Zelle aus der Stichprobe (Zeile 1-basiert, Spalte 0-basiert) */
+function impCell(r, c) {
+  var s = (impS.wiz && impS.wiz.info && impS.wiz.info.sample) || [];
+  var row = s[r - 1];
+  return row && row[c] != null ? String(row[c]).trim() : '';
+}
+
+function impHeaderText(c) {
+  var cfg = impS.wiz.cfg;
+  return cfg && cfg.form !== 'raster' && cfg.headerRow > 0 ? impCell(cfg.headerRow, c) : '';
+}
+
+/** "A · Name" */
+function impColName(c) {
+  var h = impHeaderText(c);
+  return impColLetter(c) + (h ? ' · ' + (h.length > 40 ? h.slice(0, 39) + '…' : h) : '');
+}
+
+function impColOptions(sel) {
+  var n = impNCols();
+  var html = '<option value="-1"' + (sel < 0 ? ' selected' : '') + '>– keine –</option>';
+  for (var c = 0; c < Math.max(n, sel + 1); c++) {
+    html += '<option value="' + c + '"' + (c === sel ? ' selected' : '') + '>' + esc(impColName(c)) + '</option>';
+  }
+  return html;
+}
+
+// Felder an den Zustand binden: data-k = Pfad in impS.wiz, data-t = 'int' | 'col' | 'cell' | Text,
+// data-r = nach der Änderung den Schritt neu zeichnen.
+function impBind(el, quiet) {
+  var w = impS.wiz;
+  if (!w || !el) return;
+  var path = el.getAttribute('data-k'), t = el.getAttribute('data-t') || '';
+  if (!path) return;
+  var v;
+  if (el.type === 'checkbox') v = !!el.checked;
+  else if (el.type === 'radio') { if (!el.checked) return; v = el.value; }
+  else v = el.value;
+  if (t === 'int') v = impInt(v, 0);
+  else if (t === 'col') v = impColIdx(v);
+  else if (t === 'cell') v = v === '' ? null : String(v).split(',').map(Number);
+  impSetPath(w, path, v);
+  if (/^cfg\.grid\.block/.test(path)) impPruneCells();
+  if (!quiet && el.getAttribute('data-r')) impRenderWiz();
+}
+
+function impSetPath(obj, path, v) {
+  var parts = path.split('.'), o = obj;
+  for (var k = 0; k < parts.length - 1; k++) {
+    if (!o[parts[k]] || typeof o[parts[k]] !== 'object') o[parts[k]] = {};
+    o = o[parts[k]];
+  }
+  var last = parts[parts.length - 1];
+  if (v === null) delete o[last]; else o[last] = v;
+}
+
+/** Alle Felder der Ansicht einlesen (vor Zurück/Weiter, falls ein Ereignis gefehlt hat) */
+function impCollect() {
+  var main = $('impMain');
+  if (!main) return;
+  var els = main.querySelectorAll('[data-k]');
+  for (var k = 0; k < els.length; k++) impBind(els[k], true);
+}
+
+/** Zellen außerhalb eines verkleinerten Blocks vergessen */
+function impPruneCells() {
+  var w = impS.wiz, g = w.cfg && w.cfg.grid;
+  if (!g) return;
+  var br = Math.max(1, impN(g.blockRows)), bc = Math.max(1, impN(g.blockCols));
+  Object.keys(g.cells || {}).forEach(function (f) {
+    var p = g.cells[f];
+    if (!p || p[0] >= br || p[1] >= bc) delete g.cells[f];
+  });
+  if (w.ex) {
+    Object.keys(w.ex).forEach(function (key) {
+      var m = key.match(/^(\d+),(\d+)$/);
+      if (m && (Number(m[1]) >= br || Number(m[2]) >= bc)) delete w.ex[key];
+    });
+  }
+}
+
+function impRenderWiz() {
+  var w = impS.wiz;
+  if (!w || impS.screen !== 'wiz') return;
+  var n = w.step, dots = '';
+  for (var k = 1; k <= 8; k++) dots += '<span class="' + (k <= n ? 'on' : '') + '"></span>';
+  var body = [impStep1, impStep2, impStep3, impStep4, impStep5, impStep6, impStep7, impStep8][n - 1]();
+  var next = n === 8 ? '<button class="btn primary" onclick="impWizStart()">Erkennung starten</button>' :
+    '<button class="btn primary" onclick="impWizNext()">Weiter</button>';
+  $('impMain').innerHTML = '<h2>Neuer Import</h2><div class="imp-sub">Schritt ' + n + ' von 8: ' + esc(impStepTitles[n - 1]) + '</div>' +
+    '<div class="imp-steps">' + dots + '</div>' + body +
+    '<div class="actions"><button class="btn" onclick="impWizBack()">Zurück</button>' + next + '</div>' +
+    '<div id="impAct"></div><button class="imp-link" onclick="impWizLeave()">Zur Übersicht</button>';
+}
+
+function impWizLeave() {
+  if (impBusy) return;
+  var w = impS.wiz;
+  impLoadStart(w && w.source ? 'Der Import bleibt in Arbeit. Mit „Weitermachen“ geht es später weiter.' : '');
+}
+
+function impWizBack() {
+  var w = impS.wiz;
+  if (!w || impBusy) return;
+  impCollect();
+  if (w.step === 6) impApplyExtras();
+  if (w.step <= 1) { impWizLeave(); return; }
+  w.step--;
+  impRenderWiz();
+  if (w.step === 7) impLoadPreview();
+}
+
+function impWizNext() {
+  var w = impS.wiz;
+  if (!w || impBusy) return;
+  impCollect();
+  setMsg('impAct', '');
+  var err = impValidate(w.step);
+  if (err) { setMsg('impAct', esc(err), 'err'); return; }
+  if (w.step === 1) {
+    var url = String(w.url || '').trim();
+    if (w.source && w.srcUrl === url) { w.step = 2; impRenderWiz(); return; }
+    impAsk('importOpenSource', [url], 'Öffne die Tabelle …', function (res) { impSourceLoaded(res, url); });
+    return;
+  }
+  if (w.step === 2) {
+    if (w.info && w.info.tab === w.tab && w.cfg) { w.step = 3; impRenderWiz(); return; }
+    impLoadTab(w.tab, null);
+    return;
+  }
+  if (w.step === 6) impApplyExtras();
+  w.step++;
+  impRenderWiz();
+  if (w.step === 7) impLoadPreview();
+}
+
+/** Prüft den aktuellen Schritt; liefert einen Fehlertext oder '' */
+function impValidate(step) {
+  var w = impS.wiz, c = w.cfg;
+  if (step === 1 && !String(w.url || '').trim()) return 'Bitte füge den Link zu deiner Tabelle ein.';
+  if (step === 2 && !w.tab) return 'Bitte wähle einen Tab aus.';
+  if (step === 3 && !c) return 'Die Vorlage wird noch geladen. Bitte einen Moment.';
+  if (step === 4 && c.form === 'raster' && !c.grid.cells.name && !c.grid.cells.number && !c.grid.cells.cmLink && !c.grid.cells.tcgdexId) {
+    return 'Beim Raster brauche ich mindestens die Stelle für Name oder Nummer im Block.';
+  }
+  if (step === 5) {
+    if (c.form !== 'raster') {
+      if (c.cols.name < 0 && c.cols.number < 0 && c.cols.cmLink < 0 && c.cols.tcgdexId < 0) {
+        return 'Bitte ordne mindestens eine Spalte für Name, Nummer, Cardmarket-Link oder tcgdex-ID zu.';
+      }
+      if (c.form === 'checkliste' && c.cols.check < 0) return 'Bei einer Checkliste brauche ich die Spalte mit dem Haken (Vorhanden).';
+      var first = c.firstRow || c.headerRow + 1;
+      if (c.headerRow > 0 && first <= c.headerRow) return 'Die erste Datenzeile muss unter der Kopfzeile liegen.';
+      if (c.lastRow > 0 && c.lastRow < first) return 'Die letzte Zeile liegt vor der ersten Datenzeile. Lass das Feld leer, wenn bis zum Ende gelesen werden soll.';
+    } else if (c.lastRow > 0 && c.lastRow < c.grid.startRow) {
+      return 'Die letzte Zeile liegt vor dem ersten Block.';
+    }
+  }
+  if (step === 6) {
+    impExInit();
+    var seen = {}, msg = '';
+    impExtraCandidates().forEach(function (x) {
+      var e = w.ex[x.key];
+      if (msg || !e || !e.take) return;
+      var name = String(e.name || '').replace(/\s+/g, ' ').trim();
+      if (!name) { msg = 'Bitte gib der Zusatzspalte aus ' + x.label + ' einen Namen.'; return; }
+      var low = name.toLowerCase();
+      if (impFixedHeaders.some(function (h) { return h.toLowerCase() === low; })) {
+        msg = '„' + name + '“ gibt es im Blatt „Daten“ schon als feste Spalte. Bitte nimm einen anderen Namen.';
+        return;
+      }
+      if (seen[low]) { msg = 'Zwei Zusatzspalten heißen „' + name + '“. Bitte gib ihnen verschiedene Namen.'; return; }
+      seen[low] = true;
+    });
+    if (msg) return msg;
+  }
+  return '';
+}
+
+function impSourceLoaded(res, url) {
+  var w = impS.wiz;
+  w.source = res || {};
+  w.srcUrl = url;
+  w.tab = ''; w.info = null; w.cfg = null; w.ex = null; w.preview = null; w.previewKey = null; w.tplChoice = ''; w.saveName = '';
+  var tabs = w.source.tabs || [];
+  for (var k = 0; k < tabs.length && !w.tab; k++) if (!tabs[k].hidden && impN(tabs[k].rows) > 0) w.tab = tabs[k].name;
+  if (!w.tab && tabs.length) w.tab = tabs[0].name;
+  w.step = 2;
+  impRenderWiz();
+}
+
+/** importSelectTab; saved = Entwurf beim Weitermachen (seine Einstellungen gehen vor) */
+function impLoadTab(tab, saved) {
+  var w = impS.wiz;
+  impAsk('importSelectTab', [tab], 'Lese den Tab „' + tab + '“ …', function (res) {
+    if (impS.wiz !== w) return;
+    impTabLoaded(res || {}, saved);
+  });
+}
+
+function impTabLoaded(res, saved) {
+  var w = impS.wiz;
+  w.info = res;
+  w.tab = res.tab || w.tab;
+  w.ex = null; w.preview = null; w.previewKey = null;
+  w.step = 3;
+  if (saved && saved.cfg) {
+    w.cfg = impNormCfg(saved.cfg);
+    w.tplChoice = impTplByName(saved.templateName) ? saved.templateName : '';
+    w.mode = impModeCode(saved.mode);
+    w.saveName = saved.templateName || impDefaultName();
+    impRenderWiz();
+    return;
+  }
+  var t = impTplByName(res.suggested);
+  w.tplChoice = t ? t.name : '';
+  w.mode = t ? impModeCode(t.mode) : 'neu';
+  w.saveName = t ? t.name : impDefaultName();
+  var cfg = t ? (t.cfg || res.cfg || null) : (res.cfg || impDefaultCfg(res.guess));
+  w.cfg = cfg ? impNormCfg(cfg) : null;
+  impRenderWiz();
+  if (!w.cfg) impFetchTemplate(t.name);
+}
+
+/** Vorlage im Auswahlfeld gewechselt: deren Einstellungen und Modus übernehmen */
+function impPickTemplate(name) {
+  var w = impS.wiz;
+  if (!w || impBusy) return;
+  w.tplChoice = name; w.ex = null; w.preview = null; w.previewKey = null;
+  var t = impTplByName(name);
+  if (!t) {
+    w.tplChoice = '';
+    w.cfg = impDefaultCfg(w.info && w.info.guess);
+    w.mode = 'neu';
+    w.saveName = impDefaultName();
+    impRenderWiz();
+    return;
+  }
+  w.saveName = t.name;
+  w.mode = impModeCode(t.mode);
+  w.cfg = t.cfg ? impNormCfg(t.cfg) : null;
+  impRenderWiz();
+  if (!w.cfg) impFetchTemplate(t.name);
+}
+
+/** Vorlage ohne mitgelieferte Einstellungen: aus importListTemplates holen */
+function impFetchTemplate(name) {
+  var w = impS.wiz;
+  impAsk('importListTemplates', [], 'Lade die Vorlage …', function (list) {
+    if (impS.wiz !== w || w.tplChoice !== name) return;
+    var f = (list || []).filter(function (x) { return x && x.name === name; })[0];
+    w.cfg = impNormCfg(f && f.cfg ? f.cfg : impDefaultCfg(w.info && w.info.guess));
+    if (f && f.mode) w.mode = impModeCode(f.mode);
+    impRenderWiz();
+  });
+}
+
+// Schritt 1: Quelle
+function impStep1() {
+  var w = impS.wiz, st = impS.st || {};
+  return '<label for="impUrl">Link zu deiner Tabelle</label>' +
+    '<input type="text" id="impUrl" data-k="url" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/d/…" value="' + esc(w.url) + '"' +
+    ' oninput="impBind(this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();impWizNext();}">' +
+    '<div class="hint">Ein Google Sheet oder eine .xlsx-Datei aus deinem Drive. Kopiere einfach den Link aus der Adresszeile.</div>' +
+    (st.driveService === false ?
+      '<div class="warn">Für .xlsx-Dateien fehlt noch die „Drive API“: Im Apps-Script-Editor links unter „Dienste“ die „Drive API“ hinzufügen. Google Sheets gehen auch ohne.</div>' :
+      '<div class="hint">.xlsx-Dateien werden dafür kurz in ein Google Sheet umgewandelt (braucht im Apps-Script-Editor unter „Dienste“ die „Drive API“). Die Kopie wird danach gelöscht.</div>');
+}
+
+// Schritt 2: Tab
+function impStep2() {
+  var w = impS.wiz, src = w.source || {};
+  var tabs = src.tabs && src.tabs.length ? src.tabs : (w.tab ? [{ name: w.tab }] : []);
+  var html = '<div class="imp-sub">Datei: <b>' + esc(src.sourceName || 'Tabelle') + '</b>' + (src.kind === 'xlsx' ? ' (.xlsx)' : '') + '</div>' +
+    '<div class="notes">In welchem Tab stehen deine Karten?</div>';
+  tabs.forEach(function (t) {
+    var info = [];
+    if (t.rows != null) info.push(impPl(t.rows, 'Zeile', 'Zeilen'));
+    if (t.cols != null) info.push(impPl(t.cols, 'Spalte', 'Spalten'));
+    if (t.hidden) info.push('ausgeblendet');
+    html += '<label class="imp-opt"><input type="radio" name="impTab" data-k="tab" value="' + esc(t.name) + '"' +
+      (t.name === w.tab ? ' checked' : '') + ' onchange="impBind(this)"><span><b>' + esc(t.name) + '</b>' +
+      (info.length ? '<div class="hint">' + esc(info.join(', ')) + '</div>' : '') + '</span></label>';
+  });
+  if (!tabs.length) html += '<div class="notes">Die Datei hat keine Tabs.</div>';
+  return html;
+}
+
+// Schritt 3: Vorlage
+function impStep3() {
+  var w = impS.wiz, info = w.info || {}, tpls = info.templates || [];
+  var opts = '<option value=""' + (w.tplChoice ? '' : ' selected') + '>Neue Vorlage (Spalten geraten)</option>';
+  tpls.forEach(function (t) {
+    opts += '<option value="' + esc(t.name) + '"' + (t.name === w.tplChoice ? ' selected' : '') + '>' + esc(t.name) +
+      (t.matches ? ' (passt zu diesem Tab)' : '') + '</option>';
+  });
+  var hint;
+  if (info.suggested) hint = 'Die Vorlage „' + esc(info.suggested) + '“ passt zu den Überschriften dieses Tabs und ist vorausgewählt.';
+  else if (tpls.length) hint = 'Keine Vorlage passt genau zu diesem Tab. Du kannst trotzdem eine nehmen oder neu anfangen.';
+  else hint = 'Noch keine Vorlagen. Die Spalten sind geraten, du prüfst sie in den nächsten Schritten.';
+  return '<div class="imp-sub">Tab „' + esc(w.tab) + '“' + (info.nRows != null ? ': ' + impPl(info.nRows, 'Zeile', 'Zeilen') + ', ' +
+    impPl(info.nCols, 'Spalte', 'Spalten') : '') + '</div>' +
+    '<label for="impTpl">Vorlage</label><select id="impTpl" onchange="impPickTemplate(this.value)">' + opts + '</select>' +
+    '<div class="hint">' + hint + '</div>' +
+    (w.tplChoice ? '<div class="hint">Modus der Vorlage: ' + esc(impModeLabel(w.mode)) + '</div>' : '');
+}
+
+// Schritt 4: Form (Liste, Checkliste, Raster mit Blockangaben)
+function impStep4() {
+  var c = impS.wiz.cfg;
+  var forms = [
+    ['liste', 'Liste', 'Eine Zeile pro Karte.'],
+    ['checkliste', 'Checkliste', 'Eine Zeile pro Karte und eine Spalte mit Haken für „habe ich“.'],
+    ['raster', 'Raster', 'Karten in Blöcken neben- und untereinander, z. B. wie Seiten in einem Ordner.']
+  ];
+  var html = '<div class="notes">Wie ist dein Tab aufgebaut?</div>';
+  forms.forEach(function (f) {
+    html += '<label class="imp-opt"><input type="radio" name="impForm" value="' + f[0] + '" data-k="cfg.form" data-r="1" onchange="impBind(this)"' +
+      (c.form === f[0] ? ' checked' : '') + '><span><b>' + f[1] + '</b><div class="hint">' + f[2] + '</div></span></label>';
+  });
+  if (c.form === 'raster') html += impGridHtml();
+  return html;
+}
+
+function impGridHtml() {
+  var g = impS.wiz.cfg.grid;
+  function num(key, label, min, hint) {
+    return '<div><label for="impG_' + key + '">' + label + '</label><input type="number" id="impG_' + key + '" min="' + min + '" inputmode="numeric"' +
+      ' value="' + esc(g[key]) + '" data-k="cfg.grid.' + key + '" data-t="int" data-r="1" onchange="impBind(this)">' +
+      (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>';
+  }
+  var colOpts = '', n = Math.max(impNCols(), g.startCol + 1);
+  for (var c = 0; c < n; c++) colOpts += '<option value="' + c + '"' + (c === g.startCol ? ' selected' : '') + '>' + esc(impColLetter(c)) + '</option>';
+  var html = '<div class="box"><h3>Raster</h3>' +
+    '<div class="row">' + num('startRow', 'Erster Block ab Zeile', 1) +
+    '<div><label for="impG_startCol">ab Spalte</label><select id="impG_startCol" data-k="cfg.grid.startCol" data-t="col" data-r="1" onchange="impBind(this)">' +
+    colOpts + '</select></div></div>' +
+    '<div class="row">' + num('blockRows', 'Zeilen pro Block', 1) + num('blockCols', 'Spalten pro Block', 1) + '</div>' +
+    '<div class="row">' + num('gapRows', 'Leerzeilen dazwischen', 0) + num('gapCols', 'Leerspalten dazwischen', 0) + '</div>' +
+    num('perRow', 'Blöcke pro Reihe', 0, '0 = bis drei leere Blöcke nacheinander kommen') +
+    '<h3>Was steht wo im Block?</h3><div class="hint">Beispiele aus dem ersten Block stehen dahinter.</div>';
+  impFields.forEach(function (f) {
+    var p = g.cells[f];
+    html += '<label for="impC_' + f + '">' + esc(impFieldLabels[f]) + '</label><select id="impC_' + f + '" data-k="cfg.grid.cells.' + f + '" data-t="cell" onchange="impBind(this)">' +
+      impCellOptions(p ? p[0] + ',' + p[1] : '') + '</select>';
+  });
+  return html + '</div>' + impSampleHtml();
+}
+
+function impCellOptions(sel) {
+  var g = impS.wiz.cfg.grid, rows = Math.min(g.blockRows, 12), cols = Math.min(g.blockCols, 12);
+  var html = '<option value=""' + (sel ? '' : ' selected') + '>– keine –</option>';
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var v = r + ',' + c, ex = impCell(g.startRow + r, g.startCol + c);
+      if (ex.length > 24) ex = ex.slice(0, 23) + '…';
+      html += '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>Zeile ' + (r + 1) + ', Spalte ' + (c + 1) +
+        (ex ? ': ' + esc(ex) : '') + '</option>';
+    }
+  }
+  return html;
+}
+
+// Schritt 5: Zuordnung
+function impStep5() {
+  var c = impS.wiz.cfg, html = '';
+  var last = '<div><label for="impLr">Letzte Zeile</label><input type="number" id="impLr" min="0" inputmode="numeric" placeholder="bis zum Ende"' +
+    ' value="' + (c.lastRow ? esc(c.lastRow) : '') + '" data-k="cfg.lastRow" data-t="int" onchange="impBind(this)"><div class="hint">leer = bis zum Ende</div></div>';
+  if (c.form === 'raster') {
+    return '<div class="notes">Beim Raster hast du in Schritt 4 festgelegt, wo im Block was steht. Hier kannst du das Ende begrenzen.</div>' +
+      '<div class="row">' + last + '</div>' + impSampleHtml();
+  }
+  html += '<div class="row"><div><label for="impHr">Kopfzeile</label><input type="number" id="impHr" min="0" inputmode="numeric" value="' + esc(c.headerRow) + '"' +
+    ' data-k="cfg.headerRow" data-t="int" data-r="1" onchange="impBind(this)"><div class="hint">0 = keine</div></div>' +
+    '<div><label for="impFr">Erste Datenzeile</label><input type="number" id="impFr" min="1" inputmode="numeric" value="' + esc(c.firstRow) + '"' +
+    ' data-k="cfg.firstRow" data-t="int" onchange="impBind(this)"></div>' + last + '</div>' +
+    '<div class="notes">Welche Spalte enthält was?</div>';
+  impFields.forEach(function (f) {
+    if (f === 'check' && c.form !== 'checkliste') return;
+    html += '<label for="impCol_' + f + '">' + esc(impFieldLabels[f]) + '</label><select id="impCol_' + f + '" data-k="cfg.cols.' + f + '" data-t="col" onchange="impBind(this)">' +
+      impColOptions(c.cols[f]) + '</select>' + (impFieldHints[f] ? '<div class="hint">' + esc(impFieldHints[f]) + '</div>' : '');
+  });
+  return html + impSampleHtml();
+}
+
+/** Rohe Stichprobe (erste 25 Zeilen) als kleine Tabelle */
+function impSampleHtml() {
+  var w = impS.wiz, info = w.info || {}, s = info.sample || [], c = w.cfg || {};
+  if (!s.length) return '';
+  var n = Math.min(impNCols(), 30);
+  var hr = c.form === 'raster' ? 0 : impN(c.headerRow);
+  var html = '<div class="imp-scroll"><table class="imp-tbl"><tr><th></th>';
+  for (var j = 0; j < n; j++) html += '<th>' + impColLetter(j) + '</th>';
+  html += '</tr>';
+  s.forEach(function (row, i) {
+    html += '<tr' + (i + 1 === hr ? ' class="imp-hr"' : '') + '><th>' + (i + 1) + '</th>';
+    for (var j = 0; j < n; j++) html += '<td>' + esc(row && row[j] != null ? row[j] : '') + '</td>';
+    html += '</tr>';
+  });
+  return html + '</table></div><div class="hint">Die ersten ' + s.length + ' Zeilen deines Tabs' +
+    (impN(info.nRows) > s.length ? ' (von ' + esc(info.nRows) + ')' : '') + (hr ? ', die Kopfzeile ist blau hinterlegt.' : '.') + '</div>';
+}
+
+// Schritt 6: Feste Werte und Zusatzspalten
+function impStep6() {
+  var w = impS.wiz, f = w.cfg.fixed;
+  var condOpts = '<option value=""' + (f.cond ? '' : ' selected') + '>aus der Tabelle (sonst ohne Angabe)</option>';
+  CONDITIONS.forEach(function (code) {
+    if (!code) return;
+    condOpts += '<option value="' + esc(code) + '"' + (code === f.cond ? ' selected' : '') + '>' + esc(code) +
+      (CONDITION_LABELS[code] ? ' · ' + esc(CONDITION_LABELS[code]) : '') + '</option>';
+  });
+  var varOpts = '<option value=""' + (f.variant ? '' : ' selected') + '>aus der Tabelle (sonst Grundvariante)</option>';
+  Object.keys(VARIANT_LABELS).forEach(function (k) {
+    varOpts += '<option value="' + k + '"' + (k === f.variant ? ' selected' : '') + '>' + esc(VARIANT_LABELS[k]) + '</option>';
+  });
+  var html = '<h3>Feste Werte</h3><div class="hint">Gelten nur für Zeilen, in denen deine Tabelle selbst nichts dazu sagt.</div>' +
+    '<div class="row"><div><label for="impFxLang">Sprache</label><select id="impFxLang" data-k="cfg.fixed.lang" onchange="impBind(this)">' +
+    langOptions(f.lang || 'DE') + '</select></div>' +
+    '<div><label for="impFxCond">Zustand</label><select id="impFxCond" data-k="cfg.fixed.cond" onchange="impBind(this)">' + condOpts + '</select></div></div>' +
+    '<div class="row"><div><label for="impFxVar">Variante</label><select id="impFxVar" data-k="cfg.fixed.variant" onchange="impBind(this)">' + varOpts + '</select></div>' +
+    '<div><label for="impFxVer">Sonderversion</label><input type="text" id="impFxVer" list="versionList" autocomplete="off" placeholder="z. B. Snowflake"' +
+    ' value="' + esc(f.version) + '" data-k="cfg.fixed.version" oninput="impBind(this)"></div></div>';
+  html += '<h3>Zusatzspalten</h3><div class="hint">Weitere Spalten kannst du unter eigenem Namen übernehmen, z. B. Ordner oder Notiz. ' +
+    'Sie stehen dann im Blatt „Daten“ und auf Wunsch in der Sammlung.</div>';
+  impExInit();
+  var cands = impExtraCandidates();
+  if (!cands.length) html += '<div class="notes">Keine weiteren Spalten.</div>';
+  cands.forEach(function (x, k) {
+    var e = w.ex[x.key] || (w.ex[x.key] = { take: false, name: x.name, show: false });
+    html += '<div class="box"><h3>' + esc(x.label) + '</h3>' + (x.sample ? '<div class="imp-sub">z. B. „' + esc(x.sample) + '“</div>' : '') +
+      '<label class="check"><input type="checkbox" id="impExT' + k + '" data-k="ex.' + x.key + '.take" onchange="impBind(this)"' + (e.take ? ' checked' : '') + '> übernehmen</label>' +
+      '<label for="impExN' + k + '">Name der Zusatzspalte</label><input type="text" id="impExN' + k + '" autocomplete="off" value="' + esc(e.name) + '"' +
+      ' data-k="ex.' + x.key + '.name" oninput="impBind(this)">' +
+      '<label class="check"><input type="checkbox" id="impExS' + k + '" data-k="ex.' + x.key + '.show" onchange="impBind(this)"' + (e.show ? ' checked' : '') + '> in der Sammlung zeigen</label></div>';
+  });
+  return html;
+}
+
+/** Spalten (Liste) bzw. Zellen im Block (Raster), die keinem Feld zugeordnet sind */
+function impExtraCandidates() {
+  var w = impS.wiz, c = w.cfg, out = [];
+  if (!c) return out;
+  if (c.form === 'raster') {
+    var g = c.grid, used = {};
+    Object.keys(g.cells).forEach(function (f) { used[g.cells[f][0] + ',' + g.cells[f][1]] = true; });
+    for (var r = 0; r < Math.min(g.blockRows, 12); r++) {
+      for (var cc = 0; cc < Math.min(g.blockCols, 12); cc++) {
+        var key = r + ',' + cc;
+        if (used[key]) continue;
+        out.push({ key: key, col: -1, cell: [r, cc], label: 'Zeile ' + (r + 1) + ', Spalte ' + (cc + 1) + ' im Block', name: '',
+          sample: impCell(g.startRow + r, g.startCol + cc) });
+      }
+    }
+    return out;
+  }
+  var mapped = {};
+  impFields.forEach(function (f) { if (c.cols[f] >= 0 && (f !== 'check' || c.form === 'checkliste')) mapped[c.cols[f]] = true; });
+  var n = impNCols(), first = c.firstRow || c.headerRow + 1;
+  for (var col = 0; col < n; col++) {
+    if (mapped[col]) continue;
+    var head = impHeaderText(col), sample = '';
+    for (var row = first; row <= first + 24 && !sample; row++) if (row !== c.headerRow) sample = impCell(row, col);
+    if (!head && !sample) continue;
+    out.push({ key: 'c' + col, col: col, label: 'Spalte ' + impColName(col), name: head || 'Spalte ' + impColLetter(col), sample: sample });
+  }
+  return out;
+}
+
+/** Zustand für Schritt 6 aus cfg.extras aufbauen (einmal pro Vorlage/Tab) */
+function impExInit() {
+  var w = impS.wiz;
+  if (w.ex) return;
+  w.ex = {};
+  ((w.cfg && w.cfg.extras) || []).forEach(function (x) {
+    var key = x.cell ? x.cell[0] + ',' + x.cell[1] : 'c' + x.col;
+    w.ex[key] = { take: true, name: x.name, show: !!x.show };
+  });
+}
+
+/** Häkchen aus Schritt 6 nach cfg.extras übertragen */
+function impApplyExtras() {
+  var w = impS.wiz;
+  if (!w || !w.ex || !w.cfg) return;
+  var list = [];
+  impExtraCandidates().forEach(function (x) {
+    var e = w.ex[x.key];
+    if (!e || !e.take) return;
+    var name = String(e.name || '').replace(/\s+/g, ' ').trim();
+    if (!name) return;
+    var o = { col: x.col, name: name, show: !!e.show };
+    if (x.cell) o.cell = x.cell;
+    list.push(o);
+  });
+  w.cfg.extras = list;
+}
+
+// Schritt 7: Vorschau der ersten zehn Zeilen
+function impStep7() {
+  var p = impS.wiz.preview;
+  return '<div id="impPrev">' + (p ? impPreviewRowsHtml(p) : '<div class="spin">Lese die ersten Zeilen …</div>') + '</div>';
+}
+
+function impLoadPreview() {
+  var w = impS.wiz, cfg = impCfgOut(), key = JSON.stringify(cfg);
+  if (w.preview && w.previewKey === key) return;
+  w.preview = null; w.previewKey = key;
+  var gen = ++impPrevGen, sgen = impGen;
+  if ($('impPrev')) spinner('impPrev', 'Lese die ersten Zeilen …');
+  call('importPreviewRows', cfg).then(function (res) {
+    if (gen !== impPrevGen || sgen !== impGen || impS.wiz !== w) return;
+    w.preview = res || { rows: [], total: 0 };
+    if (w.step === 7 && $('impPrev')) $('impPrev').innerHTML = impPreviewRowsHtml(w.preview);
+  }, function (e) {
+    if (gen !== impPrevGen || sgen !== impGen || impS.wiz !== w) return;
+    w.previewKey = null;
+    if (w.step === 7 && $('impPrev')) {
+      $('impPrev').innerHTML = '<div class="msg err">' + esc(impErrText(e)) + '</div>' +
+        '<div class="actions"><button class="btn" onclick="impLoadPreview()">Nochmal versuchen</button></div>';
+    }
+  });
+}
+
+function impPreviewRowsHtml(p) {
+  var rows = p.rows || [], sc = p.skippedCounts || {};
+  var total = impN(p.total), skipped = impN(sc.summe) + impN(sc.leer) + impN(sc.nichtAngehakt);
+  var ok = p.importable != null ? impN(p.importable) : Math.max(0, total - skipped);
+  var bits = [];
+  if (impN(sc.summe)) bits.push(impPl(sc.summe, 'Summenzeile', 'Summenzeilen'));
+  if (impN(sc.leer)) bits.push(impN(sc.leer) + ' leer');
+  if (impN(sc.nichtAngehakt)) bits.push(impN(sc.nichtAngehakt) + ' nicht angehakt');
+  var html = '<div class="notes">' + impPl(total, 'Zeile', 'Zeilen') + ' gelesen, davon ' + ok + ' mit Karten.' +
+    (bits.length ? ' Übersprungen: ' + esc(bits.join(', ')) + '.' : '') + '</div>';
+  if (!rows.length) return html + '<div class="warn">Keine Zeilen gefunden. Bitte prüfe Kopfzeile, erste Datenzeile und die Zuordnung.</div>';
+  html += '<div class="imp-scroll"><table class="imp-tbl"><tr><th>Zeile</th><th>Name</th><th>Nummer</th><th>Set</th><th>Anzahl</th><th>Details</th><th>Hinweis</th></tr>';
+  rows.forEach(function (r) {
+    var f = r.fields || {};
+    var det = [];
+    if (f.variant) det.push(VARIANT_LABELS[f.variant] || f.variant);
+    if (f.lang || f.cond) det.push((f.lang || '') + (f.cond ? ' ' + f.cond : ''));
+    if (f.version) det.push(f.version);
+    if (typeof f.price === 'number') det.push(eur(f.price) + (f.priceDate ? ' (' + f.priceDate + ')' : ''));
+    if (f.cmUrl) det.push('Cardmarket-Link');
+    if (f.tcgdexId) det.push('tcgdex ' + f.tcgdexId);
+    var ex = r.extras || f.extras || {};
+    Object.keys(ex).forEach(function (k) { if (ex[k] !== '' && ex[k] != null) det.push(k + ': ' + ex[k]); });
+    var skip = r.skip || f.skip || '';
+    html += '<tr' + (skip ? ' class="imp-skip"' : '') + '><td>' + esc(impSrcRows(r.srcRows)) + '</td><td>' + esc(f.nameClean || f.name || '') + '</td>' +
+      '<td>' + esc(f.number || '') + '</td><td>' + esc(f.set || '') + '</td><td>' + esc(f.qty != null ? f.qty : '') + '</td>' +
+      '<td>' + esc(det.join(' · ')) + '</td><td>' + esc(skip ? (impSkipLabels[skip] || skip) : '') + '</td></tr>';
+  });
+  return html + '</table></div><div class="hint">Die ersten zehn Zeilen, so wie der Import sie liest. Passt etwas nicht, geh mit „Zurück“ zur Zuordnung.</div>';
+}
+
+/** [5] -> "5", [5, 9] -> "5, 9", ['r3c2'] -> "3/B" */
+function impSrcRows(list) {
+  return (list || []).map(function (s) {
+    var m = String(s).match(/^r(\d+)c(\d+)$/);
+    return m ? m[1] + '/' + impColLetter(Number(m[2]) - 1) : String(s);
+  }).join(', ');
+}
+
+// Schritt 8: Vorlage speichern und Modus
+function impStep8() {
+  var w = impS.wiz;
+  var html = '<label for="impSaveName">Name der Vorlage</label><input type="text" id="impSaveName" maxlength="80" autocomplete="off"' +
+    ' value="' + esc(w.saveName) + '" data-k="saveName" oninput="impBind(this)">' +
+    '<div class="hint">Mit der Vorlage geht der nächste Import aus dieser Tabelle schneller. Leer lassen, wenn du keine speichern willst.</div>' +
+    '<h3>Modus</h3>';
+  impModes.forEach(function (m) {
+    html += '<label class="imp-opt"><input type="radio" name="impMode" value="' + m.code + '" data-k="mode" onchange="impBind(this)"' +
+      (w.mode === m.code ? ' checked' : '') + '><span><b>' + esc(m.label) + (m.code === 'neu' ? ' (Standard)' : '') + '</b>' +
+      '<div class="hint">' + esc(m.text) + '</div></span></label>';
+  });
+  return html + '<div class="hint">Danach sucht die Erkennung jede Karte bei tcgdex. Bei vielen Zeilen dauert das ein paar Minuten.</div>';
+}
+
+/** Vorlage speichern (wenn ein Name da ist), dann die Erkennung starten */
+function impWizStart() {
+  var w = impS.wiz;
+  if (!w || impBusy) return;
+  impCollect();
+  var cfg = impCfgOut(), mode = impModeCode(w.mode);
+  var name = String(w.saveName || '').replace(/\s+/g, ' ').trim();
+  var gen = impGen;
+  impSetBusy(true);
+  impSpin(name ? 'Speichere die Vorlage …' : 'Bereite die Erkennung vor …');
+  var start = function () {
+    impSpin('Bereite die Erkennung vor …');
+    return call('importStartRecognition', cfg, name, mode).then(function (res) { return { res: res || {} }; });
+  };
+  var chain = name ? call('importSaveTemplate', name, cfg, mode).then(function () { return gen === impGen ? start() : null; }) : start();
+  chain.then(function (out) {
+    if (!out || gen !== impGen) return;
+    impSetBusy(false);
+    impS.erk = { total: impN(out.res.total), pos: 0, counts: null, skipped: out.res.skipped || null, err: '', running: false };
+    impGo('erk');
+    impErkStep();
+  }).catch(function (e) {
+    if (gen !== impGen) return;
+    impSetBusy(false);
+    impErr(e);
+  });
+}
+
+// ---------- 3. Erkennung ----------
+
+function impErkCounts(c) {
+  c = c || {};
+  var parts = [impN(c.eindeutig) + ' eindeutig', impN(c.unklar) + ' unklar', impN(c.nichtGefunden) + ' nicht gefunden'];
+  if (impN(c.uebersprungen)) parts.push(impN(c.uebersprungen) + ' übersprungen');
+  if (impN(c.bekannt)) parts.push(impN(c.bekannt) + ' schon importiert');
+  return parts.join(', ');
+}
+
+function impRenderErk() {
+  var e = impS.erk;
+  if (!e || impS.screen !== 'erk') return;
+  var total = impN(e.total), pos = Math.min(impN(e.pos), total);
+  var pct = total ? Math.round(pos * 100 / total) : 0;
+  var sk = e.skipped || {}, bits = [];
+  if (impN(sk.summe)) bits.push(impPl(sk.summe, 'Summenzeile', 'Summenzeilen'));
+  if (impN(sk.leer)) bits.push(impN(sk.leer) + ' leer');
+  if (impN(sk.nichtAngehakt)) bits.push(impN(sk.nichtAngehakt) + ' nicht angehakt');
+  $('impMain').innerHTML = '<h2>Erkennung</h2>' +
+    '<div class="notes">Jede Zeile wird bei tcgdex gesucht. Der Stand wird nach jedem Schritt gespeichert, du kannst also jederzeit später weitermachen.</div>' +
+    '<div class="imp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><div style="width:' + pct + '%"></div></div>' +
+    '<div id="impErkPos">' + pos + ' von ' + total + ' Einträgen erkannt</div>' +
+    (e.counts ? '<div class="imp-sub" id="impErkCounts">' + esc(impErkCounts(e.counts)) + '</div>' : '') +
+    (bits.length ? '<div class="imp-sub">In der Tabelle übersprungen: ' + esc(bits.join(', ')) + '</div>' : '') +
+    '<div id="impAct">' + (e.err ? '<div class="msg err">' + esc(e.err) + '</div>' : (e.running ? '<div class="spin">Erkenne die nächsten Einträge …</div>' : '')) + '</div>' +
+    '<div class="actions">' + (e.err ? '<button class="btn primary" onclick="impErkRetry()">Nochmal versuchen</button>' : '') +
+    '<button class="btn" onclick="impErkLater()">Später weitermachen</button></div>';
+}
+
+/** Ein Schritt importRecognizeStep; danach der nächste, bis alles erkannt ist */
+function impErkStep() {
+  var e = impS.erk;
+  if (!e || e.running) return;
+  var gen = impGen;
+  e.running = true; e.err = '';
+  impRenderErk();
+  call('importRecognizeStep').then(function (res) {
+    if (gen !== impGen || impS.erk !== e) return;
+    e.running = false;
+    res = res || {};
+    e.pos = impN(res.pos); e.total = impN(res.total);
+    if (res.counts) e.counts = res.counts;
+    if (res.done) { impErkDone(); return; }
+    impErkStep();
+  }, function (err) {
+    if (gen !== impGen || impS.erk !== e) return;
+    e.running = false; e.err = impErrText(err);
+    impRenderErk();
+  });
+}
+
+function impErkDone() {
+  var c = impS.erk.counts || {};
+  var msg = 'Erkennung fertig: ' + impErkCounts(c) + '.';
+  if (impN(c.unklar) + impN(c.nichtGefunden) > 0) impOpenReview(msg);
+  else impOpenPreview(msg);
+}
+
+function impErkRetry() { var e = impS.erk; if (e && !e.running) impErkStep(); }
+
+function impErkLater() {
+  if (impBusy) return;
+  impLoadStart('Die Erkennung ist gespeichert. Mit „Weitermachen“ geht es dort weiter.');
+}
+
+// ---------- 4. Prüfliste ----------
+
+function impOpenReview(okText) {
+  if (impBusy) return;
+  var gen = impGo('review');
+  if (okText) setMsg('impMsg', esc(okText), 'ok');
+  spinner('impMain', 'Lade die Prüfliste …');
+  call('importReviewList').then(function (res) {
+    if (gen !== impGen) return;
+    res = res || {};
+    var items = res.items || [];
+    impS.rv = { items: items, open: impN(res.open), total: res.total != null ? impN(res.total) : items.length, ui: [] };
+    impS.rvSeen = true;
+    impRenderReview();
+  }, function (e) {
+    if (gen !== impGen) return;
+    impLoadFailed(e, 'impOpenReview()');
+  });
+}
+
+function impRenderReview() {
+  var rv = impS.rv;
+  var html = '<h2>Prüfliste</h2><div class="notes" id="impRvProg">' + esc(impRvProgText()) + '</div><div id="impRvAll">' + impRvAllHtml() + '</div>';
+  if (!rv.items.length) html += '<div class="notes">Nichts zu prüfen, alle Zeilen wurden erkannt.</div>';
+  else html += '<div class="hint">Tippe bei jeder Zeile die passende Karte an. Offene Zeilen werden nicht importiert, du kannst sie beim nächsten Import nachholen.</div>';
+  rv.items.forEach(function (it, k) { html += '<div class="' + impRvBoxClass(k) + '" id="impRv' + k + '">' + impRvItemHtml(k) + '</div>'; });
+  html += '<div class="actions"><button class="btn" onclick="impRvLater()">Später weitermachen</button>' +
+    '<button class="btn primary" onclick="impOpenPreview()">Weiter zur Vorschau</button></div><div id="impAct"></div>';
+  $('impMain').innerHTML = html;
+}
+
+function impRvProgText() { var rv = impS.rv; return Math.max(0, rv.total - rv.open) + ' von ' + rv.total + ' erledigt'; }
+
+function impRvAllHtml() {
+  var n = impS.rv.items.filter(function (it) { return it.prefilled && it.decision && !it.confirmed; }).length;
+  if (!n) return '';
+  return '<div class="choose"><div class="t">' + (n === 1 ? '1 Zeile hast du' : n + ' Zeilen hast du') + ' beim letzten Mal schon entschieden.</div>' +
+    '<div class="hint">Sie sind mit „Deine Wahl vom letzten Mal“ markiert. Du kannst sie einzeln ändern oder alle auf einmal übernehmen.</div>' +
+    '<button class="btn opt" onclick="impRvAcceptAll()">Alle übernehmen</button></div>';
+}
+
+function impRvBoxClass(k) {
+  var it = impS.rv.items[k];
+  return 'box imp-rv' + (it && it.decision && it.confirmed ? ' imp-done' : '');
+}
+
+/** Originalwerte der Quellzeile ("Name: … · Nummer: …"), schon escaped */
+function impRvOrig(v) {
+  var raw = v.raw || {}, parts = [];
+  var keys = Object.keys(raw).length ? impFields.filter(function (f) { return String(raw[f] == null ? '' : raw[f]).trim() !== ''; }) : [];
+  if (keys.length) {
+    keys.forEach(function (f) {
+      var t = String(raw[f]).trim();
+      if (t.length > 60) t = t.slice(0, 59) + '…';
+      parts.push(esc(impFieldLabels[f]) + ': ' + esc(t));
+    });
+  } else {
+    if (v.number) parts.push('Nummer: ' + esc(v.number));
+    if (v.set) parts.push('Set: ' + esc(v.set));
+  }
+  return parts.join(' · ');
+}
+
+function impRvDecText(it) {
+  var d = it.decision, c = it.card || {};
+  if (d.type === 'skip') return 'Deine Wahl: <b>Überspringen</b>';
+  if (d.type === 'frei') return 'Deine Wahl: <b>Als freie Karte</b>' + (c.name ? ' „' + esc(c.name) + '“' : '');
+  return 'Deine Wahl: <b>' + esc(c.name || d.id || '') + '</b>' + (c.setName ? ' · ' + esc(c.setName) : '') +
+    (c.localId ? ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') : '') +
+    (c.variant && VARIANT_LABELS[c.variant] ? ' · ' + esc(VARIANT_LABELS[c.variant]) : '');
+}
+
+/** Enter oder Leertaste auf einer Kachel wirkt wie ein Klick */
+function impTileKey(ev, el) {
+  if (ev.target !== el || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+  ev.preventDefault();
+  el.click();
+}
+
+/** Kachel einer Karte (Kandidat oder Suchtreffer); onclick ist eigener Code mit Indizes */
+function impTileHtml(c, onclick, chosen) {
+  return '<div class="tile' + (chosen ? ' imp-chosen' : '') + '" role="button" tabindex="0" onclick="' + onclick + '" onkeydown="impTileKey(event,this)">' +
+    imgTag(cardImg(c.image, 'low')) + '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId || '') +
+    (c.localId != null && c.localId !== '' ? ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') : '') +
+    (c.lang === 'en' ? ' · englische Daten' : '') + (chosen ? '<br><b>gewählt</b>' : '') + '</div></div>';
+}
+
+function impRvItemHtml(k) {
+  var rv = impS.rv, it = rv.items[k], ui = rv.ui[k] || {};
+  var v = it.values || {}, d = it.decision, done = !!(d && it.confirmed), last = !!(d && it.prefilled);
+  var title = v.nameClean || v.name || (v.raw && v.raw.name) || 'Zeile ohne Namen';
+  var where = it.srcRows && it.srcRows.length ? (it.srcRows.length === 1 ? 'Zeile ' : 'Zeilen ') + impSrcRows(it.srcRows) : '';
+  var html = '<div><b>' + esc(title) + '</b>' +
+    (done ? '<span class="imp-badge done">erledigt</span>' : '<span class="imp-badge">' + esc(it.status || 'offen') + '</span>') +
+    (last ? '<span class="imp-badge last">Deine Wahl vom letzten Mal</span>' : '') + '</div>' +
+    '<div class="imp-sub">' + esc([where, impPl(it.qty, 'Stück', 'Stück')].filter(Boolean).join(' · ')) + '</div>';
+  var orig = impRvOrig(v);
+  if (orig) html += '<div class="imp-sub">' + orig + '</div>';
+  if (it.reason) html += '<div class="hint">' + esc(it.reason) + '</div>';
+  if (d) html += '<div class="imp-pick">' + impRvDecText(it) + '</div>';
+  var cands = it.candidates || [];
+  if (cands.length) {
+    html += '<div class="grid">';
+    cands.forEach(function (c, i) { html += impTileHtml(c, 'impRvPick(' + k + ',' + i + ')', !!(d && d.type === 'karte' && d.id === c.id)); });
+    html += '</div>';
+  }
+  html += '<div class="actions">' +
+    '<button class="btn' + (ui.search ? ' imp-on' : '') + '" onclick="impRvToggleSearch(' + k + ')">Neu suchen</button>' +
+    '<button class="btn' + (d && d.type === 'frei' ? ' imp-on' : '') + '" onclick="impRvDecide(' + k + ',\'frei\')">Als freie Karte</button>' +
+    '<button class="btn' + (d && d.type === 'skip' ? ' imp-on' : '') + '" onclick="impRvDecide(' + k + ',\'skip\')">Überspringen</button>' +
+    (d ? '<button class="btn" onclick="impRvDecide(' + k + ',\'\')">Wahl aufheben</button>' : '') + '</div>';
+  if (ui.search) html += impRvSearchHtml(k);
+  return html + '<div id="impRvMsg' + k + '"></div>';
+}
+
+function impRvDraw(k) {
+  var el = $('impRv' + k);
+  if (!el || !impS.rv || !impS.rv.items[k]) return;
+  el.className = impRvBoxClass(k);
+  el.innerHTML = impRvItemHtml(k);
+}
+
+function impRvRefresh() {
+  if ($('impRvProg')) $('impRvProg').textContent = impRvProgText();
+  if ($('impRvAll')) $('impRvAll').innerHTML = impRvAllHtml();
+}
+
+function impRvPick(k, i) {
+  var it = impS.rv && impS.rv.items[k], c = it && it.candidates && it.candidates[i];
+  if (c) impRvSend(k, { type: 'karte', id: c.id, lang: c.lang });
+}
+
+function impRvDecide(k, type) { impRvSend(k, { type: type }); }
+
+/** importReviewDecide für eine Zeile; Antwort ersetzt die Zeile */
+function impRvSend(k, decision) {
+  var rv = impS.rv, it = rv && rv.items[k];
+  if (!it || impBusy) return;
+  var gen = impGen, ui = rv.ui[k] = rv.ui[k] || {};
+  impSetBusy(true);
+  spinner('impRvMsg' + k, 'Speichere …');
+  call('importReviewDecide', it.fp, decision).then(function (res) {
+    if (gen !== impGen || impS.rv !== rv) return;
+    impSetBusy(false);
+    res = res || {};
+    if (res.item) rv.items[k] = res.item;
+    if (res.open != null) rv.open = impN(res.open);
+    ui.search = null;
+    impRvDraw(k);
+    impRvRefresh();
+  }, function (e) {
+    if (gen !== impGen || impS.rv !== rv) return;
+    impSetBusy(false);
+    setMsg('impRvMsg' + k, esc(impErrText(e)), 'err');
+  });
+}
+
+function impRvAcceptAll() {
+  var rv = impS.rv;
+  if (!rv || impBusy) return;
+  impAsk('importReviewAcceptPrefilled', [], 'Übernehme deine Wahl vom letzten Mal …', function (res) {
+    if (impS.rv !== rv) return;
+    rv.items.forEach(function (it) { if (it.prefilled && it.decision) it.confirmed = true; });
+    if (res && res.open != null) rv.open = impN(res.open);
+    impRenderReview();
+    setMsg('impMsg', 'Deine Wahl vom letzten Mal ist übernommen.', 'ok');
+  }, null, 'impRvAll');
+}
+
+function impRvLater() {
+  if (impBusy) return;
+  impLoadStart('Die Prüfliste ist gespeichert. Mit „Weitermachen“ geht es dort weiter.');
+}
+
+// Neu suchen (wie im Tab Hinzufügen: Treffer als Kacheln oder Set-Auswahl)
+function impRvToggleSearch(k) {
+  var rv = impS.rv, it = rv && rv.items[k];
+  if (!it || impBusy) return;
+  var ui = rv.ui[k] = rv.ui[k] || {};
+  if (ui.search) ui.search = null;
+  else {
+    var v = it.values || {};
+    ui.search = { name: v.nameClean || v.name || '', number: v.number || '', set: v.set || '', res: null, busy: false, busyText: '', msg: '', filter: '', gen: 0, query: null };
+  }
+  impRvDraw(k);
+}
+
+function impRvSearchHtml(k) {
+  var S = impS.rv.ui[k].search;
+  return '<form class="box" onsubmit="impRvSearch(event,' + k + ')"><h3>Neu suchen</h3>' +
+    '<label for="impRvN' + k + '">Name</label><input type="text" id="impRvN' + k + '" autocomplete="off" value="' + esc(S.name) + '" oninput="impRvField(' + k + ',\'name\',this.value)">' +
+    '<div class="row"><div><label for="impRvNr' + k + '">Nummer</label><input type="text" id="impRvNr' + k + '" autocomplete="off" value="' + esc(S.number) + '" oninput="impRvField(' + k + ',\'number\',this.value)"></div>' +
+    '<div><label for="impRvSet' + k + '">Set (optional)</label><input type="text" id="impRvSet' + k + '" list="setList" autocomplete="off" value="' + esc(S.set) + '" oninput="impRvField(' + k + ',\'set\',this.value)"></div></div>' +
+    '<div class="actions"><button class="btn primary" type="submit">Suchen</button></div></form>' +
+    '<div id="impRvRes' + k + '">' + impRvResHtml(k) + '</div>';
+}
+
+function impRvSearchOf(k) { var rv = impS.rv; return rv && rv.ui[k] ? rv.ui[k].search : null; }
+function impRvField(k, f, v) { var S = impRvSearchOf(k); if (S) S[f] = v; }
+function impRvDrawRes(k) { if ($('impRvRes' + k) && impRvSearchOf(k)) $('impRvRes' + k).innerHTML = impRvResHtml(k); }
+
+function impRvResHtml(k) {
+  var S = impRvSearchOf(k), res = S.res;
+  var html = S.msg ? '<div class="msg err">' + esc(S.msg) + '</div>' : '';
+  if (S.busy) return html + '<div class="spin">' + esc(S.busyText || 'Suche bei tcgdex …') + '</div>';
+  if (!res) return html;
+  html += notesHtml(res.notes);
+  if (res.cards && res.cards.length) {
+    html += '<div class="notes">Karte antippen, um sie zu wählen:</div><div class="grid">';
+    res.cards.forEach(function (c, i) { html += impTileHtml(c, 'impRvPickFound(' + k + ',' + i + ')', false); });
+    html += '</div>';
+    if (res.back) html += '<button class="imp-link" onclick="impRvBackSets(' + k + ')">Anderes Set wählen</button>';
+    return html;
+  }
+  if (res.stage === 'pickSet') {
+    return html + '<label for="impRvF' + k + '">Set filtern</label><input type="text" id="impRvF' + k + '" autocomplete="off" placeholder="Set-Name"' +
+      ' value="' + esc(S.filter) + '" oninput="impRvFilter(' + k + ',this.value)"><div class="grid" id="impRvSets' + k + '">' + impRvSetsHtml(k) + '</div>';
+  }
+  if (!res.tooMany && !(res.notes && res.notes.length)) html += '<div class="notes">Keine Karte gefunden. Du kannst sie als freie Karte übernehmen.</div>';
+  return html;
+}
+
+function impRvSetsHtml(k) {
+  var S = impRvSearchOf(k), sets = (S.res && S.res.sets) || [];
+  var t = String(S.filter || '').trim().toLowerCase();
+  var anyPref = sets.some(function (s) { return s.preferred; });
+  var html = '', shown = 0;
+  sets.forEach(function (s, i) {
+    if (shown >= 40) return;
+    if (t) { if ((s.name + ' ' + (s.nameEn || '') + ' ' + s.id).toLowerCase().indexOf(t) < 0) return; }
+    else if (anyPref && !s.preferred) return;
+    shown++;
+    html += '<div class="tile set" role="button" tabindex="0" onclick="impRvPickSet(' + k + ',' + i + ')" onkeydown="impTileKey(event,this)">' + imgTag(s.logo ? s.logo + '.webp' : PLACEHOLDER) +
+      '<div class="cap"><b>' + esc(s.name) + '</b><br>' + esc(s.id) + (s.official ? ' · ' + esc(s.official) + ' Karten' : '') + '</div></div>';
+  });
+  return html || '<div class="notes">Kein Set passt.</div>';
+}
+
+function impRvFilter(k, v) {
+  var S = impRvSearchOf(k);
+  if (!S) return;
+  S.filter = v;
+  if ($('impRvSets' + k)) $('impRvSets' + k).innerHTML = impRvSetsHtml(k);
+}
+
+/** importReviewSearch; nur die Antwort auf die neueste Suche zählt */
+function impRvSearch(ev, k) {
+  if (ev) ev.preventDefault();
+  var rv = impS.rv, it = rv && rv.items[k], S = impRvSearchOf(k);
+  if (!it || !S) return;
+  var q = { name: String(S.name || '').trim(), number: String(S.number || '').trim(), set: String(S.set || '').trim() };
+  var gen = S.gen = ++impSearchGen, sgen = impGen;
+  S.query = q; S.res = null; S.msg = ''; S.busy = true; S.busyText = 'Suche bei tcgdex …'; S.filter = '';
+  impRvDrawRes(k);
+  call('importReviewSearch', it.fp, q).then(function (res) {
+    if (sgen !== impGen || S.gen !== gen || impRvSearchOf(k) !== S) return;
+    S.busy = false; S.res = res || {};
+    impRvDrawRes(k);
+  }, function (e) {
+    if (sgen !== impGen || S.gen !== gen || impRvSearchOf(k) !== S) return;
+    S.busy = false; S.msg = impErrText(e);
+    impRvDrawRes(k);
+  });
+}
+
+function impRvPickSet(k, i) {
+  var S = impRvSearchOf(k);
+  if (!S || S.busy) return;
+  var prev = S.res, s = prev && prev.sets && prev.sets[i];
+  if (!s) return;
+  var number = prev.number || (S.query && S.query.number) || S.number;
+  var gen = S.gen = ++impSearchGen, sgen = impGen;
+  S.busy = true; S.msg = ''; S.busyText = 'Suche Nummer ' + number + ' in ' + s.name + ' …';
+  impRvDrawRes(k);
+  call('getCardBySetNumber', s.id, number).then(function (card) {
+    if (sgen !== impGen || S.gen !== gen || impRvSearchOf(k) !== S) return;
+    S.busy = false;
+    S.res = { stage: 'set', cards: card ? [card] : [], notes: [], sets: prev.sets, number: prev.number, back: prev };
+    impRvDrawRes(k);
+  }, function (e) {
+    if (sgen !== impGen || S.gen !== gen || impRvSearchOf(k) !== S) return;
+    S.busy = false; S.msg = impErrText(e); S.res = prev;
+    impRvDrawRes(k);
+  });
+}
+
+function impRvBackSets(k) {
+  var S = impRvSearchOf(k);
+  if (!S || !S.res || !S.res.back) return;
+  S.res = S.res.back; S.msg = '';
+  impRvDrawRes(k);
+}
+
+function impRvPickFound(k, i) {
+  var S = impRvSearchOf(k), c = S && S.res && S.res.cards && S.res.cards[i];
+  if (c) impRvSend(k, { type: 'karte', id: c.id, lang: c.lang });
+}
+
+// ---------- 5. Vorschau ----------
+
+function impOpenPreview(okText) {
+  if (impBusy) return;
+  var gen = impGo('preview');
+  if (okText) setMsg('impMsg', esc(okText), 'ok');
+  spinner('impMain', 'Berechne die Vorschau …');
+  call('importBuildPreview').then(function (res) {
+    if (gen !== impGen) return;
+    res = res || {};
+    var pv = impS.pv = { res: res, hand: {}, removed: {}, showAll: false };
+    (res.handMatch || []).forEach(function (h) { pv.hand[h.fp] = h.choice === 'extra' ? 'extra' : 'same'; });
+    (res.removedByYou || []).forEach(function (x) { pv.removed[x.fp] = false; });
+    impRenderPreview();
+  }, function (e) {
+    if (gen !== impGen) return;
+    impLoadFailed(e, 'impOpenPreview()');
+  });
+}
+
+function impPvCountsText(c) {
+  var parts = [];
+  if (impN(c.neu)) parts.push(impPl(c.neu, 'neue Karte', 'neue Karten'));
+  if (impN(c.mehr)) parts.push(impPl(c.mehr, 'Exemplar', 'Exemplare') + ' mehr bei Karten, die du schon hast');
+  if (impN(c.weniger)) parts.push(impN(c.weniger) + ' weniger (Abgleich)');
+  if (impN(c.uebersprungen)) parts.push(impN(c.uebersprungen) + ' übersprungen');
+  if (impN(c.bekannt)) parts.push(impN(c.bekannt) + ' schon importiert');
+  if (impN(c.pruefOffen)) parts.push(impN(c.pruefOffen) + ' in der Prüfliste offen');
+  return parts.length ? parts.join(', ') + '.' : 'Nichts Neues zu importieren.';
+}
+
+function impPvCountsHtml(r) {
+  return '<div id="impPvCounts">' + esc(impPvCountsText(r.counts || {})) + '</div>' +
+    (impSigned(r.valueChange) ? '<div class="imp-sub">Wert der Sammlung: ' + esc(impSigned(r.valueChange)) + '</div>' : '');
+}
+
+/** Entscheidungen aus der Vorschau für den Server */
+function impPvChoices() {
+  var pv = impS.pv, choices = { hand: {}, removed: {} };
+  (pv.res.handMatch || []).forEach(function (h) { choices.hand[h.fp] = pv.hand[h.fp] === 'extra' ? 'extra' : 'same'; });
+  (pv.res.removedByYou || []).forEach(function (x) { if (pv.removed[x.fp]) choices.removed[x.fp] = true; });
+  return choices;
+}
+
+/** Zahlen oben neu rechnen lassen, wenn du bei „Schon von Hand erfasst“ oder „Von dir entfernt“ etwas änderst */
+var impPvSeq = 0;
+function impPvRecount() {
+  var pv = impS.pv;
+  if (!pv) return;
+  var seq = ++impPvSeq, gen = impGen;
+  call('importBuildPreview', impPvChoices()).then(function (res) {
+    if (seq !== impPvSeq || gen !== impGen || impS.pv !== pv || !res) return;
+    pv.res.counts = res.counts || pv.res.counts;
+    pv.res.valueChange = res.valueChange;
+    if ($('impPvBox')) $('impPvBox').innerHTML = impPvCountsHtml(pv.res);
+  }, function () { /* die Zahlen oben bleiben dann alt; beim Importieren rechnet der Server ohnehin neu */ });
+}
+
+function impRenderPreview() {
+  var pv = impS.pv, r = pv.res, c = r.counts || {};
+  var html = '<h2>Vorschau</h2><div class="imp-sub">' + esc(r.sourceName || '') + (r.tab ? ' · Tab ' + esc(r.tab) : '') + ' · ' +
+    esc(r.modeLabel || impModeLabel(r.mode)) + '</div>' +
+    '<div class="box" id="impPvBox">' + impPvCountsHtml(r) + '</div>';
+  (r.warnings || []).forEach(function (w) { html += '<div class="warn">' + esc(w) + '</div>'; });
+  (r.notes || []).forEach(function (n) { html += '<div class="notes">' + esc(n) + '</div>'; });
+  if (r.newColumns && r.newColumns.length) html += '<div class="notes">Neue Zusatzspalten: ' + r.newColumns.map(esc).join(', ') + '</div>';
+  if (impN(c.pruefOffen)) {
+    html += '<div class="warn">' + (impN(c.pruefOffen) === 1 ? '1 Zeile aus der Prüfliste ist noch offen und wird' :
+      impN(c.pruefOffen) + ' Zeilen aus der Prüfliste sind noch offen und werden') + ' nicht importiert.' +
+      '<div class="actions"><button class="btn" onclick="impOpenReview()">Zur Prüfliste</button></div></div>';
+  }
+  var hm = r.handMatch || [];
+  if (hm.length) {
+    html += '<h3>Schon von Hand erfasst (' + hm.length + ')</h3><div class="hint">Diese Karten hast du schon von Hand eingetragen. ' +
+      'Ist es dieselbe Karte, zählt sie nicht doppelt. Der Eintrag von Hand bleibt so, wie er ist.</div>';
+    hm.forEach(function (h, k) {
+      var ch = pv.hand[h.fp];
+      html += '<div class="item">' + imgTag(cardImg(h.image, 'low')) + '<div class="info"><div class="t">' + esc(h.title) + '</div>' +
+        '<div class="s">' + esc(h.sub) + '</div><div class="s">In der Tabelle: ' + esc(h.qty) + ', von Hand: ' + esc(h.handCount) + '</div>' +
+        '<label class="imp-opt"><input type="radio" name="impHm' + k + '" id="impHmS' + k + '" value="same"' + (ch === 'same' ? ' checked' : '') +
+        ' onchange="impPvHand(' + k + ',this.value)"><span>Dieselbe Karte</span></label>' +
+        '<label class="imp-opt"><input type="radio" name="impHm' + k + '" id="impHmE' + k + '" value="extra"' + (ch === 'extra' ? ' checked' : '') +
+        ' onchange="impPvHand(' + k + ',this.value)"><span>Zusätzliches Exemplar</span></label></div></div>';
+    });
+  }
+  var rb = r.removedByYou || [];
+  if (rb.length) {
+    html += '<h3>Von dir entfernt (' + rb.length + ')</h3><div class="hint">Diese Exemplare hast du nach einem früheren Import selbst entfernt, ' +
+      'z. B. weil du sie verkauft hast. Sie bleiben weg, außer du setzt den Haken.</div>';
+    rb.forEach(function (x, k) {
+      html += '<div class="item">' + imgTag(cardImg(x.image, 'low')) + '<div class="info"><div class="t">' + esc(x.title) + '</div>' +
+        '<div class="s">' + esc(x.sub) + ' · ' + esc(x.qty) + ' Stück</div>' +
+        '<label class="check"><input type="checkbox" id="impRb' + k + '" onchange="impPvRemoved(' + k + ',this.checked)"' + (pv.removed[x.fp] ? ' checked' : '') +
+        '> trotzdem übernehmen</label></div></div>';
+    });
+  }
+  var ad = r.added || [];
+  if (ad.length) {
+    html += '<h3>Neu (' + ad.length + ')</h3>';
+    var lim = pv.showAll ? ad.length : Math.min(ad.length, 50);
+    for (var k = 0; k < lim; k++) {
+      var a = ad[k];
+      html += '<div class="item">' + imgTag(cardImg(a.image, 'low')) + '<div class="info"><div class="t">' + esc(a.title) + '</div>' +
+        '<div class="s">' + esc(a.sub) + (a.newGroup ? ' · neu in der Sammlung' : ' · mehr Exemplare') + '</div></div>' +
+        '<div class="ctl"><span class="cnt">+' + esc(a.qty) + '</span></div></div>';
+    }
+    if (lim < ad.length) html += '<div class="actions"><button class="btn" onclick="impPvShowAll()">Alle ' + ad.length + ' zeigen</button></div>';
+  }
+  var de = r.decreased || [];
+  if (de.length) {
+    html += '<h3>Weniger (Abgleich) (' + de.length + ')</h3><div class="hint">Stehen in deiner Tabelle nicht mehr oder seltener drin.</div>';
+    de.forEach(function (x) {
+      html += '<div class="item"><div class="info"><div class="t">' + esc(x.title) + '</div><div class="s">' + esc(x.sub) +
+        (x.fromImport != null && x.fromImport !== '' ? ' · aus Import ' + esc(x.fromImport) : '') + '</div></div>' +
+        '<div class="ctl"><span class="cnt">−' + esc(x.qty) + '</span></div></div>';
+    });
+  }
+  var sk = r.skipped || [];
+  if (sk.length) {
+    html += '<h3>Übersprungen (' + sk.length + ')</h3>';
+    sk.forEach(function (x) {
+      html += '<div class="erow"><div class="einfo">' + esc(x.title) + '<div class="x">' + esc(x.reason) + '</div></div></div>';
+    });
+  }
+  html += '<div class="actions"><button class="btn" onclick="impDiscard(\'preview\')">Abbrechen</button>' +
+    '<button class="btn primary" onclick="impCommit()">Importieren</button></div><div id="impAct"></div>' +
+    '<button class="imp-link" onclick="impPvLater()">Später weitermachen</button>';
+  $('impMain').innerHTML = html;
+}
+
+/** Zur Übersicht, ohne etwas zu verwerfen: der Entwurf bleibt, das Banner führt zurück in die Vorschau */
+function impPvLater() {
+  if (impBusy) return;
+  impLoadStart('Der Import bleibt in Arbeit. Mit „Weitermachen“ geht es später weiter.');
+}
+
+function impPvHand(k, v) {
+  var h = impS.pv && (impS.pv.res.handMatch || [])[k];
+  if (!h) return;
+  impS.pv.hand[h.fp] = v === 'extra' ? 'extra' : 'same';
+  impPvRecount();
+}
+
+function impPvRemoved(k, on) {
+  var x = impS.pv && (impS.pv.res.removedByYou || [])[k];
+  if (!x) return;
+  impS.pv.removed[x.fp] = !!on;
+  impPvRecount();
+}
+
+function impPvShowAll() { if (impS.pv && !impBusy) { impS.pv.showAll = true; impRenderPreview(); } }
+
+/** importCommit mit den Entscheidungen aus der Vorschau; Zahlen rechnet der Server selbst neu */
+function impCommit() {
+  var pv = impS.pv;
+  if (!pv || impBusy) return;
+  var choices = impPvChoices();
+  impPvSeq++; // eine noch laufende Neuberechnung der Zahlen zählt nicht mehr
+  impAsk('importCommit', [choices], 'Importiere … das kann einen Moment dauern.', function (res) {
+    res = res || {};
+    loadUiConfig();
+    impLoadStart(res.message || ('Import ' + (res.nr != null ? res.nr + ' ' : '') + 'ist fertig.'));
+  }, function (e) {
+    var t = impErrText(e);
+    // Abgebrochen oder Entwurf verworfen: in der Vorschau geht es nicht weiter, die Liste zeigt „Fortsetzen“
+    if (/unterbrochen|verworfen/i.test(t)) {
+      loadUiConfig();
+      impLoadStart();
+      setMsg('impMsg', esc(t), 'err');
+      return;
+    }
+    impErr(e);
+  });
+}
+
+// ---------- 6. Zurücknehmen ----------
+
+function impOpenUndo(k) {
+  var imp = impS.st && impS.st.imports && impS.st.imports[k];
+  if (!imp || impBusy) return;
+  var nr = imp.nr;
+  var gen = impGo('undo');
+  spinner('impMain', 'Prüfe, was beim Zurücknehmen passiert …');
+  call('importUndoPreview', nr).then(function (res) {
+    if (gen !== impGen) return;
+    impS.ud = { nr: nr, res: res || {}, dec: {} };
+    impRenderUndo();
+  }, function (e) {
+    if (gen !== impGen) return;
+    impLoadFailed(e, '');
+  });
+}
+
+/** "70 Einträge werden gelöscht, 5 auf den alten Stand gesetzt, 2 von Hand geänderte zur Entscheidung." */
+function impUndoText(c, nChanged) {
+  var l = impN(c.loeschen), z = impN(c.zurueck), f = impN(c.fehlt), b = impN(c.bleiben), parts = [];
+  if (l) parts.push(l === 1 ? '1 Eintrag wird gelöscht' : l + ' Einträge werden gelöscht');
+  if (z) parts.push(z + (l ? '' : (z === 1 ? ' wird' : ' werden')) + ' auf den alten Stand gesetzt');
+  if (nChanged) parts.push(nChanged === 1 ? '1 von Hand geänderter zur Entscheidung' : nChanged + ' von Hand geänderte zur Entscheidung');
+  if (b) parts.push(b === 1 ? '1 Exemplar, das du von Hand dazugezählt hast, bleibt' : b + ' Exemplare, die du von Hand dazugezählt hast, bleiben');
+  if (f) parts.push(f === 1 ? '1 Eintrag ist schon nicht mehr da' : f + ' Einträge sind schon nicht mehr da');
+  return parts.length ? parts.join(', ') + '.' : 'Es gibt nichts mehr zu löschen. Der Import wird nur als zurückgenommen vermerkt.';
+}
+
+function impUdItemText(t) {
+  if (t && typeof t === 'object') return String(t.term || t.name || t.text || JSON.stringify(t));
+  return String(t == null ? '' : t);
+}
+
+function impRenderUndo() {
+  var ud = impS.ud, r = ud.res, ch = r.changed || [];
+  var html = '<h2>Import ' + esc(r.nr != null ? r.nr : ud.nr) + ' zurücknehmen</h2>' +
+    (r.sourceName ? '<div class="imp-sub">' + esc(r.sourceName) + '</div>' : '') +
+    '<div class="box"><div id="impUdText">' + esc(impUndoText(r.counts || {}, ch.length)) + '</div>' +
+    '<div class="hint">Was du von Hand hinzugefügt hast, bleibt immer. Begriffe, Set-Zuordnungen und Vorlagen bleiben auch.</div></div>';
+  var later = r.laterSameSource || [];
+  if (later.length) {
+    html += '<div class="notes">Spätere Importe derselben Tabelle (' + later.map(function (n) { return 'Nr. ' + esc(n); }).join(', ') +
+      ') bleiben, wie sie sind.</div>';
+  }
+  if ((r.newTerms || []).length) html += '<div class="notes">Bleiben erhalten: ' + r.newTerms.map(function (t) { return esc(impUdItemText(t)); }).join(', ') + '</div>';
+  if (ch.length) {
+    html += '<h3>Von Hand geändert (' + ch.length + ')</h3><div class="hint">Diese Exemplare hast du nach dem Import geändert. Entscheide bei jedem, ob es bleibt.</div>';
+    ch.forEach(function (x, k) {
+      var d = ud.dec[x.eid];
+      html += '<div class="box"><div><b>' + esc(x.title) + '</b></div><div class="imp-sub">' + esc(x.sub) +
+        (x.count != null ? ' · ' + esc(x.count) + ' Stück' : '') + '</div>' +
+        ((x.changes || []).length ? '<div class="hint">Geändert: ' + x.changes.map(esc).join(', ') + '</div>' : '') +
+        '<div class="row"><label class="imp-opt"><input type="radio" name="impUd' + k + '" id="impUdK' + k + '" value="keep"' + (d === 'keep' ? ' checked' : '') +
+        ' onchange="impUdPick(' + k + ',this.value)"><span>Behalten</span></label>' +
+        '<label class="imp-opt"><input type="radio" name="impUd' + k + '" id="impUdR' + k + '" value="remove"' + (d === 'remove' ? ' checked' : '') +
+        ' onchange="impUdPick(' + k + ',this.value)"><span>Entfernen</span></label></div></div>';
+    });
+  }
+  html += '<div class="hint" id="impUdHint">' + esc(impUdHint()) + '</div>' +
+    '<div class="actions"><button class="btn" onclick="impUdCancel()">Abbrechen</button>' +
+    '<button class="btn primary" id="impUdGo" onclick="impUndo()"' + (impUdReady() ? '' : ' disabled') + '>Zurücknehmen</button></div><div id="impAct"></div>';
+  $('impMain').innerHTML = html;
+}
+
+function impUdReady() {
+  var ud = impS.ud;
+  return !!ud && (ud.res.changed || []).every(function (x) { return ud.dec[x.eid] === 'keep' || ud.dec[x.eid] === 'remove'; });
+}
+
+function impUdHint() {
+  var ud = impS.ud, n = (ud.res.changed || []).filter(function (x) { return !ud.dec[x.eid]; }).length;
+  return n ? 'Noch ' + n + ' zu entscheiden, dann kannst du zurücknehmen.' : '';
+}
+
+function impUdPick(k, v) {
+  var ud = impS.ud, x = ud && (ud.res.changed || [])[k];
+  if (!x || impBusy) return;
+  ud.dec[x.eid] = v === 'remove' ? 'remove' : 'keep';
+  if ($('impUdGo')) $('impUdGo').disabled = !impUdReady();
+  if ($('impUdHint')) $('impUdHint').textContent = impUdHint();
+}
+
+function impUdCancel() { if (!impBusy) impLoadStart(); }
+
+function impUndo() {
+  var ud = impS.ud;
+  if (!ud || impBusy || !impUdReady()) return;
+  var decisions = {};
+  (ud.res.changed || []).forEach(function (x) { decisions[x.eid] = ud.dec[x.eid]; });
+  impAsk('importUndo', [ud.nr, decisions], 'Nehme Import ' + ud.nr + ' zurück …', function (res) {
+    res = res || {};
+    loadUiConfig();
+    impLoadStart(res.message || ('Import ' + ud.nr + ' ist zurückgenommen.'));
+  });
+}
+</script>
