@@ -4,6 +4,17 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.0.2",
+      "tag": "v1.0.2",
+      "date": "2026-10-22",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "„Neue Version holen“ legt pro Version nur noch eine neue Tabelle an, auch bei Doppelklick oder zwei offenen Fenstern",
+        "Wurde die neue Tabelle gelöscht, lässt sie sich wieder anlegen"
+      ]
+    },
+    {
       "version": "1.0.1",
       "tag": "v1.0.1",
       "date": "2026-10-22",

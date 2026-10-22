@@ -1399,7 +1399,7 @@ function updRender() {
       h += '<div class="hint">Die neue Version holst du am Computer: Tabelle öffnen, dann Pokémon > Updates > Nach Updates suchen.</div>';
     } else if (i.newCopy) {
       h += '<div class="notes">Die neue Tabelle für Version ' + esc(i.newCopy.version) + ' ist schon angelegt. So geht es weiter:</div>' + updSteps(i.newCopy.url) +
-        '<div class="actions"><button class="btn" type="button" id="updGo" onclick="updCopy()">Noch einmal anlegen</button></div>';
+        '<div class="hint">Hast du sie gelöscht (Papierkorb), kannst du hier danach eine neue anlegen.</div>';
     } else if (i.templateUrl) {
       if (i.copyVersion && i.copyVersion !== i.available) {
         h += '<div class="hint">Für Version ' + esc(i.available) + ' gibt es noch keine Vorlage zum Kopieren. „Neue Version holen“ legt Version ' + esc(i.copyVersion) + ' an.</div>';

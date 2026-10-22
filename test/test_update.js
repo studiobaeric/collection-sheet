@@ -95,6 +95,7 @@ function openWith(book, srcDir, W) {
   return env;
 }
 
+const updSheetIdOf = url => (String(url).match(/\/d\/([\w-]+)/) || [])[1];
 const settingOf = (book, key) => {
   const sh = book.getSheetByName('Tool-Einstellungen');
   if (!sh) return undefined;
@@ -264,7 +265,12 @@ t.section('getUpdateInfo');
   env.ctx.settingsSetMany_({ NEW_COPY_URL: 'https://docs.google.com/spreadsheets/d/NEUNEUNEUNEUNEUNEUNEUNEU/edit', NEW_COPY_VERSION: '1.0.5' });
   t.ok('angelegte Kopie einer anderen Version zählt nicht', env.uiCall('getUpdateInfo', false).newCopy === null);
   env.ctx.settingSet_('NEW_COPY_VERSION', '1.1.0');
+  t.ok('angelegte Kopie, die es in Drive nicht (mehr) gibt, zählt nicht', env.uiCall('getUpdateInfo', false).newCopy === null);
+  env.driveFiles.NEUNEUNEUNEUNEUNEUNEUNEU = { name: 'Neu', mime: 'application/vnd.google-apps.spreadsheet', trashed: false };
   t.eq('angelegte Kopie dieser Version', env.uiCall('getUpdateInfo', false).newCopy, { url: 'https://docs.google.com/spreadsheets/d/NEUNEUNEUNEUNEUNEUNEUNEU/edit', version: '1.1.0' });
+  env.driveFiles.NEUNEUNEUNEUNEUNEUNEUNEU.trashed = true;
+  t.ok('angelegte Kopie im Papierkorb zählt nicht', env.uiCall('getUpdateInfo', false).newCopy === null);
+  env.driveFiles.NEUNEUNEUNEUNEUNEUNEUNEU.trashed = false;
   env.ctx.settingSet_('TAKE_FROM', 'https://docs.google.com/spreadsheets/d/' + OLD_ID + '/edit');
   t.eq('ausstehende Übernahme', env.uiCall('getUpdateInfo', false).pendingTake, 'https://docs.google.com/spreadsheets/d/' + OLD_ID + '/edit');
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
@@ -312,6 +318,9 @@ t.section('Neue Version holen: Kopie der Vorlage, Übernahme, alte Tabelle');
     !old.setting('TAKEN_OVER_BY') && old.triggers.length === 2);
   const info = old.uiCall('getUpdateInfo', false);
   t.ok('alte Tabelle: Info nennt die angelegte Kopie', info.newCopy && info.newCopy.url === r.url && info.available === '1.1.0', info);
+  const r2 = old.uiCall('updateCopy');
+  t.ok('zweites Holen: keine zweite Tabelle, Link der ersten', r2.state === 'copied' && r2.existing === true && r2.url === r.url &&
+    old.backups.length === 1 && /gibt es schon/.test(r2.message) && old.lock.depth === 0, r2);
 
   // die neue Tabelle mit ihrem eigenen (neuen) Code öffnen
   const neu = openWith(copy, dir, W);
@@ -413,6 +422,12 @@ t.section('Neue Version holen: Kopieren scheitert, Vorabversion ohne Vorlage');
   r = env.uiCall('updateCopy');
   t.ok('Vorabversion ohne Vorlage: holt 1.1.0', r.state === 'copied' && r.version === '1.1.0', r);
   t.eq('Info: angelegte Kopie zählt für 1.1.0', env.uiCall('getUpdateInfo', false).newCopy, { url: r.url, version: '1.1.0' });
+  const nCopies = env.backups.length;
+  const again = env.uiCall('updateCopy');
+  t.ok('noch einmal holen: dieselbe Tabelle, keine neue', again.existing === true && again.url === r.url && env.backups.length === nCopies, again);
+  env.driveFiles[updSheetIdOf(r.url)].trashed = true;
+  const fresh = env.uiCall('updateCopy');
+  t.ok('erste Kopie im Papierkorb: eine neue', fresh.state === 'copied' && !fresh.existing && fresh.url !== r.url && env.backups.length === nCopies + 1, fresh);
   W.templateUrl = '';
   r = env.uiCall('updateCopy');
   t.ok('gar keine Vorlage: notemplate für die neueste Version', r.state === 'notemplate' && r.version === '1.2.0-beta.1', r);

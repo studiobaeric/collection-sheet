@@ -28,7 +28,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.0.1';
+const TOOL_VERSION = '1.0.2';
 
 const SHEETS = {
   view: 'Sammlung',
