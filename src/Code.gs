@@ -939,13 +939,11 @@ function ensureSchema_() {
  */
 function migrateSchema_() {
   const ss = ss_();
-  return withLock_(function () {
+  withLock_(function () {
     let sh = ss.getSheetByName(SHEETS.data);
-    let msg;
     let migrated = false;
     if (!sh) {
       setupDataSheet_(ss);
-      msg = 'Datenblatt angelegt.';
     } else {
       const lastCol = Math.min(sh.getLastColumn(), sh.getMaxColumns());
       const head = lastCol ? sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h == null ? '' : h).trim(); }) : [];
@@ -955,7 +953,6 @@ function migrateSchema_() {
           ensureCols_(sh, NCOL);
           writeHeaders_(sh, DATA_HEADERS);
         }
-        msg = 'Datenblatt ist aktuell.';
       } else {
         // alte Spalten hinter den 23 festen (falls jemand welche angelegt hat) werden zu Zusatzspalten
         const oldExtras = [];
@@ -981,16 +978,14 @@ function migrateSchema_() {
         sh.getRange(1, 1, 1, Math.max(headers.length, lastCol)).clearContent();
         writeHeaders_(sh, headers);
         applyDataFormats_(sh);
-        msg = rows.length + ' Einträge auf das neue Datenformat umgestellt.';
         migrated = true;
       }
     }
     settingSet_('SCHEMA_VERSION', SCHEMA_VERSION);
     rebuildGroups_();
-    // Die alte Ansichtsformel las Daten!A2:W. Wird zum ersten Mal umgestellt (z. B. weil die Seitenleiste vor
-    // der Einrichtung geöffnet wurde), gleich auf die neue Formel mit Gruppen wechseln. Suchfelder bleiben.
+    // Die alte Ansichtsformel las Daten!A2:W. Wird zum ersten Mal umgestellt (beim ersten Öffnen nach dem Einfügen
+    // neuen Codes), gleich auf die neue Formel mit Gruppen wechseln. Suchfelder bleiben.
     if (migrated && ss.getSheetByName(SHEETS.view)) setupViewSheet_(ss, true);
-    return msg;
   });
 }
 
@@ -1115,7 +1110,7 @@ const SETTINGS_HEADERS = ['Schlüssel', 'Wert'];
 const SETTING_SHEET_ID = 'Tabellen-ID';
 /** Gelten nur für genau diese Tabelle. In einer Kopie lesen sie sich leer und werden beim ersten Schreiben gelöscht. */
 const SETTINGS_LOCAL = ['WEBAPP_URL', 'NEW_COPY_URL', 'NEW_COPY_VERSION', 'TAKE_FROM', 'TAKE_RUN',
-  'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT'];
+  'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT', 'NIGHTLY_AT'];
 /** Standen früher in den Skript-Eigenschaften; settingGet_ liest dort weiter, bis sie im Blatt stehen. */
 const SETTINGS_FROM_PROPS = ['SCHEMA_VERSION', 'WEBAPP_URL', 'VIEW_EXTRAS'];
 /** Auslöser des Tools. Die Namen bleiben über alle Versionen gleich, sonst laufen alte Auslöser ins Leere. */
@@ -1532,9 +1527,8 @@ function setupAll_() {
   const prevId = props.getProperty('SPREADSHEET_ID') || ''; // nennt sie eine andere Tabelle, ist das hier eine Kopie
   props.setProperty('SPREADSHEET_ID', ss.getId());
   if (settingsAll_().copy) adoptCopy_();
-  let migMsg = '';
   try {
-    migMsg = migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
+    migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
   } catch (e) {
     alert_('Das Datenblatt konnte nicht auf das neue Format umgestellt werden (' + e.message + '). Es wurde nichts geändert.');
     return '';
@@ -1543,7 +1537,7 @@ function setupAll_() {
   setupSheets_(ss, false);
   setupTriggers_();
   settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm') });
-  let msg = 'Einrichtung fertig.' + (migMsg && /^[1-9]\d* Einträge .*umgestellt/.test(migMsg) ? ' ' + migMsg : '');
+  let msg = 'Einrichtung fertig.';
   try {
     msg += ' ' + buildTranslationAndSets_();
   } catch (e) {
@@ -1576,18 +1570,22 @@ function setupSheets_(ss, keepControls) {
  * (ohne tcgdex-Abruf, Suchfelder bleiben) und einen fehlenden nächtlichen Preislauf wieder anlegen.
  */
 function repairSetup_() {
-  const ss = ss_();
-  const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('SPREADSHEET_ID') !== ss.getId()) props.setProperty('SPREADSHEET_ID', ss.getId());
-  const missing = missingToolSheets_();
-  if (missing.length) {
-    notify_('Lege fehlende Blätter wieder an: ' + missing.join(', ') + ' …');
-    ensureSchema_();
-    setupSheets_(ss, true);
-  }
-  if (nightlyTriggerMissing_()) {
-    setupTriggers_();
-    notify_('Der nächtliche Preislauf fehlte und ist wieder eingerichtet.');
+  try {
+    const ss = ss_();
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty('SPREADSHEET_ID') !== ss.getId()) props.setProperty('SPREADSHEET_ID', ss.getId());
+    const missing = missingToolSheets_();
+    if (missing.length) {
+      notify_('Lege fehlende Blätter wieder an: ' + missing.join(', ') + ' …');
+      ensureSchema_();
+      setupSheets_(ss, true);
+    }
+    if (triggersMissing_()) {
+      setupTriggers_();
+      notify_('Die Auslöser für den nächtlichen Preislauf und für Änderungen im Blatt Daten sind wieder eingerichtet.');
+    }
+  } catch (e) {
+    notify_('Reparatur ging nicht: ' + e.message); // die Seitenleiste öffnet trotzdem
   }
 }
 
@@ -1603,19 +1601,28 @@ function missingToolSheets_() {
 }
 
 /**
- * Fehlt der nächtliche Preislauf? Auslöser gehören dem Konto, das sie angelegt hat, und jedes Konto sieht nur seine
- * eigenen. Damit ein zweites Konto mit Zugriff auf die Tabelle keinen doppelten Preislauf anlegt, fehlt er erst, wenn
- * die Einrichtung älter als drei Tage ist und seit drei Tagen kein Preislauf im Verlauf steht.
+ * Fehlen die Auslöser? Sie gehören dem Konto, das sie angelegt hat, und jedes Konto sieht nur seine eigenen. Hat dieses
+ * Konto den nächtlichen Preislauf, fehlt höchstens der Auslöser „bei Änderung“. Sonst fehlt der Preislauf erst, wenn die
+ * Tabelle Karten hat und es seit drei Tagen weder eine Einrichtung noch einen Preislauf gab (Stempel NIGHTLY_AT oder ein
+ * Tag im Verlauf). So legt ein zweites Konto mit Zugriff keinen doppelten Preislauf an, und die Vorlage bleibt ohne.
  */
-function nightlyTriggerMissing_() {
-  if (ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'naechtlicherPreislauf'; })) return false;
+function triggersMissing_() {
+  const own = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+  if (own.indexOf('naechtlicherPreislauf') >= 0) return own.indexOf('beiStrukturAenderung') < 0;
   const since = Date.now() - 3 * 24 * 3600 * 1000;
-  const m = /^(\d{2})\.(\d{2})\.(\d{4})/.exec(settingGet_('SETUP_AT')); // 'dd.MM.yyyy HH:mm' oder 'vor 1.0'
-  if (m && new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime() > since) return false;
+  if (dayStampTime_(settingGet_('SETUP_AT')) > since || dayStampTime_(settingGet_('NIGHTLY_AT')) > since) return false;
+  const data = ss_().getSheetByName(SHEETS.data);
+  if (!data || data.getLastRow() < 2) return false;
   const sh = ss_().getSheetByName(SHEETS.hist);
   const last = sh ? sh.getLastRow() : 0;
   const dates = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
   return !dates.some(function (r) { return r[0] instanceof Date && r[0].getTime() > since; });
+}
+
+/** Zeitpunkt eines Stempels 'dd.MM.yyyy HH:mm' (Tag genügt), sonst 0 (leer oder 'vor 1.0'). */
+function dayStampTime_(text) {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})/.exec(String(text || ''));
+  return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime() : 0;
 }
 
 /** Baut Gruppen und die Blätter Sammlung und Pokédex neu auf (keine API-Abrufe, Daten bleiben). */
@@ -3179,6 +3186,8 @@ function translateName_(name) {
 /** Zeit-Trigger (täglich 3–4 Uhr). Schaut danach auch nach einer neuen Version (nur Hinweis, kein Update). */
 function naechtlicherPreislauf() {
   if (takenOverBy_()) { stopTriggers_(); return; }
+  // Lebenszeichen für triggersMissing_: Dieser Auslöser läuft, auch wenn der Preislauf danach scheitert
+  try { settingSet_('NIGHTLY_AT', Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm')); } catch (e) { /* weiter */ }
   startPriceRun_();
   if (typeof checkForUpdate_ === 'function') {
     try { checkForUpdate_(); } catch (e) { /* ohne Netz oder GitHub weiter */ }

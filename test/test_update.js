@@ -545,24 +545,43 @@ t.section('Seitenleiste legt Fehlendes wieder an (statt Menüpunkt Einrichtung)'
   c.kartenErfassen();
   t.eq('ohne Auslöser, aber heute eingerichtet: nichts anlegen', env.triggers.length, 0);
   c.settingSet_('SETUP_AT', dmy(daysAgo(10)));
+  c.kartenErfassen();
+  t.eq('ohne Karten (wie die Vorlage): kein Preislauf', env.triggers.length, 0);
+  env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
+  env.triggers = [];
   env.sheet('Verlauf').getRange(2, 1, 1, 5).setValues([[daysAgo(1), 10, 1, 0, 0]]);
   c.kartenErfassen();
   t.eq('Preislauf von gestern im Verlauf: nichts anlegen', env.triggers.length, 0);
   env.sheet('Verlauf').getRange(2, 1).setValue(daysAgo(5));
+  c.settingSet_('NIGHTLY_AT', dmy(daysAgo(1)));
+  c.kartenErfassen();
+  t.eq('Auslöser eines anderen Kontos lief gestern (Stempel): nichts anlegen', env.triggers.length, 0);
+  c.settingSet_('NIGHTLY_AT', dmy(daysAgo(5)));
   c.kartenErfassen();
   t.eq('seit drei Tagen kein Preislauf: Auslöser wieder da', env.triggers.map(x => x.fn).sort(), ['beiStrukturAenderung', 'naechtlicherPreislauf']);
-  t.ok('Hinweis zum Preislauf', /Preislauf fehlte/.test(env.ss.toasts.slice(-1)[0]), env.ss.toasts.slice(-1));
+  t.ok('Hinweis zu den Auslösern', /Auslöser .* wieder eingerichtet/.test(env.ss.toasts.slice(-1)[0]), env.ss.toasts.slice(-1));
   c.kartenErfassen();
-  t.eq('vorhandener Auslöser: nicht doppelt', env.triggers.length, 2);
+  t.eq('vorhandene Auslöser: nicht doppelt', env.triggers.length, 2);
+  env.triggers = env.triggers.filter(x => x.fn === 'naechtlicherPreislauf');
+  c.kartenErfassen();
+  t.eq('eigener Preislauf ohne Auslöser bei Änderung: beide wieder da', env.triggers.map(x => x.fn).sort(), ['beiStrukturAenderung', 'naechtlicherPreislauf']);
   env.triggers = [];
   c.settingSet_('SETUP_AT', 'vor 1.0');
   c.kartenErfassen();
   t.eq('vor 1.0 eingerichtet: zählt als alt', env.triggers.length, 2);
+  c.naechtlicherPreislauf();
+  t.ok('nächtlicher Preislauf setzt seinen Stempel', c.dayStampTime_(env.setting('NIGHTLY_AT')) > daysAgo(1).getTime(), env.setting('NIGHTLY_AT'));
+  t.ok('Stempel gilt nur in dieser Tabelle', env.run('SETTINGS_LOCAL').indexOf('NIGHTLY_AT') >= 0);
 
   delete env.props.SPREADSHEET_ID;
   c.kartenErfassen();
   t.eq('Tabellen-ID für Web-App und Auslöser wieder gespeichert', env.props.SPREADSHEET_ID, env.ss.getId());
   t.eq('keine Meldungsfenster', env.ui.alerts, []);
+  env.run("triggersMissing_ = function () { throw new Error('kaputt'); }");
+  const before = env.ui.sidebars.length;
+  c.kartenErfassen();
+  t.ok('Fehler in der Reparatur: Hinweis, Seitenleiste öffnet trotzdem', env.ui.sidebars.length === before + 1 &&
+    /Reparatur ging nicht: kaputt/.test(env.ss.toasts.slice(-1)[0]), env.ss.toasts.slice(-1));
 }
 
 // ---------------------------------------------------------------------------
