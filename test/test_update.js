@@ -395,6 +395,47 @@ t.section('Neue Version holen: Fehlerfälle');
 }
 
 // ---------------------------------------------------------------------------
+t.section('Neue Version holen: Name und Meldung nach der Version in der Vorlage');
+{
+  // Die Liste auf GitHub hinkt hinterher (nennt noch 1.1.0), die Vorlage ist schon auf 1.2.0
+  const W = makeWorld();
+  W.release('1.0.0'); W.release('1.1.0');
+  const env = setupEnv(W);
+  env.ss.name = 'Meine Karten';
+  const { dir } = addTemplate(env, W, '1.2.0');
+  const r = env.uiCall('updateCopy');
+  const copy = env.sources[env.backups[0].id];
+  t.ok('Kopie heißt nach der Version der Vorlage', r.state === 'copied' && r.version === '1.2.0' && r.name === 'Meine Karten (neu, Version 1.2.0)' &&
+    copy.getName() === 'Meine Karten (neu, Version 1.2.0)' && /Version 1\.2\.0 liegt/.test(r.message), r);
+  t.ok('Merker mit der echten Version', env.setting('NEW_COPY_VERSION') === '1.2.0' && env.setting('NEW_COPY_URL') === r.url);
+  t.eq('Info nennt die Kopie mit ihrer Version', env.uiCall('getUpdateInfo', false).newCopy, { url: r.url, version: '1.2.0' });
+  const again = env.uiCall('updateCopy');
+  t.ok('noch einmal: dieselbe Tabelle (1.2.0 reicht für 1.1.0)', again.existing === true && again.url === r.url && again.version === '1.2.0' &&
+    env.backups.length === 1, again);
+  W.release('1.2.0');
+  const later = env.uiCall('updateCopy');
+  t.ok('Liste kennt 1.2.0 jetzt auch: weiter dieselbe Tabelle', later.existing === true && later.url === r.url && env.backups.length === 1, later);
+  W.release('1.3.0');
+  env.cache.clear();
+  t.ok('neuere Version als die Kopie: die Kopie zählt nicht mehr', env.uiCall('getUpdateInfo', true).newCopy === null);
+  t.ok('Sperre frei', env.lock.depth === 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+{
+  // Die Liste kündigt 1.1.0 an, die Vorlage hat noch 1.0.5: keine Kopie
+  const W = makeWorld();
+  W.release('1.0.0'); W.release('1.1.0');
+  const env = setupEnv(W);
+  const { dir } = addTemplate(env, W, '1.0.5');
+  const r = env.uiCall('updateCopy');
+  const made = env.backups[0];
+  t.ok('Vorlage älter als angekündigt: Fehler, Kopie im Papierkorb, kein Merker', r.state === 'error' && /noch nicht fertig/.test(r.message) &&
+    /Version 1\.0\.5/.test(r.message) && !r.templateUrl && made && env.driveFiles[made.id].trashed === true && !env.setting('NEW_COPY_URL'), r);
+  t.ok('Sperre frei', env.lock.depth === 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
 t.section('Neue Version holen: Kopieren scheitert, Vorabversion ohne Vorlage');
 {
   const W = makeWorld();
