@@ -4,6 +4,17 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.0.1",
+      "tag": "v1.0.1",
+      "date": "2026-10-22",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Import: Tabs mit sehr vielen leeren Zeilen (z. B. Kästchen bis ganz unten) führen nicht mehr zu „Fehler aufgrund fehlenden Speichers“",
+        "Die Tab-Auswahl im Import zeigt die echte Zeilenzahl"
+      ]
+    },
+    {
       "version": "1.0.0",
       "tag": "v1.0.0",
       "date": "2026-10-21",
