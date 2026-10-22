@@ -165,8 +165,8 @@ function getUpdateInfo(force) {
     if (target) {
       info.copyVersion = target.version;
       info.templateUrl = updTemplateFor_(ch, target);
-      const url = settingGet_('NEW_COPY_URL');
-      if (url && settingGet_('NEW_COPY_VERSION') === target.version) info.newCopy = { url: url, version: target.version };
+      const url = updExistingCopy_(target.version);
+      if (url) info.newCopy = { url: url, version: target.version };
     }
   }
   return info;
@@ -180,7 +180,8 @@ function setPrereleases(on) {
 
 /**
  * Neue Version holen (nur Seitenleiste): die Vorlage der neuesten erlaubten Version (mit Vorlage) in den Ordner
- * dieser Tabelle kopieren und ihr sagen, woher sie die Daten übernehmen soll. Hier ändert sich nichts außer zwei
+ * dieser Tabelle kopieren und ihr sagen, woher sie die Daten übernehmen soll. Gibt es die Kopie dieser Version schon
+ * (nicht im Papierkorb), kommt ihr Link zurück (existing: true) statt einer zweiten. Hier ändert sich nichts außer zwei
  * Einstellungen. Wirft nie: Fehler kommen als state 'error', mit templateUrl für den Weg von Hand.
  * -> {state: 'copied'|'none'|'notemplate'|'error', message, url, name, version, templateUrl}
  */
@@ -193,6 +194,35 @@ function updateCopy() {
   const rel = updCopyTarget_(ch, newer);
   if (!rel) {
     return { state: 'notemplate', version: newer[0].version, guideUrl: ch.guideUrl, message: 'Für Version ' + newer[0].version + ' gibt es noch keine Vorlage zum Kopieren.' };
+  }
+  // unter der Sperre: ein Doppelklick oder ein zweites Fenster legt keine zweite Tabelle an
+  try {
+    return withLock_(function () { return updMakeCopy_(ch, rel); });
+  } catch (e) {
+    return { state: 'error', message: e.message };
+  }
+}
+
+/** Die schon angelegte neue Tabelle dieser Version, solange es sie gibt (nicht im Papierkorb). -> Link oder '' */
+function updExistingCopy_(version) {
+  const url = settingGet_('NEW_COPY_URL');
+  if (!url || settingGet_('NEW_COPY_VERSION') !== version) return '';
+  try {
+    return DriveApp.getFileById(updSheetId_(url)).isTrashed() ? '' : url;
+  } catch (e) {
+    return '';
+  }
+}
+
+/** Teil von updateCopy unter der Sperre: die angelegte Tabelle nennen oder die Vorlage kopieren. */
+function updMakeCopy_(ch, rel) {
+  settingsCache_ = null; // eine andere Ausführung kann gerade eine Kopie angelegt haben
+  const existing = updExistingCopy_(rel.version);
+  if (existing) {
+    return {
+      state: 'copied', existing: true, version: rel.version, url: existing, name: '',
+      message: 'Die neue Tabelle mit Version ' + rel.version + ' gibt es schon. Öffne sie und übernimm dort deine Daten.'
+    };
   }
   const templateUrl = updTemplateFor_(ch, rel);
   const fail = function (text) { return { state: 'error', version: rel.version, templateUrl: templateUrl, message: text + ' Du kannst die Vorlage auch selbst kopieren.' }; };

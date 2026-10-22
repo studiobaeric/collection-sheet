@@ -1014,8 +1014,8 @@ function boot(mode, opts) {
       /Karten erfassen/.test(m.textContent) && /Jetzt übernehmen/.test(m.textContent) && /Neue Bereitstellung/.test(m.textContent) && !E.btn($('updInfo'), 'Neue Version holen').disabled);
     ok('danach: getUpdateInfo neu', E.calls('getUpdateInfo').length === 1);
     await E.respond('getUpdateInfo');
-    ok('Bereich: Kopie schon angelegt, Link, Noch einmal anlegen', /schon angelegt/.test($('updInfo').textContent) &&
-      $('updInfo').querySelector('a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]') && !!E.btn($('updInfo'), 'Noch einmal anlegen') && !E.btn($('updInfo'), 'Neue Version holen'));
+    ok('Bereich: Kopie schon angelegt, Link, kein Knopf für eine zweite', /schon angelegt/.test($('updInfo').textContent) && /Papierkorb/.test($('updInfo').textContent) &&
+      $('updInfo').querySelector('a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]') && !E.btn($('updInfo'), 'Noch einmal anlegen') && !E.btn($('updInfo'), 'Neue Version holen'));
     ok('Schritte und Link nur einmal, Meldung bleibt', E.doc.querySelectorAll('#paneUpd ol.rel').length === 1 &&
       E.doc.querySelectorAll('#paneUpd a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]').length === 1 && /liegt im selben Ordner/.test($('updMsg').textContent));
     // Zustände
@@ -1029,7 +1029,7 @@ function boot(mode, opts) {
       [{ state: 'error', message: '<img src=x onerror="window.__xss=9">kaputt' }, m => m.querySelector('.msg.err') && !m.querySelector('img') && /kaputt/.test(m.textContent)]
     ];
     for (const [value, check] of states) {
-      E.click(E.btn($('updInfo'), 'Noch einmal anlegen'));
+      E.win.updCopy();
       await E.respond('updateCopy', { value });
       ok('Zustand ' + value.state + ' ' + (value.templateUrl ? 'mit Vorlage' : ''), !!check($('updMsg')), $('updMsg').innerHTML);
       if (value.state === 'none' || value.state === 'notemplate') {
@@ -1038,9 +1038,9 @@ function boot(mode, opts) {
         ok('Zustand ' + value.state + ': Meldung bleibt, solange der Bereich noch anderes zeigt', !!check($('updMsg')));
       }
     }
-    E.click(E.btn($('updInfo'), 'Noch einmal anlegen'));
+    E.win.updCopy();
     await E.respond('updateCopy', { error: 'Das Sheet ist gerade beschäftigt.' });
-    ok('Serverfehler: Meldung, Knöpfe frei', /beschäftigt/.test($('updMsg').textContent) && !E.btn($('updInfo'), 'Noch einmal anlegen').disabled);
+    ok('Serverfehler: Meldung, Knöpfe frei', /beschäftigt/.test($('updMsg').textContent) && !E.btn($('updInfo'), 'Nach Updates suchen').disabled);
     // Vorabversionen
     E.click($('updPre'));
     ok('Vorabversionen: setPrereleases(true)', J(E.calls('setPrereleases')[0].args) === J([true]));
