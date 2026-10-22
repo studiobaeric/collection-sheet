@@ -11,13 +11,13 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
 
    Die Version steht außerdem oben in jeder Script- und HTML-Datei (Kopfkommentar „Pokémon-Sammlung · Version …“). Den schreibt Schritt 3 selbst; nur die Köpfe nachziehen: `node tools/release.js --stamp`.
 2. `SCHEMA_VERSION` nur erhöhen, wenn sich das Format des Blatts „Daten“ ändert (mit Umstellung in `migrateSchema_`). Die Übernahme stellt alte Daten dann selbst um. Eine ältere Version kann eine Tabelle mit neuerem Datenformat nicht übernehmen.
-3. Den Kanal schreiben:
+3. In [`CHANGELOG.md`](../CHANGELOG.md) oben einen Abschnitt `## [1.1.0]` anlegen (ohne Datum) und darunter je Neuerung einen Punkt `- …`: eine Zeile, aus Sicht der Nutzer, einfacher Text ohne Markdown, ohne Punkt am Ende. Das sind die Release-Notizen. Dann den Kanal schreiben:
 
    ```sh
-   node tools/release.js --notes "Was ist neu, Punkt 1" --notes "Punkt 2"
+   node tools/release.js
    ```
 
-   Eine Version mit Bindestrich (`1.1.0-beta.1`) wird automatisch als Vorabversion eingetragen, `--prerelease` und `--final` legen es ausdrücklich fest. Eine Vorabversion braucht ihre eigene Vorlage: `--template https://docs.google.com/spreadsheets/d/<ID>/copy`. Für die erste Vorabversion gibt es die noch nicht: zuerst anlegen (Abschnitt „Die Vorlage“, Schritte 1 bis 3) oder den Befehl danach mit `--template` wiederholen. Ruft man das Werkzeug für dieselbe Version noch einmal auf, bleiben Notizen, Datum, Vorabversion und Vorlage. `npm test` und `node tools/release.js --check` melden, wenn der Kanal oder ein Kopfkommentar nicht zur Version im Code passt (Exit 1). Fehlt für die Version eine Vorlage, gibt `--check` nur einen Hinweis aus: Dann zeigen die Tabellen „Neue Version holen“ nicht.
+   Das Werkzeug trägt das Datum in `CHANGELOG.md` ein (heute, mit `--date 2026-10-21` ein anderes), schreibt die Punkte nach `releases/channel.json`, gleicht dort Notizen und Datum der älteren Versionen mit `CHANGELOG.md` ab und setzt die Version oben in die Script- und HTML-Dateien. Eine Version mit Bindestrich (`1.1.0-beta.1`) wird automatisch als Vorabversion eingetragen, `--prerelease` und `--final` legen es ausdrücklich fest. Eine Vorabversion braucht ihre eigene Vorlage: `--template https://docs.google.com/spreadsheets/d/<ID>/copy`. Für die erste Vorabversion gibt es die noch nicht: zuerst anlegen (Abschnitt „Die Vorlage“, Schritte 1 bis 3) oder den Befehl danach mit `--template` wiederholen. Ruft man das Werkzeug für dieselbe Version noch einmal auf, bleiben Datum, Vorabversion und Vorlage; die Notizen kommen immer aus `CHANGELOG.md`. Eine Notiz ändern: in `CHANGELOG.md` ändern und das Werkzeug noch einmal laufen lassen. `npm test` und `node tools/release.js --check` melden, wenn der Kanal, `CHANGELOG.md` oder ein Kopfkommentar nicht zur Version im Code passt (Exit 1). Fehlt für die Version eine Vorlage, gibt `--check` nur einen Hinweis aus: Dann zeigen die Tabellen „Neue Version holen“ nicht.
 4. `npm test` muss grün sein (erst nach Schritt 3: Ein Test prüft, dass der Kanal zur Version passt).
 5. Committen, pushen, Pull Request, Tests grün, Review.
 6. **Vor dem Mergen** die Vorlage auf die neue Version bringen (Abschnitt „Die Vorlage“), mit dem Code aus dem Ordner `src` des Pull-Request-Branchs: Der Tag entsteht erst nach dem Mergen. Bei einer Vorabversion nur ihre eigene Vorlage (die bei `--template`), die Hauptvorlage bekommt nur fertige Versionen. Sobald `channel.json` auf `main` steht, sehen alle Tabellen die Version und kopieren die Vorlage.
@@ -30,11 +30,12 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
    git push origin v1.1.0
    ```
 
-   Auf GitHub kann man aus dem Tag zusätzlich einen Release mit den Notizen machen.
+   Den GitHub-Release legt dann der Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) an, mit den Punkten aus `CHANGELOG.md` und einem Hinweis, wie man aktualisiert. Er heißt wie der Tag, einen eigenen Namen kannst du danach auf GitHub setzen. Legst du den Release lieber selbst auf GitHub an (mit neuem Tag oder zu einem vorhandenen), setzt der Workflow beim Veröffentlichen die Notizen aus `CHANGELOG.md` ein, der Name bleibt. Die Notizen zum Ansehen: `node tools/release.js --print-notes v1.1.0`.
 8. In einer Testtabelle **Pokémon > Updates > Nach Updates suchen** öffnen: Das fragt sofort bei GitHub nach. **Neue Version holen** ausprobieren und die Übernahme einmal durchspielen. Von selbst merkt eine Tabelle eine neue Version spätestens nach 6 Stunden oder beim nächtlichen Preislauf.
 
 ## Regeln
 
+- Die Release-Notizen stehen nur in `CHANGELOG.md`. `releases/channel.json` schreibt `tools/release.js`, nie von Hand.
 - Einen veröffentlichten Tag nie verschieben. Fehler werden mit einer neuen Version behoben.
 - Eine Version nicht aus `channel.json` löschen, solange Tabellen sie installiert haben.
 - Die Namen der Blätter, die die Übernahme kopiert (`updTakeoverSheets_` in `src/Update.gs`), bleiben gleich, oder die neue Version stellt alte Namen in `takeoverRun` selbst um. Die Übernahme läuft immer mit dem Code der neuen Tabelle.

@@ -957,25 +957,25 @@ t.section('Release-Werkzeug und Kanal im Repo');
   const ch = JSON.parse(fs.readFileSync(path.join(SRC, '..', 'releases', 'channel.json'), 'utf8'));
   const clean = env.ctx.updCleanChannel_(ch);
   t.ok('Kanal: alle Einträge gültig, Repo, Anleitung', clean.releases.length === ch.releases.length && clean.repo === REPO && /#von-hand-aktualisieren$/.test(clean.guideUrl));
-  // erneuter Lauf für dieselbe Version: Notizen, Datum, Vorabversion und Vorlage bleiben
+  // erneuter Lauf für dieselbe Version: Vorabversion und Vorlage bleiben, Notizen und Datum kommen aus CHANGELOG.md
   const entry = R.buildEntry({});
   const tplUrl = 'https://docs.google.com/spreadsheets/d/' + BETA_ID + '/copy';
   const chan = { repo: REPO, releases: [Object.assign({}, entry, { notes: ['alt'], date: '2026-01-02', prerelease: true, templateUrl: tplUrl })] };
-  const n1 = R.nextChannel(chan, R.buildEntry({}), { notes: [] });
-  t.ok('nextChannel: Notizen, Datum, Vorabversion, Vorlage bleiben', n1.entry.notes[0] === 'alt' && n1.entry.date === '2026-01-02' &&
-    n1.entry.prerelease === true && n1.entry.templateUrl === tplUrl && chan.releases.length === 1, n1.entry);
-  const n2 = R.nextChannel(chan, R.buildEntry({ prerelease: false, notes: ['neu'] }), { notes: ['neu'], prerelease: false });
-  t.ok('nextChannel: --final und neue Notizen', n2.entry.prerelease === false && J(n2.entry.notes) === J(['neu']));
-  t.throws('nextChannel: neue Version ohne Notizen', () => R.nextChannel({ releases: [] }, Object.assign(R.buildEntry({}), { version: '9.9.9' }), { notes: [] }), /--notes/);
+  const n1 = R.nextChannel(chan, R.buildEntry({}), {});
+  t.ok('nextChannel: Vorabversion und Vorlage bleiben, Notizen und Datum aus CHANGELOG.md', J(n1.entry.notes) === J(entry.notes) && entry.notes.length > 0 &&
+    n1.entry.date === entry.date && n1.entry.prerelease === true && n1.entry.templateUrl === tplUrl && chan.releases.length === 1, n1.entry);
+  const n2 = R.nextChannel(chan, R.buildEntry({ prerelease: false }), { prerelease: false });
+  t.ok('nextChannel: --final', n2.entry.prerelease === false);
+  t.throws('nextChannel: Version ohne Punkte in CHANGELOG.md', () => R.nextChannel({ releases: [] }, Object.assign(R.buildEntry({}), { version: '9.9.9', notes: [] }), {}), /CHANGELOG\.md/);
   t.throws('--template nur mit Tabellen-Link', () => R.parseArgs(['--template', 'https://example.org/x']), /Google-Tabelle/);
-  t.eq('--template', R.parseArgs(['--template', tplUrl, '--notes', 'x']).template, tplUrl);
+  t.eq('--template', R.parseArgs(['--template', tplUrl]).template, tplUrl);
   const readme = fs.readFileSync(path.join(SRC, '..', 'README.md'), 'utf8');
   t.ok('README hat den Abschnitt „Von Hand aktualisieren“', /^## Von Hand aktualisieren$/m.test(readme));
 
   // check() mit erfundenem Kanal: jede Abweichung wird gemeldet
   const code = read('src/Code.gs');
   const v = entry.version;
-  const base = () => ({ repo: REPO, templateUrl: TEMPLATE_URL, releases: [Object.assign({}, entry, { notes: ['x'], prerelease: false })] });
+  const base = () => ({ repo: REPO, templateUrl: TEMPLATE_URL, releases: [Object.assign({}, entry, { prerelease: false })] });
   const diffOf = mut => { const ch = base(); mut(ch, ch.releases[0]); return R.check(code, ch); };
   t.ok('check: passt', (r => !r.missing && !r.diffs.length && !r.warnings.length)(R.check(code, base())));
   t.ok('check: Version fehlt', R.check(withVersion(code, '9.9.9'), base()).missing === true);
@@ -994,16 +994,47 @@ t.section('Release-Werkzeug und Kanal im Repo');
     R.parseArgs(['--date', '2026-10-22']).date === '2026-10-22' && R.parseArgs(['--main-template', TEMPLATE_URL]).mainTemplate === TEMPLATE_URL);
   t.throws('parseArgs: falsches Datum', () => R.parseArgs(['--date', '22.10.2026']), /JJJJ-MM-TT/);
   t.throws('parseArgs: unbekannte Option', () => R.parseArgs(['--hallo']), /Unbekannte Option/);
-  t.throws('parseArgs: --notes ohne Wert', () => R.parseArgs(['--notes']), /braucht einen Wert/);
-  t.throws('parseArgs: --notes leer', () => R.parseArgs(['--notes', '  ']), /braucht einen Wert/);
-  t.throws('parseArgs: --notes frisst keine Option', () => R.parseArgs(['--notes', '--final']), /braucht einen Wert/);
+  t.throws('parseArgs: --notes gibt es nicht mehr (Notizen in CHANGELOG.md)', () => R.parseArgs(['--notes', 'x']), /CHANGELOG\.md/);
+  t.throws('parseArgs: --date ohne Wert', () => R.parseArgs(['--date']), /braucht einen Wert/);
+  t.throws('parseArgs: --print-notes leer', () => R.parseArgs(['--print-notes', '  ']), /braucht einen Wert/);
+  t.throws('parseArgs: --template frisst keine Option', () => R.parseArgs(['--template', '--final']), /braucht einen Wert/);
   t.throws('parseArgs: --main-template nur Tabellen-Link', () => R.parseArgs(['--main-template', 'https://example.org']), /Google-Tabelle/);
-  const n3 = R.nextChannel({ releases: [Object.assign({}, entry, { notes: ['alt'] })] }, R.buildEntry({ notes: [' '] }), { notes: [' '] });
-  t.ok('nextChannel: leere Notizen ersetzen alte nicht', J(n3.entry.notes) === J(['alt']), n3.entry.notes);
+  // CHANGELOG.md: Quelle der Notizen
+  const clText = read('CHANGELOG.md');
+  const cl = R.parseChangelog(clText);
+  t.eq('CHANGELOG.md: jede Version des Kanals genau einmal, neueste zuerst', cl.map(s => s.version), ch.releases.map(r => r.version));
+  const badNotes = cl.filter(s => !/^\d{4}-\d{2}-\d{2}$/.test(s.date) || !s.notes.length || s.notes.some(n => /[*_`<\[\]]|\.$/.test(n)));
+  t.ok('CHANGELOG.md: jede Version mit Datum und Punkten, einfacher Text ohne Punkt am Ende', !badNotes.length, badNotes);
+  t.eq('parseChangelog: – oder -, ohne Datum, Folgezeilen, ### bleibt im Abschnitt, ## ohne Version beendet ihn', R.parseChangelog([
+    '# Changelog', '- kein Abschnitt', '## [1.2.0]', '', '- Eins', '  weiter', '### Behoben', '- Zwei', '## [1.1.0] - 2026-10-01', '* Drei',
+    '## Sonstiges', '- nicht', ''].join('\n')), [{ version: '1.2.0', date: '', notes: ['Eins weiter', 'Zwei'] }, { version: '1.1.0', date: '2026-10-01', notes: ['Drei'] }]);
+  t.eq('setChangelogDate: nur der Abschnitt der Version', R.parseChangelog(R.setChangelogDate('## [1.2.0]\n- a\n## [1.1.0] – 2026-10-01\n- b\n', '1.2.0', '2026-11-01')).map(s => s.date),
+    ['2026-11-01', '2026-10-01']);
+  const relNotes = R.releaseNotes(clText, 'v' + cl[0].version);
+  t.ok('releaseNotes: Punkte als Markdown-Liste, dazu wie man aktualisiert (auch mit Tag v…)', relNotes.indexOf(cl[0].notes.map(n => '- ' + n).join('\n') + '\n\n') === 0 &&
+    /Neue Version holen/.test(relNotes) && /#von-hand-aktualisieren/.test(relNotes), relNotes);
+  t.throws('releaseNotes: Version ohne Abschnitt', () => R.releaseNotes(clText, '9.9.9'), /keine Punkte/);
+  const chOld = JSON.parse(JSON.stringify(ch));
+  const v1 = chOld.releases[1];
+  v1.notes = ['veraltet'];
+  v1.date = '2000-01-01';
+  const dOld = R.changelogDiffs(chOld, clText);
+  t.ok('changelogDiffs: andere Notizen und anderes Datum gemeldet', dOld.length === 2 && dOld.every(d => d.indexOf(v1.version + ':') === 0), dOld);
+  t.eq('syncChannel: holt Notizen und Datum aus CHANGELOG.md', [R.syncChannel(chOld, clText), J(v1.notes) === J(cl[1].notes), v1.date === cl[1].date, R.changelogDiffs(chOld, clText).length],
+    [[v1.version], true, true, 0]);
+  const dDup = R.changelogDiffs(ch, clText.replace('## [1.0.2]', '## [1.0.1]'));
+  t.ok('changelogDiffs: Abschnitt doppelt oder fehlt', dDup.some(d => /\[1\.0\.1\] doppelt/.test(d)) && dDup.some(d => /kein Abschnitt \[1\.0\.2\]/.test(d)) &&
+    R.changelogDiffs(ch, '').length === ch.releases.length, dDup);
+  t.ok('check: Notizen anders als in CHANGELOG.md', diffOf((c, r) => { r.notes = ['anders']; }).diffs.some(d => /Notizen anders als in CHANGELOG\.md/.test(d)));
+  // Workflow für den GitHub-Release
+  const wf = read('.github/workflows/release.yml');
+  t.ok('Workflow: bei Tags v… und veröffentlichten Releases, Notizen über --print-notes', /tags: \['v\*'\]/.test(wf) && /types: \[published\]/.test(wf) &&
+    /--print-notes "\$GITHUB_REF_NAME"/.test(wf) && /gh release edit/.test(wf) && /gh release create/.test(wf));
   // Kommandozeile: Exit 1 bei Abweichung (in einer Kopie des Repos)
   const cp = require('child_process');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-'));
   ['src', 'tools', 'releases', 'parts'].forEach(d => fs.cpSync(path.join(SRC, '..', d), path.join(tmp, d), { recursive: true }));
+  fs.copyFileSync(path.join(SRC, '..', 'CHANGELOG.md'), path.join(tmp, 'CHANGELOG.md'));
   const cli = args => cp.spawnSync(process.execPath, [path.join(tmp, 'tools', 'release.js')].concat(args), { encoding: 'utf8' });
   t.eq('CLI --check: passt, Exit 0', cli(['--check']).status, 0);
   const upd = path.join(tmp, 'src', 'Update.gs');
@@ -1023,6 +1054,27 @@ t.section('Release-Werkzeug und Kanal im Repo');
   t.ok('CLI --main-template schreibt nur die Hauptvorlage', set.status === 0 && JSON.parse(fs.readFileSync(chPath, 'utf8')).templateUrl === TEMPLATE_URL, set.stdout + set.stderr);
   t.eq('CLI: Fehler in Optionen, Exit 1', cli(['--notes']).status, 1);
   fs.rmSync(tmp, { recursive: true, force: true });
+
+  // Kommandozeile: Release-Lauf für eine neue Version in einer Kopie: Punkte und Datum aus CHANGELOG.md
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'rel2-'));
+  ['src', 'tools', 'releases', 'parts'].forEach(d => fs.cpSync(path.join(SRC, '..', d), path.join(tmp2, d), { recursive: true }));
+  fs.writeFileSync(path.join(tmp2, 'src', 'Code.gs'), withVersion(read('src/Code.gs'), '1.9.0'));
+  fs.writeFileSync(path.join(tmp2, 'CHANGELOG.md'), clText.replace(/\n## \[/, '\n## [1.9.0]\n\n- Etwas Neues\n- Noch etwas\n\n## ['));
+  const cli2 = args => cp.spawnSync(process.execPath, [path.join(tmp2, 'tools', 'release.js')].concat(args), { encoding: 'utf8' });
+  const run = cli2(['--date', '2026-12-24']);
+  const r19 = JSON.parse(fs.readFileSync(path.join(tmp2, 'releases', 'channel.json'), 'utf8')).releases[0];
+  t.ok('CLI Release-Lauf: neuer Eintrag oben im Kanal, Punkte aus CHANGELOG.md', run.status === 0 && r19.version === '1.9.0' &&
+    J(r19.notes) === J(['Etwas Neues', 'Noch etwas']) && r19.date === '2026-12-24', run.stdout + run.stderr);
+  t.ok('CLI Release-Lauf: Datum in CHANGELOG.md eingetragen, Köpfe auf 1.9.0', /^## \[1\.9\.0\] – 2026-12-24$/m.test(fs.readFileSync(path.join(tmp2, 'CHANGELOG.md'), 'utf8')) &&
+    R.HEADER_FILES.every(f => R.headerVersion(fs.readFileSync(path.join(tmp2, f), 'utf8')) === '1.9.0'));
+  t.eq('CLI nach dem Release-Lauf: --check passt', cli2(['--check']).status, 0);
+  const printed = cli2(['--print-notes', 'v1.9.0']);
+  t.ok('CLI --print-notes: Markdown der Version', printed.status === 0 && printed.stdout.indexOf('- Etwas Neues\n- Noch etwas\n\n') === 0, printed.stdout + printed.stderr);
+  fs.writeFileSync(path.join(tmp2, 'src', 'Code.gs'), withVersion(read('src/Code.gs'), '1.9.1'));
+  const noSection = cli2([]);
+  t.ok('CLI Release-Lauf ohne Abschnitt in CHANGELOG.md: Exit 1 mit Hinweis', noSection.status === 1 && /CHANGELOG\.md/.test(noSection.stderr), noSection.stderr);
+  t.eq('CLI --print-notes ohne Abschnitt: Exit 1', cli2(['--print-notes', '1.9.1']).status, 1);
+  fs.rmSync(tmp2, { recursive: true, force: true });
 }
 
 fs.rmSync(BASE_DIR, { recursive: true, force: true });

@@ -30,7 +30,7 @@ Das Dashboard kommt im Look Rot-weiß. Zwei weitere Looks, Dunkel und Hell-neutr
 
 ## Updates
 
-Gibt es eine neue Version, zeigen Seitenleiste und Web-App oben einen Hinweis. Unten in der Seitenleiste führt **Updates** (oder **Pokémon > Updates > Nach Updates suchen**) zum Bereich mit allen Neuerungen. Die alte Version läuft weiter, bis du selbst wechselst.
+Gibt es eine neue Version, zeigen Seitenleiste und Web-App oben einen Hinweis. Unten in der Seitenleiste führt **Updates** (oder **Pokémon > Updates > Nach Updates suchen**) zum Bereich mit allen Neuerungen. Die alte Version läuft weiter, bis du selbst wechselst. Was jede Version geändert hat, steht auch in [CHANGELOG.md](CHANGELOG.md).
 
 Google erlaubt einem Skript in einer Tabelle nicht, seinen eigenen Code zu ersetzen. Eine neue Version kommt deshalb als neue Tabelle:
 
@@ -70,7 +70,8 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 | Ordner | Inhalt |
 | --- | --- |
 | `src/` | Die Dateien, die ins Apps-Script-Projekt gehören: `Code.gs`, `Ui.html`, `Import.gs`, `ImportUi.html`, `Update.gs`, `appsscript.json` |
-| `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen |
+| `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen (die Neuerungen kommen aus `CHANGELOG.md`) |
+| `.github/` | `workflows/release.yml` legt beim Tag `v…` den GitHub-Release mit den Neuerungen aus `CHANGELOG.md` an |
 | `assets/` | `dashboard/`: die Bilder der Dashboard-Knöpfe, die Tabellen laden sie von hier |
 | `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |

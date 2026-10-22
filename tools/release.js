@@ -1,25 +1,29 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Release-Eintrag in releases/channel.json schreiben (Version und Datenformat aus src/Code.gs).
+ * Release-Eintrag in releases/channel.json schreiben (Version und Datenformat aus src/Code.gs, Notizen und Datum aus
+ * CHANGELOG.md).
  *
- *   node tools/release.js --notes "Erster Punkt" --notes "Zweiter Punkt" [--prerelease|--final] [--template URL] [--date 2026-10-21]
+ *   node tools/release.js [--prerelease|--final] [--template URL] [--date 2026-10-21]
  *   node tools/release.js --main-template URL   nur die Hauptvorlage des Kanals (templateUrl) setzen
- *   node tools/release.js --check     prüft nur, ob die aktuelle Version im Kanal und oben in den Dateien steht (sonst Exit 1)
+ *   node tools/release.js --check     prüft nur, ob Kanal, CHANGELOG.md und die Köpfe der Dateien zur Version passen (sonst Exit 1)
  *   node tools/release.js --stamp     schreibt nur die Version in den Kopfkommentar der Script- und HTML-Dateien
+ *   node tools/release.js --print-notes v1.1.0   gibt die Notizen einer Version als Markdown aus (GitHub-Release)
  *
- * Die Tabellen lesen den Kanal und zeigen neuere Versionen an. „Neue Version holen“ kopiert die Vorlage des
- * Releases (--template, sonst templateUrl des Kanals; eine Vorabversion braucht ihre eigene). Steht die Version
- * schon im Kanal, bleiben Notizen, Datum, Vorabversion und Vorlage, solange keine Option sie ändert. Fehlt eine
- * Vorlage, warnt --check nur (Exit 0): Dann erscheint in den Tabellen „Neue Version holen“ nicht.
- * Jeder Release-Eintrag schreibt die Version auch oben in die Script- und HTML-Dateien (HEADER_FILES).
- * Schritte: docs/RELEASE.md.
+ * CHANGELOG.md ist die Quelle der Notizen: Ein Lauf nimmt die Punkte unter „## [TOOL_VERSION]“, trägt dort das Datum
+ * ein, wenn es fehlt (--date, sonst das bisherige aus dem Kanal oder heute), und gleicht Notizen und Datum aller
+ * Versionen im Kanal mit CHANGELOG.md ab. Die Tabellen lesen den Kanal und zeigen neuere Versionen an. „Neue Version
+ * holen“ kopiert die Vorlage des Releases (--template, sonst templateUrl des Kanals; eine Vorabversion braucht ihre
+ * eigene). Steht die Version schon im Kanal, bleiben Vorabversion und Vorlage, solange keine Option sie ändert. Fehlt
+ * eine Vorlage, warnt --check nur (Exit 0): Dann erscheint in den Tabellen „Neue Version holen“ nicht. Jeder Lauf
+ * schreibt die Version auch oben in die Script- und HTML-Dateien (HEADER_FILES). Schritte: docs/RELEASE.md.
  */
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const CHANNEL = path.join(ROOT, 'releases', 'channel.json');
+const CHANGELOG = 'CHANGELOG.md'; // im Repo-Ordner
 const REPO = 'studiobaeric/collection-sheet';
 /** Dateien, die ins Apps-Script-Projekt gehören (für die Anleitung „Von Hand aktualisieren“). */
 const FILES = ['src/appsscript.json', 'src/Code.gs', 'src/Import.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
@@ -28,6 +32,12 @@ const SHEET_URL = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]{20,}/;
 const HEADER_FILES = ['src/Code.gs', 'src/Import.gs', 'parts/00_shared.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
 const HEADER_RE = /Pokémon-Sammlung · Version (\S+)/;
 const HEADER_LINES = 8; // der Kopf muss in den ersten Zeilen stehen
+/** Überschrift eines Abschnitts in CHANGELOG.md: „## [1.2.0]“ oder „## [1.2.0] – 2026-11-01“ */
+const SECTION_RE = /^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\](?:\s+[–-]\s+(\d{4}-\d{2}-\d{2}))?\s*$/;
+
+const readRepo = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+const readChangelog = () => (fs.existsSync(path.join(ROOT, CHANGELOG)) ? readRepo(CHANGELOG) : '');
+const today = () => new Date().toISOString().slice(0, 10);
 
 function codeConst(code, name) {
   const m = code.match(new RegExp('^const ' + name + " = '([^']*)';", 'm'));
@@ -43,22 +53,26 @@ function readChannel() {
 }
 
 function readCode() {
-  return fs.readFileSync(path.join(ROOT, 'src/Code.gs'), 'utf8');
+  return readRepo('src/Code.gs');
 }
 
-/** Eintrag für den Stand im Arbeitsordner (code: Inhalt von src/Code.gs, sonst gelesen). */
-function buildEntry(opts, code) {
+/**
+ * Eintrag für den Stand im Arbeitsordner (code: Inhalt von src/Code.gs, changelog: Inhalt von CHANGELOG.md, sonst
+ * gelesen). Notizen und Datum aus dem Abschnitt der Version in CHANGELOG.md (Datum: opts.date geht vor, ohne beides heute).
+ */
+function buildEntry(opts, code, changelog) {
   code = code == null ? readCode() : code;
   const version = codeConst(code, 'TOOL_VERSION');
   if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('TOOL_VERSION ist keine gültige Version: ' + version);
   FILES.forEach(f => { if (!fs.existsSync(path.join(ROOT, f))) throw new Error(f + ' fehlt'); });
+  const sec = changelogSection(changelog == null ? readChangelog() : changelog, version);
   const entry = {
     version,
     tag: 'v' + version,
-    date: opts.date || new Date().toISOString().slice(0, 10),
+    date: opts.date || (sec && sec.date) || today(),
     prerelease: opts.prerelease === undefined ? /-/.test(version) : !!opts.prerelease,
     schema: codeConst(code, 'SCHEMA_VERSION'),
-    notes: cleanNotes(opts.notes)
+    notes: sec ? sec.notes.slice() : []
   };
   if (opts.template) entry.templateUrl = opts.template;
   return entry;
@@ -104,7 +118,6 @@ function stampText(text, version, html) {
 }
 
 const isHtml = f => /\.html$/.test(f);
-const readRepo = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 /** -> Abweichungen der Kopfkommentare von version, je Datei eine Zeile (read: Datei -> Inhalt, sonst aus dem Repo) */
 function headerDiffs(version, read) {
@@ -127,12 +140,87 @@ function stamp(version) {
 const cleanNotes = notes => (notes || []).map(n => String(n == null ? '' : n).trim()).filter(Boolean);
 
 /**
- * -> {version, missing, diffs, headers, warnings}: Abweichungen zwischen dem Kanal-Eintrag der aktuellen Version und
- * dem Code (diffs: Exit 1), Köpfe mit anderer Version (headers: Exit 1), warnings: keine Vorlage für diese Version.
+ * CHANGELOG.md zerlegen -> [{version, date, notes}] in der Reihenfolge der Datei. Ein Abschnitt beginnt mit
+ * „## [1.2.0]“ (Datum dahinter mit – oder -) und endet bei der nächsten Überschrift # oder ##. Punkte beginnen mit
+ * „- “, eingerückte Zeilen darunter gehören zum Punkt davor.
+ */
+function parseChangelog(text) {
+  const out = [];
+  let cur = null;
+  String(text || '').split(/\r?\n/).forEach(l => {
+    const m = SECTION_RE.exec(l);
+    if (m) { cur = { version: m[1], date: m[2] || '', notes: [] }; out.push(cur); return; }
+    if (/^#{1,2}\s/.test(l)) { cur = null; return; }
+    if (!cur) return;
+    const b = /^[-*]\s+(.*)$/.exec(l);
+    if (b) cur.notes.push(b[1]);
+    else if (/^\s+\S/.test(l) && cur.notes.length) cur.notes[cur.notes.length - 1] += ' ' + l.trim();
+  });
+  out.forEach(s => { s.notes = cleanNotes(s.notes); });
+  return out;
+}
+
+/** Abschnitt einer Version (auch als Tag „v…“) aus CHANGELOG.md, sonst null */
+function changelogSection(text, version) {
+  const v = String(version).replace(/^v/, '');
+  return parseChangelog(text).find(s => s.version === v) || null;
+}
+
+/** text mit „## [version] – date“ als Überschrift des Abschnitts der Version */
+function setChangelogDate(text, version, date) {
+  return String(text).split('\n').map(l => {
+    const m = SECTION_RE.exec(l.replace(/\r$/, ''));
+    return m && m[1] === version ? '## [' + version + '] – ' + date : l;
+  }).join('\n');
+}
+
+/** Notizen einer Version (auch als Tag „v…“) als Markdown für den GitHub-Release */
+function releaseNotes(text, version) {
+  const s = changelogSection(text, version);
+  if (!s || !s.notes.length) throw new Error('CHANGELOG.md hat keine Punkte für ' + String(version).replace(/^v/, ''));
+  return s.notes.map(n => '- ' + n).join('\n') + '\n\n' +
+    'So kommst du zur neuen Version: in der Seitenleiste unter **Updates** auf **Neue Version holen**, oder ' +
+    '[von Hand](https://github.com/' + REPO + '#von-hand-aktualisieren). Alle Versionen stehen in ' +
+    '[CHANGELOG.md](https://github.com/' + REPO + '/blob/main/CHANGELOG.md).\n';
+}
+
+/** Notizen und Datum aller Versionen im Kanal ch aus CHANGELOG.md (ändert ch; Versionen ohne Punkte dort bleiben) -> geänderte Versionen */
+function syncChannel(ch, text) {
+  const secs = parseChangelog(text);
+  return (ch.releases || []).filter(r => {
+    const s = secs.find(x => x.version === r.version);
+    if (!s || !s.notes.length) return false;
+    const date = s.date || r.date;
+    if (JSON.stringify(s.notes) === JSON.stringify(r.notes) && date === r.date) return false;
+    r.notes = s.notes.slice();
+    r.date = date;
+    return true;
+  }).map(r => r.version);
+}
+
+/** -> Abweichungen zwischen Kanal und CHANGELOG.md: jede Version im Kanal braucht dort einen Abschnitt mit denselben Punkten (und Datum) */
+function changelogDiffs(ch, text) {
+  const secs = parseChangelog(text), diffs = [], seen = {};
+  secs.forEach(s => { if (seen[s.version]) diffs.push('CHANGELOG.md: Abschnitt [' + s.version + '] doppelt'); seen[s.version] = true; });
+  (ch.releases || []).forEach(r => {
+    const s = secs.find(x => x.version === r.version);
+    if (!s) { diffs.push('CHANGELOG.md: kein Abschnitt [' + r.version + ']'); return; }
+    if (JSON.stringify(s.notes) !== JSON.stringify(cleanNotes(r.notes))) diffs.push(r.version + ': Notizen anders als in CHANGELOG.md');
+    if (s.date && s.date !== r.date) diffs.push(r.version + ': Datum ' + r.date + ' statt ' + s.date + ' wie in CHANGELOG.md');
+  });
+  return diffs;
+}
+
+/**
+ * -> {version, missing, diffs, headers, warnings}: Abweichungen zwischen dem Kanal und dem Code oder CHANGELOG.md
+ * (diffs: Exit 1), Köpfe mit anderer Version (headers: Exit 1), warnings: keine Vorlage für diese Version.
  * code/ch/read: zum Testen, sonst aus dem Repo.
  */
 function check(code, ch, read) {
-  const entry = buildEntry({}, code);
+  read = read || readRepo;
+  let changelog = '';
+  try { changelog = read(CHANGELOG); } catch (e) { changelog = ''; }
+  const entry = buildEntry({}, code, changelog);
   ch = ch || readChannel();
   const diffs = [], warnings = [], headers = headerDiffs(entry.version, read);
   if (ch.templateUrl && !SHEET_URL.test(ch.templateUrl)) diffs.push('templateUrl des Kanals ist kein Tabellen-Link');
@@ -143,6 +231,7 @@ function check(code, ch, read) {
   if (!cleanNotes(rel.notes).length) diffs.push('keine Notizen');
   if (rel.templateUrl && !SHEET_URL.test(rel.templateUrl)) diffs.push('templateUrl ist kein Tabellen-Link');
   if (rel.files || rel.scopes) diffs.push('alte Felder files/scopes (die Tabellen laden keinen Code mehr)');
+  changelogDiffs(ch, changelog).forEach(d => diffs.push(d));
   const tpl = rel.templateUrl || (rel.prerelease ? '' : ch.templateUrl);
   if (!tpl) warnings.push(rel.prerelease ? 'Diese Vorabversion hat keine eigene Vorlage (--template): Freiwillige bekommen sie nur von Hand.'
     : 'Der Kanal hat noch keine Vorlage (--main-template): „Neue Version holen“ erscheint in den Tabellen nicht.');
@@ -150,7 +239,7 @@ function check(code, ch, read) {
 }
 
 function parseArgs(argv) {
-  const o = { notes: [] };
+  const o = {};
   const value = (a, i) => {
     const v = argv[i];
     if (v === undefined || /^--/.test(v) || !String(v).trim()) throw new Error(a + ' braucht einen Wert');
@@ -162,7 +251,8 @@ function parseArgs(argv) {
     else if (a === '--stamp') o.stamp = true;
     else if (a === '--prerelease') o.prerelease = true;
     else if (a === '--final') o.prerelease = false;
-    else if (a === '--notes') o.notes.push(value(a, ++i));
+    else if (a === '--notes') throw new Error('--notes gibt es nicht mehr: Die Notizen stehen in CHANGELOG.md (docs/RELEASE.md).');
+    else if (a === '--print-notes') o.printNotes = value(a, ++i);
     else if (a === '--date') o.date = value(a, ++i);
     else if (a === '--template') o.template = value(a, ++i);
     else if (a === '--main-template') o.mainTemplate = value(a, ++i);
@@ -176,17 +266,15 @@ function parseArgs(argv) {
 }
 
 /**
- * Eintrag entry in den Kanal ch übernehmen (ändert ch). Steht die Version schon drin, bleiben Notizen, Datum,
- * Vorabversion und Vorlage, solange o sie nicht setzt. -> {entry, old}
+ * Eintrag entry in den Kanal ch übernehmen (ändert ch). Notizen und Datum bringt entry aus CHANGELOG.md mit. Steht
+ * die Version schon drin, bleiben Vorabversion und Vorlage, solange o sie nicht setzt. -> {entry, old}
  */
 function nextChannel(ch, entry, o) {
   const old = (ch.releases || []).find(r => r.version === entry.version);
   entry.notes = cleanNotes(entry.notes);
-  if (old && !cleanNotes(o.notes).length) entry.notes = cleanNotes(old.notes);
-  if (old && !o.date) entry.date = old.date || entry.date;
   if (old && o.prerelease === undefined && typeof old.prerelease === 'boolean') entry.prerelease = old.prerelease;
   if (old && !o.template && old.templateUrl) entry.templateUrl = old.templateUrl;
-  if (!entry.notes.length) throw new Error('Bitte mindestens eine Zeile mit --notes angeben (was ist neu?).');
+  if (!entry.notes.length) throw new Error('CHANGELOG.md: Unter „## [' + entry.version + ']“ steht noch kein Punkt (was ist neu?).');
   ch.repo = ch.repo || REPO;
   ch.releases = (ch.releases || []).filter(r => r.version !== entry.version).concat([entry]).sort((a, b) => cmp(b.version, a.version));
   return { entry, old };
@@ -199,6 +287,10 @@ function writeChannel(ch) {
 
 function main() {
   const o = parseArgs(process.argv.slice(2));
+  if (o.printNotes) {
+    process.stdout.write(releaseNotes(readChangelog(), o.printNotes));
+    return 0;
+  }
   if (o.stamp) {
     const version = codeConst(readCode(), 'TOOL_VERSION');
     const files = stamp(version);
@@ -212,7 +304,8 @@ function main() {
       console.log('Oben in diesen Dateien steht nicht Version ' + r.version + ':\n  ' + r.headers.join('\n  ') + '\nBitte node tools/release.js --stamp ausführen.');
     }
     if (r.missing) {
-      console.log('Version ' + r.version + ' steht noch nicht in releases/channel.json. Bitte node tools/release.js --notes "…" ausführen.');
+      console.log('Version ' + r.version + ' steht noch nicht in releases/channel.json. Bitte in CHANGELOG.md den Abschnitt „## [' + r.version +
+        ']“ anlegen und node tools/release.js ausführen.');
       return 1;
     }
     if (r.diffs.length) {
@@ -220,27 +313,44 @@ function main() {
       return 1;
     }
     if (r.headers.length) return 1;
-    console.log('releases/channel.json und die Köpfe der Dateien passen zu Version ' + r.version + '.');
+    console.log('releases/channel.json, CHANGELOG.md und die Köpfe der Dateien passen zu Version ' + r.version + '.');
     return 0;
   }
   const ch = readChannel();
   if (o.mainTemplate) {
     ch.templateUrl = o.mainTemplate;
-    if (!o.notes.length && o.prerelease === undefined && !o.date && !o.template) {
+    if (o.prerelease === undefined && !o.date && !o.template) {
       writeChannel(ch);
       console.log('Hauptvorlage gesetzt: ' + o.mainTemplate);
       return 0;
     }
   }
-  const { entry, old } = nextChannel(ch, buildEntry(o), o);
+  const version = codeConst(readCode(), 'TOOL_VERSION');
+  let text = readChangelog();
+  const sec = changelogSection(text, version);
+  if (!sec || !sec.notes.length) {
+    throw new Error('CHANGELOG.md: Bitte oben einen Abschnitt „## [' + version + ']“ mit einem Punkt je Neuerung anlegen.');
+  }
+  const known = (ch.releases || []).find(r => r.version === version);
+  const date = o.date || sec.date || (known && known.date) || today();
+  if (date !== sec.date) {
+    text = setChangelogDate(text, version, date);
+    fs.writeFileSync(path.join(ROOT, CHANGELOG), text);
+  }
+  const { entry, old } = nextChannel(ch, buildEntry(o, null, text), o);
+  const synced = syncChannel(ch, text).filter(v => v !== entry.version);
   writeChannel(ch);
   const stamped = stamp(entry.version);
-  console.log((old ? 'Aktualisiert' : 'Neu') + ': ' + entry.version + (entry.prerelease ? ' (Vorabversion)' : '') + ', Datenformat ' + entry.schema + '.');
+  console.log((old ? 'Aktualisiert' : 'Neu') + ': ' + entry.version + (entry.prerelease ? ' (Vorabversion)' : '') + ', Datenformat ' + entry.schema +
+    ', ' + entry.notes.length + ' Punkte aus CHANGELOG.md.');
+  if (date !== sec.date) console.log('Datum ' + date + ' in CHANGELOG.md eingetragen.');
+  if (synced.length) console.log('Notizen aus CHANGELOG.md übernommen für ' + synced.join(', ') + '.');
   if (stamped.length) console.log('Version oben eingetragen in ' + stamped.join(', ') + '.');
   if (entry.prerelease && !entry.templateUrl) console.log('Achtung: Ohne --template können Freiwillige diese Vorabversion nur von Hand einfügen.');
   console.log('Weiter: ' + (entry.prerelease
     ? 'nur die Vorlage der Vorabversion (--template) auf diese Version bringen, die Hauptvorlage nicht anfassen'
-    : 'die Hauptvorlage auf diese Version bringen') + ', dann committen, Pull Request, mergen, ' + entry.tag + ' taggen (docs/RELEASE.md).');
+    : 'die Hauptvorlage auf diese Version bringen') + ', dann committen, Pull Request, mergen, ' + entry.tag +
+    ' taggen; den GitHub-Release legt dann .github/workflows/release.yml an (docs/RELEASE.md).');
   return 0;
 }
 
@@ -248,4 +358,7 @@ if (require.main === module) {
   try { process.exitCode = main(); } catch (e) { console.error(e.message); process.exitCode = 1; }
 }
 
-module.exports = { FILES, HEADER_FILES, buildEntry, check, cleanNotes, cmp, header, headerDiffs, headerVersion, nextChannel, parseArgs, stampText };
+module.exports = {
+  FILES, HEADER_FILES, buildEntry, changelogDiffs, changelogSection, check, cleanNotes, cmp, header, headerDiffs, headerVersion,
+  nextChannel, parseArgs, parseChangelog, releaseNotes, setChangelogDate, stampText, syncChannel
+};
