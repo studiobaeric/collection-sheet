@@ -214,47 +214,48 @@ Ein Cardmarket-Trend von tcgdex kann unplausibel sein; das Tool übernimmt ihn b
 
 ## Release und Updates
 
-Festgelegt am 21.10.2026: Das Tool wird öffentlich geteilt. Zuerst kopieren Nutzer eine Vorlage mit Update-Knopf, später kommt ein Add-on im Google Workspace Marketplace.
+Festgelegt am 21.10.2026: Das Tool wird öffentlich geteilt. Zuerst kopieren Nutzer eine Vorlage, später kommt ein Add-on im Google Workspace Marketplace. Ein Update-Knopf, der den Code in der Tabelle selbst ersetzt, geht nicht: Google sperrt dafür die Apps-Script-API in jedem Skript (Test am 21.10.2026). Deshalb kommt eine neue Version als neue Tabelle (Entscheidung von Eric am 21.10.2026).
 
 | Thema | Entscheidung |
 | --- | --- |
 | Zielgruppe | Öffentlich, beliebig viele Nutzer, auch ohne Apps-Script-Kenntnisse. |
-| Phase 1: Kopie | Nutzer kopieren die Vorlage-Tabelle per Link. Jede Kopie hat ihr eigenes Skript und einen Update-Knopf. |
+| Phase 1: Kopie | Nutzer kopieren die Vorlage-Tabelle per Link. Jede Kopie hat ihr eigenes Skript. |
 | Phase 2: Add-on | Kommt, sobald viele das Tool nutzen. Updates landen dort bei allen automatisch. Der Code ist von Anfang an darauf ausgelegt. |
 | Ablage | Öffentliches GitHub-Repo. Jede Version ist ein Release mit Nummer und Änderungsliste. Alte Releases bleiben liegen. |
 | Lizenz | Nicht-kommerziell, zum Beispiel PolyForm Noncommercial 1.0.0: privat nutzen und ändern ja, verkaufen oder geschäftlich nutzen nein. |
-| Hinweis und Installation | Seitenleiste und Web-App zeigen „Version x verfügbar“ mit Änderungsliste. Installiert wird nur per Klick in der Seitenleiste am Rechner. Bis dahin läuft die alte Version weiter. |
-| Vorabversionen | GitHub-Vorabversionen sehen nur Tabellen mit eingeschaltetem „Vorabversionen erhalten“. Jeder Nutzer kann das einschalten. Nach ein paar Tagen ohne Probleme gibt Eric die Version für alle frei. |
-| Sicherung | Vor jedem Update legt das Tool eine Kopie der ganzen Tabelle in den Drive des Nutzers, etwa „Pokemon Sammlung – Sicherung vor 1.3“. Das Skript wird mitkopiert, Auslöser nicht. |
-| Zurück | „Vorige Version wiederherstellen“ schreibt den alten Code zurück, wenn das Update den Tabellenaufbau nicht geändert hat. Sonst verweist das Tool auf die Sicherung. |
-| Geänderter Code | Weicht der Code vom Release ab (Prüfsumme), warnt der Knopf, dass die Änderungen verloren gehen. Nach Bestätigung wird ersetzt, eigene Zusatzdateien bleiben. |
-| Ersatzweg 1: neue Kopie | Neue Vorlage kopieren und den Link der alten Tabelle einfügen. Das Tool übernimmt alles 1:1 ohne Erkennung und Prüfliste: Karten, eigene Preise, Verlauf, Importe samt Rücknahme, Begriffe, Vorlagen, Set-Zuordnungen, Seltenheiten, Zusatzspalten, Einstellungen. Tabelle und Handy-Link ändern sich, die Web-App wird in der neuen Kopie einmal bereitgestellt. |
-| Ersatzweg 2: von Hand | Anleitung im Repo zum Einfügen des Codes für Erfahrene. Tabelle und Handy-Link bleiben. |
-| Alte Tabelle | Nach der Übernahme stillgelegt: oben ein Hinweis mit Link zur neuen Tabelle, Menü und Preislauf stoppen, die Daten bleiben lesbar. |
+| Hinweis | Seitenleiste und Web-App zeigen „Version x ist da“ mit Änderungsliste. Bis der Nutzer wechselt, läuft die alte Version weiter. |
+| Neue Version holen | Ein Klick in der Seitenleiste am Rechner legt eine Kopie der Vorlage mit der neuen Version im selben Ordner an. Die neue Tabelle bietet beim ersten Öffnen sofort die Übernahme an. |
+| Übernahme | Alles 1:1 ohne Erkennung und Prüfliste: Karten, eigene Preise, Verlauf, Importe samt Rücknahme, Begriffe, Vorlagen, Set-Zuordnungen, Seltenheiten, Zusatzspalten, Einstellungen, eigene Blätter. Die neue Tabelle bekommt den Namen der alten, die alte heißt danach „… (alt)“. Tabelle und Handy-Link ändern sich, die Web-App wird in der neuen Tabelle einmal bereitgestellt. |
+| Alte Tabelle | Nach der Übernahme stillgelegt: vorne ein Hinweis mit Link zur neuen Tabelle, Menü und Preislauf stoppen, die Daten bleiben lesbar. Ihre Handy-Seite verweist auf die neue. |
+| Zurück | „Diese Tabelle wieder benutzen“ im Menü der alten Tabelle holt Menü und Preislauf zurück. Was inzwischen in der neuen Tabelle geändert wurde, fehlt dort. Eine eigene Sicherungskopie braucht es nicht, die alte Tabelle ist der Stand davor. |
+| Vorabversionen | GitHub-Vorabversionen sehen nur Tabellen mit eingeschaltetem „Vorabversionen bekommen“. Jeder Nutzer kann das einschalten. Vorabversionen haben eine eigene Vorlage. Nach ein paar Tagen ohne Probleme gibt Eric die Version für alle frei. |
+| Ersatzweg: von Hand | Anleitung im Repo zum Einfügen des Codes für Erfahrene. Tabelle und Handy-Link bleiben. |
 | Wechsel zum Add-on | Der Menüpunkt „Zum Add-on wechseln“ in der Kopie löscht deren Auslöser und legt ihr Menü still. Die Tabelle bleibt dieselbe, am Handy gilt dann der gemeinsame Link des Add-ons. |
-| Erics Tabelle | Bekommt den Update-Knopf einmal durch Einfügen von Hand, danach denselben Weg wie alle. |
+| Erics Tabelle | Bekommt Version 1.0.0 einmal durch Einfügen von Hand, danach denselben Weg wie alle. |
 
-### So läuft ein Update mit dem Knopf
+### So läuft ein Update
 
 1. Das Tool sieht einmal am Tag (beim Preislauf) und beim Öffnen der Seitenleiste auf GitHub nach der neuesten Version.
-2. Der Hinweis zeigt Versionsnummer, Änderungen und, falls nötig, neue Berechtigungen.
-3. Beim ersten Klick führt das Tool durch das Einschalten der Apps-Script-API unter script.google.com/home/usersettings.
-4. Das Tool legt die Sicherungskopie an.
-5. Es schreibt die neuen Dateien über die Apps-Script-API ins eigene Skript und stellt die Web-App auf die neue Version um. Der Handy-Link bleibt gleich. Klappt das Umstellen nicht, zeigt es die Schritte von Hand.
-6. Beim nächsten Öffnen stellt das Tool die Tabelle Schritt für Schritt auf den neuen Aufbau um, auch über mehrere Versionen hinweg.
+2. Der Hinweis zeigt Versionsnummer und Änderungen.
+3. „Neue Version holen“ kopiert die Vorlage dieser Version in den Ordner der Tabelle. An der alten Tabelle ändert sich dabei nichts.
+4. In der neuen Tabelle: Pokémon > Karten erfassen. Google fragt einmal nach den Berechtigungen, dann richtet sich die Tabelle ein und zeigt die Übernahme mit Vorschau.
+5. „Jetzt übernehmen“ holt alle Daten, stellt sie auf den neuen Aufbau um, auch über mehrere Versionen hinweg, und legt die alte Tabelle still.
+6. Wer die Handy-Seite nutzt, stellt sie in der neuen Tabelle einmal bereit.
 
 ### Regeln für den Bau
 
-- Dauerhafte Einstellungen, die heute in Skript-Eigenschaften liegen (Schema-Version, Web-App-Link, Zusatzspalten der Ansicht), wandern in ein verstecktes Blatt. Ein Add-on kann die Eigenschaften der Kopie nicht lesen.
+- Dauerhafte Einstellungen, die früher in Skript-Eigenschaften lagen (Schema-Version, Web-App-Link, Zusatzspalten der Ansicht), stehen im versteckten Blatt „Tool-Einstellungen“. Ein Add-on kann die Eigenschaften der Kopie nicht lesen.
 - Die Namen der Funktionen, die Auslöser aufrufen, bleiben über alle Versionen gleich.
-- Versionsnummer und Änderungsliste kommen als Dateien von raw.githubusercontent.com, nicht über die GitHub-API. Die erlaubt ohne Anmeldung nur 60 Abrufe pro Stunde, und Apps Script teilt sich die Adressen.
+- Versionsnummer und Änderungsliste kommen als Datei von raw.githubusercontent.com, nicht über die GitHub-API. Die erlaubt ohne Anmeldung nur 60 Abrufe pro Stunde, und Apps Script teilt sich die Adressen.
+- Vor jedem Release kommt die Vorlage auf die neue Version. Erst dann wird die Versionsliste auf GitHub veröffentlicht.
 - Ab dem ersten öffentlichen Release prüft jede Version, ob ihre Tabelle als „übernommen“ markiert ist, und stoppt dann Menü und Preislauf. Ältere Tabellen bekommen eine Anleitung, den Auslöser von Hand zu löschen.
 - Fürs Add-on liest der Import .xlsx-Dateien über eine Dateiauswahl statt mit vollem Drive-Zugriff. Sonst verlangt Google eine teure jährliche Sicherheitsprüfung.
 - Der Code protokolliert keine Kartendaten, weil Protokolle eines Add-ons in Erics Google-Cloud-Projekt landen.
 
 ### Offen
 
-- [ ] Test: Klappt die Apps-Script-API aus einem an die Tabelle gebundenen Skript ohne eigenes Google-Cloud-Projekt? Wenn nicht, ist Ersatzweg 1 bis zum Add-on der Hauptweg.
+- [x] Test: Klappt die Apps-Script-API aus einem an die Tabelle gebundenen Skript? Nein (21.10.2026, Fehler 403: im Standard-Projekt gesperrt). Kopie und Übernahme sind der Hauptweg bis zum Add-on.
+- [ ] Vorlage-Tabelle anlegen, ihren Link in die Versionsliste eintragen und das Repo öffentlich machen.
 - [ ] Bleibt der Kopie-Weg nach dem Start des Add-ons unterstützt?
 - [ ] Name des Tools: „Pokémon“ ist eine Marke. Geplant ist ein eigener Name, die Beschreibung „für Pokémon-Karten“ und der Satz „nicht verbunden mit Nintendo oder The Pokémon Company“. Kartenbilder kommen nur von tcgdex und stecken nie in der geteilten Vorlage.
 - [ ] Nutzungsbedingungen von tcgdex (Karten, Cardmarket-Preise) und PokeAPI (deutsche Namen) für eine öffentliche Weitergabe prüfen.
@@ -275,6 +276,6 @@ Das Datenmodell lässt diese Punkte zu, ohne bestehende Daten umzubauen; gebaut 
 - Import-Tab in der Web-App: Heute gibt es den Import-Tab nur in der Seitenleiste; er soll auch in die Web-App kommen. Details noch offen.
 - Optimierungen und Geschwindigkeit beim Suchen und Hinzufügen: steht auf dem Plan, welche Maßnahmen, ist noch offen.
 - Release: Der Update-Weg ist am 21.10.2026 entschieden, siehe Abschnitt Release und Updates. Offen sind dort noch Name, Nutzungsbedingungen der Datenquellen und Sprache der Oberfläche.
-- Import aus einer früheren Version: Das Import-Tool muss die Daten aus dem Sheet einer früheren Version dieses Tools übernehmen können. Das ist wichtig, damit Nutzer ohne Apps-Script-Kenntnisse ihre Sammlung auf eine neue Version bringen können; gehört zum Release. Entschieden am 21.10.2026: 1:1-Übernahme in eine neue Kopie, Einzelheiten unter Release und Updates (Ersatzweg 1).
+- Import aus einer früheren Version: Das Import-Tool muss die Daten aus dem Sheet einer früheren Version dieses Tools übernehmen können. Das ist wichtig, damit Nutzer ohne Apps-Script-Kenntnisse ihre Sammlung auf eine neue Version bringen können; gehört zum Release. Entschieden am 21.10.2026: 1:1-Übernahme in eine neue Tabelle, das ist jetzt der Hauptweg für Updates (Einzelheiten unter Release und Updates).
 - Umgang mit unplausiblen tcgdex-Preisen: Wie das Tool solche Preise erkennen und behandeln soll, ist noch zu entscheiden (Anlass: Despotar unter Bekannte Probleme).
 - Bilderkennungs-Tool für Pokémon-Karten: steht auf der Liste. Wie es funktioniert und wo es eingebunden wird, ist noch offen.

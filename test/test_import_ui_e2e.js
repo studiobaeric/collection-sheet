@@ -184,7 +184,7 @@ function evaluateTemplate(tpl, includeImpl) {
   const html = tpl.__content.replace(/<\?(!=|=)?([\s\S]*?)\?>/g, (m, kind, expr) => {
     seen.push(m);
     if (!kind) throw new Error('Scriptlet ohne Ausgabe wird hier nicht unterstützt: ' + m);
-    const val = new Function('mode', 'include', 'return (' + expr + ');')(tpl.mode, includeImpl);
+    const val = new Function('mode', 'start', 'include', 'return (' + expr + ');')(tpl.mode, tpl.start, includeImpl);
     return kind === '!=' ? String(val) : escHtml(val);
   });
   return { html, scriptlets: seen };
@@ -543,7 +543,7 @@ function missingPaths(res, paths) {
   t.section('1. Seitenleiste, Import-Tab, Einstellungen');
   let E = boot(env, 'sidebar', 'Seitenleiste');
   await E.settle();
-  t.ok('Start lädt nur Set-Vorschläge und getUiConfig', J(E.callLog.map((x) => x.fn).sort()) === J(['getSetSuggestions', 'getUiConfig']), E.callLog.map((x) => x.fn));
+  t.ok('Start lädt nur Set-Vorschläge, getUiConfig und getUpdateInfo', J(E.callLog.map((x) => x.fn).sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
   t.ok('Import-Tab sichtbar', !E.$('tabImport').classList.contains('hidden'));
   t.ok('Import-Bereich noch versteckt, kein importState', E.$('paneImport').classList.contains('hidden') && E.calls('importState').length === 0);
   await E.clickSettle(E.$('tabImport'), 'Tab Import');
@@ -820,7 +820,7 @@ function missingPaths(res, paths) {
   t.ok('Daten: Nachtara als zusätzliches Exemplar, Arktos nicht doppelt', byName(r1, 'Nachtara').count === 1 && !byName(r1, 'Arktos'));
   t.ok('Protokoll: gleich für Arktos, spalte Ordner', protoOf(env, 1).some((p) => p.Typ === 'gleich' && JSON.parse(p.Daten).title === 'Arktos') &&
     protoOf(env, 1).some((p) => p.Typ === 'spalte' && /Ordner/.test(p.Daten)) && protoOf(env, 1).every((p) => p.Status === 'erledigt'), protoOf(env, 1).map((p) => [p.Typ, p.Status]));
-  t.ok('Sammlung zeigt Ordner (VIEW_EXTRAS, Gruppen, Kopfzeile)', J(JSON.parse(env.props.VIEW_EXTRAS || '[]')) === J(['Ordner']) &&
+  t.ok('Sammlung zeigt Ordner (VIEW_EXTRAS, Gruppen, Kopfzeile)', J(JSON.parse(env.setting('VIEW_EXTRAS') || '[]')) === J(['Ordner']) &&
     env.values('Gruppen')[0].indexOf('Ordner') >= 0 && env.values('Sammlung').some((r) => r.indexOf('Ordner') >= 0));
   t.ok('Entwurf und Import-Quelle/-Prüfung geleert', !env.props.IMPORT_DRAFT && env.values('Import-Quelle').length === 0 && env.objects('Import-Prüfung').length === 0);
   t.ok('getUiConfig neu geladen: Ordner bekannt', E.win.UI_CONFIG.extras.indexOf('Ordner') >= 0 && E.win.UI_CONFIG.versions.indexOf('Snowflake') >= 0, E.win.UI_CONFIG);
@@ -868,11 +868,11 @@ function missingPaths(res, paths) {
   E.check(E.$('impVx0'), false);
   await E.clickSettle(E.btn(E.$('impVx'), 'Anzeige speichern'), 'Anzeige speichern');
   t.ok('Anzeige ohne Ordner gespeichert', /Gespeichert\. Die Sammlung zeigt keine Zusatzspalten\./.test(E.$('impSetMsg').textContent) &&
-    J(JSON.parse(env.props.VIEW_EXTRAS || '[]')) === '[]' && env.values('Gruppen')[0].indexOf('Ordner') < 0, [E.$('impSetMsg').textContent, env.props.VIEW_EXTRAS]);
+    J(JSON.parse(env.setting('VIEW_EXTRAS') || '[]')) === '[]' && env.values('Gruppen')[0].indexOf('Ordner') < 0, [E.$('impSetMsg').textContent, env.setting('VIEW_EXTRAS')]);
   E.check(E.$('impVx0'), true);
   await E.clickSettle(E.btn(E.$('impVx'), 'Anzeige speichern'), 'Anzeige speichern');
   t.ok('Anzeige mit Ordner gespeichert', /Gespeichert\. Die Sammlung zeigt jetzt: Ordner\./.test(E.$('impSetMsg').textContent) &&
-    J(JSON.parse(env.props.VIEW_EXTRAS || '[]')) === J(['Ordner']) && env.values('Gruppen')[0].indexOf('Ordner') >= 0, [E.$('impSetMsg').textContent, env.props.VIEW_EXTRAS]);
+    J(JSON.parse(env.setting('VIEW_EXTRAS') || '[]')) === J(['Ordner']) && env.values('Gruppen')[0].indexOf('Ordner') >= 0, [E.$('impSetMsg').textContent, env.setting('VIEW_EXTRAS')]);
   eyes(E, 'Einstellungen nach Import');
   checkSheets(env, 'Nach Anzeige speichern', { verlauf: VERLAUF });
   await E.clickSettle(E.btn(E.$('impImp0'), 'Zurücknehmen'), 'Zurücknehmen');

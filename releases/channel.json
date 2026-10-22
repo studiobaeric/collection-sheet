@@ -1,0 +1,20 @@
+{
+  "repo": "studiobaeric/collection-sheet",
+  "templateUrl": "https://docs.google.com/spreadsheets/d/18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE/copy",
+  "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "date": "2026-10-21",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Neue Versionen: Hinweis in Seitenleiste und Web-App, „Neue Version holen“ legt eine neue Tabelle aus der Vorlage an",
+        "Übernahme aus der alten Tabelle mit einem Klick, die alte wird stillgelegt und lässt sich wieder benutzen",
+        "Vorabversionen für Freiwillige (Schalter im Bereich Updates)",
+        "Einstellungen stehen jetzt im versteckten Blatt „Tool-Einstellungen“"
+      ]
+    }
+  ]
+}

@@ -81,10 +81,10 @@ t.section('Migration v1 -> v2');
   eq('new keys', data.map(r => r.key), ['swsh3-025|normal||NM|DE', 'base1-4|holo|||DE', 'old9-007|normal||LP|DE']);
   ok('number text kept', data[0].localId === '025' && data[2].localId === '007', data.map(r => r.localId));
   ok('dates kept', data[0].added instanceof Date && data[0].added.getTime() === d1.getTime());
-  ok('SCHEMA_VERSION = 2', env.props.SCHEMA_VERSION === '2');
+  ok('SCHEMA_VERSION = 2', env.setting('SCHEMA_VERSION') === '2');
   ok('Gruppen built (3)', env.groups().length === 3, env.groups().length);
   const before = JSON.stringify(env.data().map(r => [r.eid, r.key, r.count]));
-  delete env.props.SCHEMA_VERSION;
+  env.ctx.settingSet_('SCHEMA_VERSION', '');
   env.ctx.migrateSchema_();
   ok('second run idempotent', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
   // Zusatzspalte überlebt einrichtung
@@ -102,11 +102,11 @@ t.section('Migration v1 -> v2');
   const sh = env.ss.insertSheet('Daten');
   sh.getRange(1, 1, 1, 3).setValues([['Schlüssel', 'Karten-ID', 'Set-ID']]);
   env.ctx.ensureSchema_();
-  ok('empty v1 sheet migrated', env.values('Daten')[0][23] === 'Eintrag-ID' && env.data().length === 0 && env.props.SCHEMA_VERSION === '2');
+  ok('empty v1 sheet migrated', env.values('Daten')[0][23] === 'Eintrag-ID' && env.data().length === 0 && env.setting('SCHEMA_VERSION') === '2');
 
   const env2 = fresh();
   env2.ctx.ensureSchema_();
-  ok('missing Daten created with v2 headers', env2.sheet('Daten') && env2.values('Daten')[0][29] === 'Quellzeile' && env2.props.SCHEMA_VERSION === '2');
+  ok('missing Daten created with v2 headers', env2.sheet('Daten') && env2.values('Daten')[0][29] === 'Quellzeile' && env2.setting('SCHEMA_VERSION') === '2');
   ok('Gruppen exists after migrate', !!env2.sheet('Gruppen'));
 
   const env3 = fresh();
@@ -618,7 +618,7 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   ok('Web-App link unchanged', typeof env.ctx.webAppLinkAnzeigen === 'function');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
-  ok('web app link saved', env.props.WEBAPP_URL === 'https://script.google.com/macros/s/abc/exec');
+  ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
   ok('menu', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7);
   ok('getSetSuggestions', env.uiCall('getSetSuggestions').indexOf('Darkness Ablaze') >= 0);
   ok('Hand row count', a.count === 1);

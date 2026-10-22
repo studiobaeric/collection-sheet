@@ -14,6 +14,7 @@ const IMP_RAW = fs.readFileSync(path.join(SRC, 'ImportUi.html'), 'utf8');
 const LT_Q = '<' + '?';
 const MODE_LET = LT_Q + "!= mode ?>";
 const INCLUDE_LET = LT_Q + "!= include('ImportUi') ?>";
+const START_LET = LT_Q + '!= typeof start === "string" ? start : "" ?>';
 
 let pass = 0, failCount = 0;
 function ok(label, cond, extra) {
@@ -238,7 +239,7 @@ function makeServer() {
 // Seite starten
 // ---------------------------------------------------------------------------
 function render(mode) {
-  return UI_RAW.replace(MODE_LET, mode).replace(INCLUDE_LET, IMP_RAW);
+  return UI_RAW.replace(MODE_LET, mode).replace(START_LET, '').replace(INCLUDE_LET, IMP_RAW);
 }
 
 function boot(mode, opts) {
@@ -305,7 +306,7 @@ function boot(mode, opts) {
       const pane = doc.getElementById('paneImport');
       return !win.__xss && !pane.querySelector('img[src="x"]') && !pane.querySelector('script') && !pane.querySelector('#xssb');
     },
-    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); },
+    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo', { value: null }); },
     async openImport() { E.click(E.$('tabImport')); await E.respond('importState'); },
     step() { const m = (E.main().querySelector('.imp-sub') || {}).textContent || ''; const r = m.match(/Schritt (\d) von 8/); return r ? Number(r[1]) : 0; },
     radioVal(name) { const r = [...doc.querySelectorAll('input[name="' + name + '"]')].find(x => x.checked); return r ? r.value : null; }
@@ -441,7 +442,7 @@ async function realServerFlow() {
     R.click(box.querySelector('input'));
     R.click(R.btn(R.$('impVx'), 'Anzeige speichern'));
     await R.settle();
-    const vx = JSON.parse(env.props.VIEW_EXTRAS || '[]');
+    const vx = JSON.parse(env.setting('VIEW_EXTRAS') || '[]');
     ok('REAL: setViewExtras gespeichert', (vx.indexOf('Notiz') >= 0) === !was && /Gespeichert/.test(R.$('impSetMsg').textContent), [vx, was]);
   }
   ok('REAL: Sperre nie verschachtelt', env.lock.nested === 0, env.lock);
@@ -496,7 +497,7 @@ async function toStep3(E) {
   // ---- Web-Modus: lädt ohne Fehler, kein Import-Tab ----
   {
     const E = boot('web');
-    ok('Web: nur Start-Aufrufe aus Ui.html', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig']), E.names());
+    ok('Web: nur Start-Aufrufe aus Ui.html', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
     await E.startup();
     ok('Web: Import-Tab versteckt', E.$('tabImport').classList.contains('hidden'));
     ok('Web: paneImport vorhanden und versteckt', !!E.$('paneImport') && E.$('paneImport').classList.contains('hidden'));
@@ -509,7 +510,7 @@ async function toStep3(E) {
   // ---- Seitenleiste: Laden ohne Serveraufrufe aus ImportUi ----
   const E = boot('sidebar', { setup: S => { S.draft = { sourceId: 'SRC1', sourceName: X1 + 'Ordner', sourceUrl: 'https://docs.google.com/spreadsheets/d/SRC1/edit', kind: 'sheet', tab: 'Karten', stage: 'pruefung', mode: 'neu', total: 5, recognizePos: 5 }; } });
   const { $ } = E;
-  ok('Sidebar: beim Laden nur getSetSuggestions + getUiConfig', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig']), E.names());
+  ok('Sidebar: beim Laden nur getSetSuggestions, getUiConfig, getUpdateInfo', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
   await E.startup();
   ok('Sidebar: Import-Tab sichtbar, Bereich noch leer', !$('tabImport').classList.contains('hidden') && $('impMain').innerHTML === '');
   ok('Sidebar: impInit noch nicht aufgerufen', E.win.impInitCalls === 0);
