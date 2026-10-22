@@ -87,7 +87,7 @@ function unchecked(fp) {
 
 function mkEnv() {
   const env = H.createEnv({ files: ['Code.gs', '../parts/00_shared.gs', '../parts/30_protokoll.gs'] });
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   env.ui.alerts.length = 0;
   return env;
 }
@@ -734,7 +734,7 @@ t.section('Teile zusammen');
       console.log('  (andere Teile laden gerade nicht: ' + e.message + ', übersprungen)');
     }
     if (env) {
-      env.ctx.einrichtung();
+      env.ctx.setupAll_();
       seed(env, { items: [clear('fpX', 2, GLURAK)] });
       const r = env.uiCall('importCommit');
       t.eq('zusammen: Commit', [r.nr, rowsOf(env, 1).length], [1, 1]);
@@ -772,7 +772,7 @@ function e2e(t) {
   t.section('Ganzer Ablauf mit Quelle und Erkennung');
   const env = H.createEnv({ files: ['Code.gs', '../parts/00_shared.gs', '../parts/10_quelle.gs', '../parts/20_erkennung.gs', '../parts/30_protokoll.gs'] });
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   env.addSource({ id: 'SRCFILE0001', name: 'Meine Liste', mime: 'sheet', tabs: { Karten: [
     ['Karte Name', 'Setnummer', 'Set', 'Anzahl', 'Preis', 'Ordner'],
     ['Glurak', '025/189', 'Flammende Finsternis', '2', '', 'A'],

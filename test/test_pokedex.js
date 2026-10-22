@@ -38,7 +38,7 @@ function db() {
 
 function setup() {
   const env = H.createEnv({ files: ['Code.gs'], db: db() });
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   return env;
 }
 
@@ -111,7 +111,7 @@ t.section('Einrichtung');
   const ssh = env.sheet('Seltenheiten');
   const r = s.findIndex(o => o['Seltenheit'] === 'Selten') + 2;
   ssh.getRange(r, 2).setValue(7);
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   eq('Filter bleiben bei erneuter Einrichtung', [sh.getRange('B4:D4').getValues()[0], sh.getRange('I4').getValue()], [['Fehlend', 2, 'Pi'], '#25 Pikachu']);
   eq('eigene Stufe bleibt', ssh.getRange(r, 2).getValue(), 7);
   eq('Pokédex weiter an zweiter Stelle', env.ss.list.map(x => x.name).slice(0, 2), ['Sammlung', 'Pokédex']);
@@ -224,7 +224,7 @@ t.section('Sortierung der Sammlung');
 t.section('Ansicht neu aufbauen und onEdit');
 {
   const env = H.createEnv({ files: ['Code.gs'], db: db() });
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   env.ss.deleteSheet(env.sheet('Pokédex'));
   env.ss.deleteSheet(env.sheet('Seltenheiten'));
   env.ctx.ansichtNeuAufbauen();

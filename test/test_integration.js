@@ -351,15 +351,16 @@ function seedImport(env) {
   t.section('Seitenleiste: Start');
   const env = makeEnv();
   env.ctx.onOpen();
-  env.ctx.einrichtung();
-  t.ok('Einrichtung ohne Fehlermeldung', env.ui.alerts.length === 1 && /Einrichtung fertig/.test(env.ui.alerts[0]), env.ui.alerts);
+  const setupMsg = env.ctx.setupAll_();
+  t.ok('Einrichtung ohne Fehlermeldung, Ergebnis unten rechts', env.ui.alerts.length === 0 && /Einrichtung fertig/.test(setupMsg) &&
+    env.ss.toasts.slice(-1)[0] === setupMsg, [setupMsg, env.ui.alerts, env.ss.toasts]);
   t.ok('Schema v2', env.setting('SCHEMA_VERSION') === '2');
   t.ok('Daten und Gruppen versteckt, Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden && env.ss.list[0].name === 'Sammlung');
   t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 13), env.run('VIEW_HEADERS'));
   t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:W,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,einrichtung,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();
@@ -912,12 +913,6 @@ function seedImport(env) {
     checkUiMatchesServer(U, 'nach Umstieg');
     t.ok('keine Skriptfehler (Umstieg)', U.errors.length === 0, U.errors);
   }
-
-  // ---- 14. Alte Oberfläche: adjustCount mit v1-Schlüssel ----
-  t.section('Alte Aufrufe');
-  const ac = env.uiCall('adjustCount', 'swsh3-136|normal|EX', 1);
-  t.ok('adjustCount mit v1-Schlüssel landet auf Zeile von Hand', ac.key === 'swsh3-136|normal||EX|DE' && ac.applied === 1, ac);
-  checkSheets(env, 'nach adjustCount');
 
   // ---- 15. Fehlerpfade über die echte Brücke ----
   t.section('Fehlerpfade');

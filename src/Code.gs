@@ -16,7 +16,8 @@
  *   9. API-Prüfung ("Beim Bau zu prüfen")
  *  10. Pokédex, Seltenheiten und Sortierung der Sammlung
  *
- * Erste Schritte: Funktion `einrichtung` einmal im Apps-Script-Editor ausführen.
+ * Erste Schritte: in der Tabelle „Pokémon > Karten erfassen“ öffnen. Das richtet beim ersten Mal alles ein und legt
+ * später fehlende Blätter oder den nächtlichen Preislauf wieder an (repairSetup_).
  * Das Import-Werkzeug steht in Import.gs / ImportUi.html und nutzt die Hilfsfunktionen hier.
  * Versionsprüfung, „Neue Version holen“ und Übernahme aus einer alten Tabelle stehen in Update.gs.
  */
@@ -118,7 +119,7 @@ function ss_() {
   try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { ss = null; }
   if (!ss) {
     const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-    if (!id) throw new Error('Tabellen-ID fehlt. Bitte im Sheet einmal „Pokémon > Einrichtung" ausführen.');
+    if (!id) throw new Error('Tabellen-ID fehlt. Bitte die Tabelle am Computer öffnen und einmal „Pokémon > Karten erfassen“ starten.');
     ss = SpreadsheetApp.openById(id);
   }
   ssCache_ = ss;
@@ -131,7 +132,7 @@ function tz_() {
 
 function sheet_(name) {
   const sh = ss_().getSheetByName(name);
-  if (!sh) throw new Error('Blatt „' + name + '" fehlt. Bitte „Pokémon > Einrichtung" ausführen.');
+  if (!sh) throw new Error('Blatt „' + name + '“ fehlt. Bitte am Computer „Pokémon > Karten erfassen“ neu öffnen, dann legt das Tool es wieder an.');
   return sh;
 }
 
@@ -355,16 +356,6 @@ function groupKey_(o) {
 /** Zeile mit Inhalt? (leere Zeilen im Blatt zählen nicht) */
 function isDataRow_(r) {
   return !!(r && (String(r[COL.key] || '') || String(r[COL.id] || '') || String(r[COL.name] || '') || String(r[COL.eid] || '')));
-}
-
-/** Eigener Preis, sonst Trendpreis, sonst null. row = Daten-Zeile (Array) oder Objekt {ownPrice, price}. */
-function effectivePrice_(row) {
-  if (!row) return null;
-  const own = Array.isArray(row) ? row[COL.ownPrice] : row.ownPrice;
-  const pr = Array.isArray(row) ? row[COL.price] : row.price;
-  if (typeof own === 'number' && isFinite(own)) return own;
-  if (typeof pr === 'number' && isFinite(pr)) return pr;
-  return null;
 }
 
 /** Volle Kopfzeile des Blatts Daten: feste Spalten + Zusatzspalten (ab Index 30). */
@@ -997,7 +988,7 @@ function migrateSchema_() {
     settingSet_('SCHEMA_VERSION', SCHEMA_VERSION);
     rebuildGroups_();
     // Die alte Ansichtsformel las Daten!A2:W. Wird zum ersten Mal umgestellt (z. B. weil die Seitenleiste vor
-    // „Einrichtung“ geöffnet wurde), gleich auf die neue Formel mit Gruppen wechseln. Suchfelder bleiben.
+    // der Einrichtung geöffnet wurde), gleich auf die neue Formel mit Gruppen wechseln. Suchfelder bleiben.
     if (migrated && ss.getSheetByName(SHEETS.view)) setupViewSheet_(ss, true);
     return msg;
   });
@@ -1358,7 +1349,6 @@ function onOpen() {
     .addItem('Nach Updates suchen', 'updatesAnzeigen')
     .addItem('Aus alter Tabelle übernehmen', 'uebernahmeAnzeigen'));
   menu
-    .addItem('Einrichtung', 'einrichtung')
     .addItem('Ansicht neu aufbauen', 'ansichtNeuAufbauen')
     .addItem('API prüfen', 'apiPruefen')
     .addItem('Web-App-Link anzeigen', 'webAppLinkAnzeigen')
@@ -1372,12 +1362,14 @@ function kartenErfassen(start) {
   if (isFreshCopy_()) {
     // frische Kopie der Vorlage: einmal alles einrichten, auch die Auslöser
     notify_('Neue Tabelle: Einrichtung läuft …');
-    if (!setupAll_(false)) return;
+    if (!setupAll_()) return;
   } else {
     upgradeIfNeeded_();
     if (needsSetup_()) {
       notify_('Neue Tabelle: Einrichtung läuft …');
-      if (!setupAll_(false)) return;
+      if (!setupAll_()) return;
+    } else {
+      repairSetup_();
     }
   }
   const t = HtmlService.createTemplateFromFile('Ui');
@@ -1523,17 +1515,12 @@ function applyRowHeights_(sh) {
 // 3. Einrichtung
 // ---------------------------------------------------------------------------
 
-function einrichtung() {
-  if (takenOverBy_()) { uebernommenHinweis(); return; }
-  const msg = setupAll_(true);
-  if (msg) alert_(msg);
-}
-
 /**
- * Alles einrichten: Datenformat, Einstellungen, Blätter, Auslöser, Sets und Übersetzung. Für „Einrichtung“ und
- * für eine frische Kopie der Vorlage. withHint: Hinweis zur Web-App anhängen. -> Text für die Meldung, '' bei Abbruch
+ * Alles einrichten: Datenformat, Einstellungen, Blätter, Auslöser, Sets und Übersetzung. Für eine frische Kopie der
+ * Vorlage und eine Tabelle, die noch nie eingerichtet wurde (kartenErfassen). Zeigt das Ergebnis kurz unten rechts.
+ * -> Text der Meldung, '' bei Abbruch
  */
-function setupAll_(withHint) {
+function setupAll_() {
   const ss = ss_();
   if (Number(settingGet_('SCHEMA_VERSION')) > Number(SCHEMA_VERSION)) {
     // älterer Code als die Daten (z. B. eine alte Version von Hand eingefügt): nichts umbauen
@@ -1562,7 +1549,7 @@ function setupAll_(withHint) {
   } catch (e) {
     msg += ' Sets und Übersetzung konnten nicht geladen werden (' + e.message + '). Bitte später „Pokémon > Übersetzung und Sets aktualisieren" starten.';
   }
-  if (withHint) msg += redeployHint_();
+  notify_(msg);
   return msg;
 }
 
@@ -1585,19 +1572,50 @@ function setupSheets_(ss, keepControls) {
 }
 
 /**
- * Hinweis für die Einrichtung, wenn es eine Web-App fürs Handy gibt: Eine Bereitstellung mit fester Version
- * läuft mit dem alten Code weiter, bis sie auf „Neue Version“ gestellt wird. Offene Seitenleisten auch.
+ * Beim Öffnen der Seitenleiste in einer eingerichteten Tabelle (statt eines Menüpunkts „Einrichtung“): fehlende Blätter
+ * (ohne tcgdex-Abruf, Suchfelder bleiben) und einen fehlenden nächtlichen Preislauf wieder anlegen.
  */
-function redeployHint_() {
-  let url = settingGet_('WEBAPP_URL');
-  if (!url) {
-    try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
+function repairSetup_() {
+  const ss = ss_();
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SPREADSHEET_ID') !== ss.getId()) props.setProperty('SPREADSHEET_ID', ss.getId());
+  const missing = missingToolSheets_();
+  if (missing.length) {
+    notify_('Lege fehlende Blätter wieder an: ' + missing.join(', ') + ' …');
+    ensureSchema_();
+    setupSheets_(ss, true);
   }
-  if (!url) return '';
-  return '\n\nWichtig für die Handy-Seite: Im Apps-Script-Editor „Bereitstellen > Bereitstellungen verwalten“ öffnen, ' +
-    'auf „Bearbeiten“ (Stift) klicken, bei Version „Neue Version“ wählen und „Bereitstellen“ klicken. Bis dahin am Handy ' +
-    'bitte keine Karten ändern, die alte Seite schreibt noch im alten Format. Eine offene Seitenleiste bitte einmal schließen ' +
-    'und neu öffnen, die Handy-Seite neu laden.';
+  if (nightlyTriggerMissing_()) {
+    setupTriggers_();
+    notify_('Der nächtliche Preislauf fehlte und ist wieder eingerichtet.');
+  }
+}
+
+/** Blätter, die die Einrichtung immer anlegt und die hier fehlen (API-Check, Pokédex-Nummern und Diagnose entstehen bei Bedarf). */
+function missingToolSheets_() {
+  const later = [SHEETS.check, SHEETS.dexIds, SHEETS.settings, 'Diagnose'];
+  const noImport = typeof setupImportSheets_ !== 'function';
+  const have = {};
+  ss_().getSheets().forEach(function (sh) { have[sh.getName()] = true; });
+  return toolSheetNames_().filter(function (n) {
+    return !have[n] && later.indexOf(n) < 0 && !(noImport && /^Import/.test(n));
+  });
+}
+
+/**
+ * Fehlt der nächtliche Preislauf? Auslöser gehören dem Konto, das sie angelegt hat, und jedes Konto sieht nur seine
+ * eigenen. Damit ein zweites Konto mit Zugriff auf die Tabelle keinen doppelten Preislauf anlegt, fehlt er erst, wenn
+ * die Einrichtung älter als drei Tage ist und seit drei Tagen kein Preislauf im Verlauf steht.
+ */
+function nightlyTriggerMissing_() {
+  if (ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'naechtlicherPreislauf'; })) return false;
+  const since = Date.now() - 3 * 24 * 3600 * 1000;
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})/.exec(settingGet_('SETUP_AT')); // 'dd.MM.yyyy HH:mm' oder 'vor 1.0'
+  if (m && new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime() > since) return false;
+  const sh = ss_().getSheetByName(SHEETS.hist);
+  const last = sh ? sh.getLastRow() : 0;
+  const dates = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
+  return !dates.some(function (r) { return r[0] instanceof Date && r[0].getTime() > since; });
 }
 
 /** Baut Gruppen und die Blätter Sammlung und Pokédex neu auf (keine API-Abrufe, Daten bleiben). */
@@ -2836,30 +2854,6 @@ function revertAdjust(token) {
   }
   delete res.applied;
   return res;
-}
-
-/**
- * Für alte Oberflächen: Anzahl über den Eintragsschlüssel ändern. Nimmt die Zeile „von Hand“
- * dieses Schlüssels, sonst die erste mit diesem Schlüssel. Alte Schlüssel (id|variant|cond) gehen auch.
- * -> {key, count, applied}
- */
-function adjustCount(key, delta) {
-  ensureSchema_();
-  key = String(key == null ? '' : key);
-  const parts = key.split('|');
-  if (parts.length === 3) key = [parts[0], parts[1], '', parts[2], 'DE'].join('|'); // Schlüssel aus Version 1
-  const st = dataStore_();
-  let hand = -1, any = -1;
-  st.rows.forEach(function (r, i) {
-    if (!isDataRow_(r)) return;
-    if (entryKey_(r) !== key && String(r[COL.key]) !== key) return;
-    if (any < 0) any = i;
-    if (hand < 0 && isHandOrigin_(r[COL.origin])) hand = i;
-  });
-  const i = hand >= 0 ? hand : any;
-  if (i < 0) throw new Error('Eintrag nicht gefunden.');
-  const res = adjustEntry(st.rows[i][COL.eid], delta);
-  return { key: key, count: res.count, applied: res.applied };
 }
 
 /**

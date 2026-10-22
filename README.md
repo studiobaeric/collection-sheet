@@ -14,6 +14,8 @@ Das Tool läuft als Apps-Script-Projekt, das an eine Google-Tabelle gebunden ist
 2. Öffne in deiner Kopie **Pokémon > Karten erfassen**. Google fragt einmal nach den Berechtigungen des Skripts. Erscheint „Google hat diese App nicht überprüft“, klicke auf **Erweitert**, dann auf **Weiter zu … (unsicher)** und auf **Zulassen**. Das Skript gehört zu deiner eigenen Kopie und läuft nur in deinem Konto.
 3. Beim ersten Öffnen richtet sich die Kopie selbst ein: Blätter, nächtlicher Preislauf und die Liste der Sets. Zeigt Google oben eine gelbe Leiste „Einige Formeln erfordern das Versenden und Empfangen von Daten externer Nutzer“, klicke auf **Zugriff erlauben**. Gemeint sind die Kartenbilder: Die Tabelle lädt sie mit `IMAGE`-Formeln von tcgdex.net. Dabei geht nur die Bildadresse der Karte an tcgdex, deine Sammlung bleibt in der Tabelle. Ohne Freigabe fehlen die Kartenbilder.
 
+Einen eigenen Menüpunkt zum Einrichten gibt es nicht. Fehlt später ein Blatt des Tools oder der nächtliche Preislauf, legt **Pokémon > Karten erfassen** sie beim Öffnen wieder an.
+
 Am Handy nutzt du die Web-App: Erweiterungen > Apps Script > **Bereitstellen > Neue Bereitstellung > Web-App**, dann den Link mit **Pokémon > Web-App-Link anzeigen** speichern.
 
 ## Updates

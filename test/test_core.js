@@ -17,7 +17,7 @@ function fresh(opts) {
 
 function setup(opts) {
   const env = fresh(opts);
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   return env;
 }
 
@@ -87,13 +87,13 @@ t.section('Migration v1 -> v2');
   env.ctx.settingSet_('SCHEMA_VERSION', '');
   env.ctx.migrateSchema_();
   ok('second run idempotent', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
-  // Zusatzspalte überlebt einrichtung
+  // Zusatzspalte überlebt setupAll_
   env.ctx.withLock_(() => env.ctx.ensureExtraColumn_('Notiz'));
   env.sheet('Daten').getRange(2, 31).setValue('Lieblingskarte');
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   const v2 = env.values('Daten');
-  ok('einrichtung keeps extra header + value', v2[0][30] === 'Notiz' && v2[1][30] === 'Lieblingskarte', v2[0].slice(28));
-  ok('einrichtung keeps data', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
+  ok('setupAll_ keeps extra header + value', v2[0][30] === 'Notiz' && v2[1][30] === 'Lieblingskarte', v2[0].slice(28));
+  ok('setupAll_ keeps data', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
   ok('no nested locks', env.lock.nested === 0, env.lock);
 }
 {
@@ -131,7 +131,6 @@ t.section('Hilfsfunktionen');
   eq('originOf_/importNrOf_', [c.originOf_(4), c.importNrOf_('Import 4'), c.importNrOf_('Hand'), c.importNrOf_('')], ['Import 4', 4, null, null]);
   eq('ORIGIN_HAND', env.run('ORIGIN_HAND'), 'Hand');
   eq('LANGS first/last', [env.run('LANGS')[0], env.run('LANGS')[10]], [['DE', 'Deutsch'], ['ZH', 'Chinesisch']]);
-  eq('effectivePrice_', [c.effectivePrice_({ ownPrice: 2, price: 1 }), c.effectivePrice_({ ownPrice: '', price: 1 }), c.effectivePrice_({ ownPrice: '', price: '' })], [2, 1, null]);
   ok('newEid_ format', /^E[0-9a-f]{10}$/.test(c.newEid_()));
   const free = c.buildCardRow_({ free: true, name: 'Mew', setName: 'Black Star', localId: '012/50' }, { count: 2, variant: 'holo', lang: 'EN', ownPrice: '1,50' });
   const o = c.rowObj_(free);
@@ -275,7 +274,7 @@ t.section('searchCollection');
 }
 
 // ---------------------------------------------------------------------------
-t.section('adjustEntry / revertAdjust / adjustCount');
+t.section('adjustEntry / revertAdjust');
 {
   const env = setup();
   importeSheet(env, [{ nr: 3, name: 'Pokemon Ordner', id: 'SRC1' }]);
@@ -316,16 +315,6 @@ t.section('adjustEntry / revertAdjust / adjustCount');
   ok('revert of creating +1 deletes Hand row at 0', r.count === 0 && !env.data().some(x => x.eid === hand.eid) && env.data().length === 1, [r, env.data().length]);
   ok('Gruppen updated after revert', groupBy(env, 'swsh3-025|normal|')['Anzahl'] === 0);
   t.throws('unknown eid', () => env.uiCall('adjustEntry', 'Exxxxxxxxxx', 1), /nicht gefunden/);
-
-  // adjustCount (alte Oberflächen)
-  const a = env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
-  r = env.uiCall('adjustCount', a.key, 1);
-  ok('adjustCount new key', r.key === a.key && r.count === 2 && r.applied === 1, r);
-  r = env.uiCall('adjustCount', 'base1-4|holo|', -1);
-  ok('adjustCount old v1 key', r.key === 'base1-4|holo|||DE' && r.count === 1 && r.applied === -1, r);
-  r = env.uiCall('adjustCount', 'swsh3-025|normal||NM|DE', 1);
-  ok('adjustCount on import-only key goes to new Hand row', r.count === 1 && env.data().filter(x => x.key === 'swsh3-025|normal||NM|DE').length === 2, r);
-  t.throws('adjustCount unknown', () => env.uiCall('adjustCount', 'nix|normal||NM|DE', 1), /nicht gefunden/);
   ok('no nested locks', env.lock.nested === 0, env.lock);
 }
 
@@ -619,7 +608,8 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
-  ok('menu', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7);
+  ok('menu ohne Einrichtung', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 6 &&
+    !env.ui.menus[0].items.some(x => x[1] === 'einrichtung'), env.ui.menus[0].items);
   ok('getSetSuggestions', env.uiCall('getSetSuggestions').indexOf('Darkness Ablaze') >= 0);
   ok('Hand row count', a.count === 1);
 }
@@ -712,7 +702,7 @@ t.section('Code-Regeln');
   ok('no require/import in Code.gs', !/\brequire\(|^\s*import\s/m.test(src));
   const env = fresh();
   const pub = Object.keys(env.ctx).filter(k => typeof env.ctx[k] === 'function' && !/_$/.test(k));
-  const want = ['getUiConfig', 'addCard', 'addFreeCard', 'searchCollection', 'adjustEntry', 'revertAdjust', 'adjustCount', 'editEntry',
+  const want = ['getUiConfig', 'addCard', 'addFreeCard', 'searchCollection', 'adjustEntry', 'revertAdjust', 'editEntry',
     'setGroupOwnPrice', 'linkFreeGroup', 'getSetSuggestions', 'setViewExtras', 'include', 'doGet', 'kartenErfassen', 'searchCards', 'getCardDetail', 'getCardBySetNumber'];
   ok('public API present', want.every(n => pub.indexOf(n) >= 0), want.filter(n => pub.indexOf(n) < 0));
 }

@@ -122,7 +122,7 @@ const data = () => dataObjs(COL);
 env.ui.menus.length = 0;
 nu.onOpen();
 const newMenu = env.ui.menus[0].items.map(i => i.join('='));
-t.ok('onOpen: gleiche Menüpunkte wie vorher', J(newMenu) === J(oldMenu), { old: oldMenu, new: newMenu });
+t.ok('onOpen: gleiche Menüpunkte wie vorher, ohne Einrichtung (seit 1.0.3)', J(newMenu) === J(oldMenu.filter(x => x !== 'Einrichtung=einrichtung')), { old: oldMenu, new: newMenu });
 newMenu.forEach(m => { const fn = m.split('=')[1]; t.ok('Menüfunktion ' + fn + ' existiert', typeof nu[fn] === 'function'); });
 
 // ---------------------------------------------------------------------------
@@ -224,8 +224,8 @@ let dataAfterSidebar = null;
   t.section('Einrichtung');
   env.ui.alerts.length = 0;
   const sheetsBefore = env.ss.list.map(s => s.name);
-  nu.einrichtung();
-  t.ok('Einrichtung: genau eine Meldung, „fertig“', env.ui.alerts.length === 1 && /Einrichtung fertig/.test(env.ui.alerts[0]), env.ui.alerts);
+  const setupMsg = nu.setupAll_();
+  t.ok('Einrichtung: kein Meldungsfenster, „fertig“', env.ui.alerts.length === 0 && /Einrichtung fertig/.test(setupMsg), [setupMsg, env.ui.alerts]);
   console.log('   Meldung:', env.ui.alerts[0]);
   const names = env.ss.list.map(s => s.name);
   t.ok('Einrichtung: keine doppelten Blätter', new Set(names).size === names.length, names);
@@ -249,7 +249,7 @@ let dataAfterSidebar = null;
 
   // zweites „Einrichtung“ (Eric klickt es aus Gewohnheit noch einmal)
   env.ui.alerts.length = 0;
-  nu.einrichtung();
+  nu.setupAll_();
   t.ok('Einrichtung zweimal: Daten gleich', J(data().map(r => [r.eid, r.key, r.count])) === J(d2.map(r => [r.eid, r.key, r.count])));
   t.ok('Einrichtung zweimal: Trigger nicht doppelt', J(env.triggers.map(x => x.fn).sort()) === J(['beiStrukturAenderung', 'naechtlicherPreislauf']));
   t.ok('Einrichtung zweimal: Begriffe nicht doppelt', env.objects('Import-Begriffe').length === new Set(env.objects('Import-Begriffe').map(r => r.Begriff + '|' + r.Bedeutung)).size);
@@ -482,9 +482,9 @@ let dataAfterSidebar = null;
   {
     const { e2, n } = freshOld();
     n.onOpen();
-    n.einrichtung();
-    console.log('   Meldung:', e2.ui.alerts[0]);
-    t.ok('B: Meldung nennt die Umstellung', /6 Einträge auf das neue Datenformat umgestellt/.test(e2.ui.alerts[0] || ''), e2.ui.alerts);
+    const msgB = n.setupAll_();
+    console.log('   Meldung:', msgB);
+    t.ok('B: Meldung nennt die Umstellung', /6 Einträge auf das neue Datenformat umgestellt/.test(msgB || ''), msgB);
     t.ok('B: Trigger nicht doppelt', J(e2.triggers.map(x => x.fn).sort()) === J(['beiStrukturAenderung', 'naechtlicherPreislauf']));
     t.ok('B: Formel auf Gruppen', /Gruppen!A2:W/.test(e2.sheet('Sammlung').getRange('A6').getFormula()));
     t.ok('B: 5 Gruppen', e2.objects('Gruppen').length === 5);
@@ -504,8 +504,8 @@ let dataAfterSidebar = null;
     const c = e2.sheet('Sammlung').getRange('B4:H4').getValues()[0];
     t.ok('C: Suche/Bilder bleiben', c[0] === 'Nachtara' && c[6] === true, c);
     e2.ui.alerts.length = 0;
-    n.einrichtung();
-    t.ok('C: Einrichtung danach ok', /Einrichtung fertig/.test(e2.ui.alerts[0] || ''), e2.ui.alerts);
+    const msgC = n.setupAll_();
+    t.ok('C: Einrichtung danach ok', /Einrichtung fertig/.test(msgC || ''), msgC);
   }
   t.section('Reihenfolge D: „Ansicht neu aufbauen“ / „Preise jetzt“ vor „Einrichtung“');
   {
@@ -528,7 +528,7 @@ let dataAfterSidebar = null;
     const h = e2.values('Verlauf');
     t.ok('E: Verlauf eine Zeile heute, Gesamtwert und Kartenanzahl gleich', h.length === histOld.length && h[1][1] === histOld[1][1] && h[1][2] === histOld[1][2], { alt: histOld, neu: h });
     e2.ui.alerts.length = 0;
-    n.einrichtung();
+    n.setupAll_();
     t.ok('E: Einrichtung danach Trigger nicht doppelt', J(e2.triggers.map(x => x.fn).sort()) === J(['beiStrukturAenderung', 'naechtlicherPreislauf']));
   }
 
@@ -557,7 +557,7 @@ let dataAfterSidebar = null;
   t.section('Alte Web-App-Bereitstellung schreibt nach der Umstellung (Zeile ohne Eintrag-ID)');
   {
     const { e2, o, n } = freshOld();
-    n.einrichtung();
+    n.setupAll_();
     const COLn = vm.runInContext('COL', n);
     const gBefore = e2.objects('Gruppen').find(g => g['Gruppenschlüssel'] === 'neo2-13|normal|');
     // Handy: alte Bereitstellung, Nachtara +1 über „Hinzufügen“
@@ -588,7 +588,7 @@ let dataAfterSidebar = null;
   t.section('Variante in Daten von Hand als Text geändert („Reverse Holo“ statt „reverse“)');
   {
     const { e2, n } = freshOld();
-    n.einrichtung();
+    n.setupAll_();
     const COLn = vm.runInContext('COL', n);
     const dsh = e2.sheet('Daten');
     const rows = e2.values('Daten');
@@ -607,7 +607,7 @@ let dataAfterSidebar = null;
   t.section('Sortierung „Zuletzt hinzugefügt“: Nochmal +1 auf eine vorhandene Karte');
   {
     const { e2, n } = freshOld();
-    n.einrichtung();
+    n.setupAll_();
     const COLn = vm.runInContext('COL', n);
     // Alle Einträge am 01.10. erfasst, Nachtara normal am 10.10.
     const dsh = e2.sheet('Daten');

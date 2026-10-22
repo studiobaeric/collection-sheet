@@ -110,11 +110,11 @@ function srcValues(env) {
 }
 
 // ===========================================================================
-t.section('setupImportSheets_ über einrichtung');
+t.section('setupImportSheets_ über setupAll_');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   const vis = n => env.sheet(n) && !env.sheet(n).isSheetHidden();
   const hid = n => env.sheet(n) && env.sheet(n).isSheetHidden();
   t.ok('sichtbar: Importe, Import-Begriffe, Import-Sets', vis('Importe') && vis('Import-Begriffe') && vis('Import-Sets'));
@@ -156,7 +156,7 @@ t.section('setupImportSheets_ über einrichtung');
       ['DE', 'Sprache', 'DE', 'nur Spalten']]);
   t.ok('alle Werte sind Text (keine Zahlen/Daten)', terms.every(r => r.every(v => typeof v === 'string')));
   t.eq('Import-Sets leer', env.values('Import-Sets').length, 1);
-  lockClean(env, 'einrichtung');
+  lockClean(env, 'setupAll_');
 
   // Eric ändert etwas, dann zweite Einrichtung
   const bg = env.sheet('Import-Begriffe');
@@ -166,7 +166,7 @@ t.section('setupImportSheets_ über einrichtung');
   env.sheet('Importe').getRange(2, 1, 1, 8).setValues([[1, '2026-10-01', 'Meine Liste', SHEET_ID, 'Tabellenblatt1', '', 'Nur Neues', 'aktiv']]);
   env.sheet('Import-Vorlagen').getRange(2, 1, 1, 4).setValues([['Alt', '{"form":"liste","mode":"alle"}', 'a|b', '2026-01-01 10:00']]);
   env.sheet('Import-Antworten').getRange(2, 1, 1, 5).setValues([['S1', 'abc', '{"type":"skip"}', '', '2026-10-01']]);
-  c.einrichtung();
+  c.setupAll_();
   const terms2 = env.values('Import-Begriffe').slice(1);
   t.eq('zweite Einrichtung: 39 Begriffe, keine doppelte Vorbelegung', terms2.length, 39);
   t.eq('zweite Einrichtung: Erics Änderung bleibt', terms2[0], ['Reverse Holo', 'Variante', 'holo', 'Name und Spalten']);
@@ -217,7 +217,7 @@ t.section('importOpenSource / importSelectTab: Google Sheet');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   addSources(env);
   const shapes = ['https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit#gid=0', 'https://drive.google.com/file/d/' + SHEET_ID + '/view',
     'https://drive.google.com/open?id=' + SHEET_ID, SHEET_ID];
@@ -318,7 +318,7 @@ t.section('xlsx über Drive-API v3: temporäre Kopie');
 {
   const env = mkEnv({ drive: 'v3' });
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   addSources(env);
   const o = env.uiCall('importOpenSource', 'https://drive.google.com/file/d/' + XLSX_ID + '/view?usp=drive_link');
   t.eq('xlsx geöffnet', [o.sourceId, o.sourceName, o.kind, o.tabs.map(x => x.name)], [XLSX_ID, 'Pokemon Ordner.xlsx', 'xlsx', ['Tabellenblatt1', 'Pokedex', 'Leer']]);
@@ -372,7 +372,7 @@ t.section('xlsx über Drive-API v2 und ohne Drive-Dienst');
 {
   const env = mkEnv({ drive: 'v2' });
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   addSources(env);
   const o = env.uiCall('importOpenSource', 'https://drive.google.com/open?id=' + XLSX2_ID);
   t.eq('v2-Kopie: title + mimeType, convert true, supportsAllDrives', [o.kind, J(env.driveCopies[0].resource), J(env.driveCopies[0].extra)],
@@ -383,7 +383,7 @@ t.section('xlsx über Drive-API v2 und ohne Drive-Dienst');
 
   const env2 = mkEnv({ drive: false });
   const c2 = env2.ctx;
-  c2.einrichtung();
+  c2.setupAll_();
   addSources(env2);
   t.throws('ohne Drive-Dienst: genaue Meldung', () => c2.importOpenSource(XLSX_ID),
     /^Für \.xlsx-Dateien bitte im Apps-Script-Editor links unter „Dienste“ die „Drive API“ hinzufügen\.$/);
@@ -400,7 +400,7 @@ t.section('HYPERLINK-Formel und Rich-Text ohne Text');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   const id = '1FormelAbcdefghijklmnopQRST';
   env.addSource({ id, name: 'Formeln', mime: 'sheet', tabs: { T: { values: [['Name', 'Link'], ['Glurak', ''], ['Turtok', 7]], display: [['Name', 'Link'], ['Glurak', 'zur Karte'], ['Turtok', '7']] } } });
   env.sources[id].getSheetByName('T').formulas['2,2'] = '=HYPERLINK("' + U_GLURAK + '";"zur Karte")';
@@ -490,7 +490,7 @@ t.section('parseSourceRecords_: Liste und Checkliste');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   addSources(env);
   c.importOpenSource(SHEET_ID);
   c.importSelectTab('Tabellenblatt1');
@@ -527,7 +527,7 @@ t.section('parseSourceRecords_: Raster');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   const id = '1RasterAbcdefghijklmnopQRSTU';
   // Blöcke 2x1 (Name, Nummer), Abstand 1 Zeile / 1 Spalte, Start Zeile 2 Spalte A
   const W = 15;
@@ -571,7 +571,7 @@ t.section('Vorlagen');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   addSources(env);
   c.importOpenSource(SHEET_ID);
   const first = c.importSelectTab('Tabellenblatt1');
@@ -616,12 +616,7 @@ t.section('Vorlagen');
   const keep = env.uiCall('importSaveTemplate', 'Zweite', cfg, 'abgleich');
   t.eq('ohne Quelle: alte Signatur bleibt', keep.signature.split('|')[0], 'karte name');
 
-  const del = env.uiCall('importDeleteTemplate', 'ZWEITE');
-  t.eq('löschen (Groß/klein egal)', [del.deleted, del.templates.map(x => x.name)], [true, ['Ohne Kopf', 'ordner liste']]);
-  t.eq('unbekannte Vorlage löschen', env.uiCall('importDeleteTemplate', 'gibt es nicht').deleted, false);
-  env.uiCall('importDeleteTemplate', 'Ohne Kopf');
-  env.uiCall('importDeleteTemplate', 'ordner liste');
-  t.eq('alle gelöscht: Blatt nur mit Kopfzeile', [env.uiCall('importListTemplates'), env.values('Import-Vorlagen').length], [[], 1]);
+  t.eq('drei Vorlagen', env.uiCall('importListTemplates').map(x => x.name).sort(), ['Ohne Kopf', 'Zweite', 'ordner liste']);
   lockClean(env, 'Vorlagen');
 }
 
@@ -633,7 +628,7 @@ t.section('importState');
   // ohne Einrichtung, ohne Import-Blätter, ohne importList
   const s0 = env.uiCall('importState');
   t.eq('ohne Blätter und Teile', [s0.draft, s0.imports, s0.busy, s0.driveService, s0.templates, s0.needsSetup], [null, [], null, true, [], true]);
-  c.einrichtung();
+  c.setupAll_();
   t.eq('nach Einrichtung: needsSetup false', env.uiCall('importState').needsSetup, false);
   env.ctx.importList = () => [{ nr: 1, status: 'aktiv' }];
   t.eq('importList wird benutzt', env.uiCall('importState').imports, [{ nr: 1, status: 'aktiv' }]);
@@ -666,7 +661,7 @@ t.section('Sperre belegt');
 {
   const env = mkEnv();
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   addSources(env);
   env.lock.busy = true;
   t.throws('importOpenSource bei belegter Sperre: deutsche Meldung', () => c.importOpenSource(XLSX_ID), /gerade beschäftigt/);
@@ -727,7 +722,7 @@ t.section('Sperre belegt');
     try {
       const env = H.createEnv({ files: FILES.concat(['../parts/20_erkennung.gs']) });
       const c = env.ctx;
-      c.einrichtung();
+      c.setupAll_();
       addSources(env);
       c.importOpenSource(SHEET_ID);
       const r = c.importSelectTab('Tabellenblatt1');

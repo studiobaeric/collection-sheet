@@ -66,7 +66,7 @@ function setupEnv(W, opts) {
   const env = H.createEnv({ srcDir: opts.srcDir || BASE_DIR });
   if (opts.id) env.ss.id = opts.id;
   env.http = W.handler;
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   env.ui.alerts.length = 0;
   env.cache.clear();
   return env;
@@ -521,6 +521,51 @@ t.section('Von Hand aktualisiert: neuer Code richtet die Blätter ein');
 }
 
 // ---------------------------------------------------------------------------
+t.section('Seitenleiste legt Fehlendes wieder an (statt Menüpunkt Einrichtung)');
+{
+  const env = setupEnv(makeWorld());
+  const c = env.ctx;
+  const daysAgo = n => env.run('new Date(' + (Date.now() - n * 24 * 3600 * 1000) + ')'); // Datum aus dem Skript, wie getValues
+  const dmy = d => [d.getDate(), d.getMonth() + 1].map(x => String(x).padStart(2, '0')).join('.') + '.' + d.getFullYear() + ' 10:00';
+  t.eq('nach der Einrichtung fehlt nichts', c.missingToolSheets_(), []);
+  t.ok('Einrichtung zeigt ihr Ergebnis unten rechts', env.ss.toasts.some(x => /^Einrichtung fertig\./.test(x)), env.ss.toasts);
+
+  env.sheet('Sammlung').getRange('B4').setValue('Glurak');
+  env.ss.deleteSheet(env.sheet('Sets'));
+  env.ss.deleteSheet(env.sheet('Importe'));
+  const fetches = env.fetchLog.length, sidebars = env.ui.sidebars.length;
+  c.kartenErfassen();
+  t.ok('fehlende Blätter wieder da, Suchfeld bleibt, ohne tcgdex', !!env.sheet('Sets') && !!env.sheet('Importe') &&
+    env.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && env.fetchLog.length === fetches && env.ui.sidebars.length === sidebars + 1);
+  t.ok('Hinweis nennt die Blätter', env.ss.toasts.some(x => /fehlende Blätter.*Sets, Importe/.test(x)), env.ss.toasts);
+  t.eq('danach fehlt nichts', c.missingToolSheets_(), []);
+
+  // Auslöser gehören dem Konto, das sie anlegt; ein zweites Konto sieht sie nicht
+  env.triggers = [];
+  c.kartenErfassen();
+  t.eq('ohne Auslöser, aber heute eingerichtet: nichts anlegen', env.triggers.length, 0);
+  c.settingSet_('SETUP_AT', dmy(daysAgo(10)));
+  env.sheet('Verlauf').getRange(2, 1, 1, 5).setValues([[daysAgo(1), 10, 1, 0, 0]]);
+  c.kartenErfassen();
+  t.eq('Preislauf von gestern im Verlauf: nichts anlegen', env.triggers.length, 0);
+  env.sheet('Verlauf').getRange(2, 1).setValue(daysAgo(5));
+  c.kartenErfassen();
+  t.eq('seit drei Tagen kein Preislauf: Auslöser wieder da', env.triggers.map(x => x.fn).sort(), ['beiStrukturAenderung', 'naechtlicherPreislauf']);
+  t.ok('Hinweis zum Preislauf', /Preislauf fehlte/.test(env.ss.toasts.slice(-1)[0]), env.ss.toasts.slice(-1));
+  c.kartenErfassen();
+  t.eq('vorhandener Auslöser: nicht doppelt', env.triggers.length, 2);
+  env.triggers = [];
+  c.settingSet_('SETUP_AT', 'vor 1.0');
+  c.kartenErfassen();
+  t.eq('vor 1.0 eingerichtet: zählt als alt', env.triggers.length, 2);
+
+  delete env.props.SPREADSHEET_ID;
+  c.kartenErfassen();
+  t.eq('Tabellen-ID für Web-App und Auslöser wieder gespeichert', env.props.SPREADSHEET_ID, env.ss.getId());
+  t.eq('keine Meldungsfenster', env.ui.alerts, []);
+}
+
+// ---------------------------------------------------------------------------
 t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 {
   const W = makeWorld();
@@ -528,7 +573,7 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   // alte Tabelle: eigene Umgebung mit dem gleichen Code, andere ID
   const oldEnv = baseEnv();
   oldEnv.ss.id = OLD_ID;
-  oldEnv.ctx.einrichtung();
+  oldEnv.ctx.setupAll_();
   oldEnv.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
   oldEnv.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', condition: 'LP', qty: 1 });
   const ob = oldEnv.ss;
@@ -673,7 +718,7 @@ t.section('Übernahme: eigenes Blatt „Übernommen“, neueres Datenformat');
   const W = makeWorld();
   const oldEnv = baseEnv();
   oldEnv.ss.id = OLD_ID;
-  oldEnv.ctx.einrichtung();
+  oldEnv.ctx.setupAll_();
   oldEnv.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
   const ob = oldEnv.ss;
   ob.insertSheet('Übernommen').getRange('A1:B1').setValues([['Tausch mit Max', 'Glurak']]);
@@ -694,7 +739,7 @@ t.section('Übernahme: eigenes Blatt „Übernommen“, neueres Datenformat');
   // alte Tabelle mit neuerem Datenformat
   const newer = baseEnv();
   newer.ss.id = OLD_ID.replace('Old', 'New');
-  newer.ctx.einrichtung();
+  newer.ctx.setupAll_();
   newer.ctx.settingsSetMany_({ SCHEMA_VERSION: '3', CODE_VERSION: '2.0.0' });
   const env3 = setupEnv(makeWorld());
   env3.sources[newer.ss.id] = newer.ss;
@@ -727,7 +772,7 @@ t.section('Übernahme: eigene Blätter mit Namen des Tools');
   // ab 1.0: die Liste der alten Tabelle zählt (ein Blatt, das erst eine spätere Version anlegt)
   const o2 = baseEnv();
   o2.ss.id = OLD_ID;
-  o2.ctx.einrichtung();
+  o2.ctx.setupAll_();
   o2.ctx.settingSet_('TOOL_SHEETS', J(JSON.parse(o2.setting('TOOL_SHEETS')).filter(n => n !== 'Seltenheiten')));
   o2.sheet('Seltenheiten').clear();
   o2.sheet('Seltenheiten').getRange('A1:B2').setValues([['Wunsch', 'Preis'], ['Mew', 50]]);
@@ -744,7 +789,7 @@ t.section('Übernahme: abgebrochen, wiederholt, doppelt, ohne Schreibrecht');
 {
   const oldEnv = baseEnv();
   oldEnv.ss.id = OLD_ID;
-  oldEnv.ctx.einrichtung();
+  oldEnv.ctx.setupAll_();
   oldEnv.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
   const ob = oldEnv.ss;
   ob.insertSheet('Notizen').getRange('A1').setValue('Wunschliste');
@@ -787,7 +832,7 @@ t.section('Übernahme: abgebrochen, wiederholt, doppelt, ohne Schreibrecht');
   const env2 = setupEnv(makeWorld());
   const o2 = baseEnv();
   o2.ss.id = OLD_ID.replace('Old', 'Two');
-  o2.ctx.einrichtung();
+  o2.ctx.setupAll_();
   env2.sources[o2.ss.id] = o2.ss;
   env2.ctx.settingSet_('TAKE_RUN', J({ from: o2.ss.id, url: o2.ss.getUrl(), at: Date.now(), own: [] }));
   t.throws('läuft gerade: Vorschau sagt warten', () => env2.uiCall('takeoverPreview', o2.ss.id), /läuft gerade/);
@@ -809,7 +854,7 @@ t.section('Älterer Code als die Daten, Kopie einer Tabelle vor 1.0');
   const env = setupEnv(W);
   env.ctx.settingSet_('SCHEMA_VERSION', '3');
   env.ui.alerts.length = 0;
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   t.ok('Einrichtung mit älterem Code: nichts umgebaut, Hinweis', env.setting('SCHEMA_VERSION') === '3' && /neueren Version/.test(env.ui.alerts.join(' ')), env.ui.alerts);
   // frische Kopie mit neuerem Datenformat: keine Seitenleiste
   const sh = env.sheet('Tool-Einstellungen');
@@ -828,13 +873,13 @@ t.section('Älterer Code als die Daten, Kopie einer Tabelle vor 1.0');
   c.ctx.kartenErfassen();
   t.ok('Kopie vor 1.0: wird eingerichtet (Auslöser, eigene ID), alter Web-App-Link gilt nicht', c.triggers.length === 2 && c.props.SPREADSHEET_ID === c.ss.getId() &&
     c.ctx.settingGet_('WEBAPP_URL') === '' && c.setting('SETUP_AT') !== 'vor 1.0', [c.triggers.length, c.props.SPREADSHEET_ID, c.setting('SETUP_AT')]);
-  // dasselbe über Pokémon > Einrichtung statt Karten erfassen
+  // dasselbe direkt über setupAll_
   const c2 = setupEnv(W);
   c2.ss.deleteSheet(c2.sheet('Tool-Einstellungen'));
   Object.assign(c2.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: 'ORIGINALORIGINALORIGINAL', WEBAPP_URL: 'https://script.google.com/macros/s/ALT/exec' });
   c2.run('settingsCache_ = null');
-  c2.ctx.einrichtung();
-  t.ok('Kopie vor 1.0 über Einrichtung: alter Web-App-Link gilt nicht', c2.ctx.settingGet_('WEBAPP_URL') === '' && c2.props.SPREADSHEET_ID === c2.ss.getId() && c2.triggers.length === 2);
+  c2.ctx.setupAll_();
+  t.ok('Kopie vor 1.0 über setupAll_: alter Web-App-Link gilt nicht', c2.ctx.settingGet_('WEBAPP_URL') === '' && c2.props.SPREADSHEET_ID === c2.ss.getId() && c2.triggers.length === 2);
   // eigene Tabelle vor 1.0 (SPREADSHEET_ID passt): gilt als eingerichtet
   const own = setupEnv(W);
   own.ss.deleteSheet(own.sheet('Tool-Einstellungen'));

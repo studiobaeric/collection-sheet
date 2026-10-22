@@ -328,7 +328,7 @@ async function realServerFlow() {
   } catch (e) { ok('REAL: Serverteile laden', false, e.message); return; }
   console.log('\n# REAL: echte Serverteile');
   const c = env.ctx;
-  c.einrichtung();
+  c.setupAll_();
   try { c.uebersetzungUndSetsAktualisieren(); } catch (e) { /* Sets-Cache optional */ }
   c.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: '', qty: 1, inputName: 'Glurak' });
   const SID = 'SRCE2E0000001';
@@ -1076,7 +1076,8 @@ async function toStep3(E) {
     B.S.busy = { nr: 7, phase: 'undo' };
     B.S.needsSetup = true;
     await B.respond('importState', { value: Object.assign(B.S.importState(), { needsSetup: true }) });
-    ok('laufendes Zurücknehmen und fehlende Blätter angezeigt', /Gerade wird Import 7 zurückgenommen/.test(B.main().textContent) && /Einrichtung/.test(B.main().textContent));
+    ok('laufendes Zurücknehmen und fehlende Blätter angezeigt', /Gerade wird Import 7 zurückgenommen/.test(B.main().textContent) &&
+      /Import-Blätter fehlen.*Karten erfassen/.test(B.main().textContent) && !/Einrichtung/.test(B.main().textContent));
     ok('keine Skriptfehler', B.errors.length === 0, B.errors);
   }
 

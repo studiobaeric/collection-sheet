@@ -77,13 +77,13 @@ const QU_SAMPLE_ROWS = 25;
 const QU_SAMPLE_CHARS = 60;
 const QU_TMP_PREFIX = 'Pokémon-Import (temporär) ';
 
-/* ---------- 1a. Blätter anlegen (aus einrichtung) ---------- */
+/* ---------- 1a. Blätter anlegen (aus setupSheets_ in Code.gs) ---------- */
 
 /**
  * Legt alle Import-Blätter an (idempotent): "Importe", "Import-Begriffe" (vorbelegt, nur wenn leer),
  * "Import-Sets" sichtbar; "Import-Vorlagen", "Import-Quelle", "Import-Prüfung", "Import-Antworten",
  * "Import-Protokoll" versteckt. Einträge von Eric bleiben bei jedem weiteren Lauf erhalten.
- * Wird von einrichtung() außerhalb der Sperre aufgerufen und nimmt die Sperre selbst.
+ * Wird von setupSheets_ (Einrichtung, Update, Reparatur) außerhalb der Sperre aufgerufen und nimmt die Sperre selbst.
  */
 function setupImportSheets_(ss) {
   ss = ss || ss_();
@@ -1196,33 +1196,4 @@ function importSaveTemplate(name, cfg, mode) {
     }
   });
   return { name: name, mode: m, signature: saved, templates: quTemplateList_() };
-}
-
-/** Vorlage löschen. -> {deleted: bool, templates} */
-function importDeleteTemplate(name) {
-  ensureSchema_();
-  name = String(name == null ? '' : name).replace(/\s+/g, ' ').trim();
-  let deleted = false;
-  withLock_(function () {
-    const sh = ss_().getSheetByName(IMP_SHEETS.templates);
-    if (!sh || sh.getLastRow() < 2) return;
-    // ohne deleteRow (Sheets löscht die letzte Datenzeile nicht): Rest in einem Rutsch neu schreiben
-    const n = sh.getLastRow() - 1, w = TEMPLATE_HEADERS.length;
-    const all = sh.getRange(2, 1, n, w).getValues();
-    const keep = all.filter(function (r) { return String(r[0] == null ? '' : r[0]).trim().toLowerCase() !== name.toLowerCase(); });
-    deleted = keep.length < all.length;
-    if (!deleted) return;
-    sh.getRange(2, 1, n, w).clearContent();
-    if (keep.length) {
-      const range = sh.getRange(2, 1, keep.length, w);
-      range.setNumberFormat('@');
-      range.setValues(keep.map(function (r) { return r.map(cellText_); }));
-    }
-    const d = importDraft_();
-    if (deleted && d && String(d.templateName || '').toLowerCase() === name.toLowerCase()) {
-      d.templateName = '';
-      quSaveDraft_(d);
-    }
-  });
-  return { deleted: deleted, templates: quTemplateList_() };
 }
