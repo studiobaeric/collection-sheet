@@ -219,6 +219,11 @@ t.section('Hinweis auf neue Version');
   env.cache.clear();
   refresh(env);
   ok('ohne Zwischenspeicher kein Abruf', env.httpLog.length + env.fetchLog.length === n && cell(env, 'O2') === 'Version ' + v);
+  // nächtlicher Lauf: erst Preise, dann die Prüfung auf Updates; das Dashboard zeigt die neue Version danach gleich
+  env.http = url => (/\/releases\/channel\.json/.test(url) ? { code: 200, body: J({ repo: 'studiobaeric/collection-sheet', templateUrl: '', releases: [
+    { version: '9.9.9', tag: 'v9.9.9', date: '2026-10-30', prerelease: false, schema: '2', notes: ['x'] }] }) } : undefined);
+  env.ctx.naechtlicherPreislauf();
+  eq('nach dem nächtlichen Lauf: Hinweis auf die neue Version', cell(env, 'O2'), 'Version ' + v + ' · Version 9.9.9 ist da');
 }
 
 // ---------------------------------------------------------------------------

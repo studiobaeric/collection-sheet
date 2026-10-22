@@ -3209,6 +3209,8 @@ function naechtlicherPreislauf() {
   startPriceRun_();
   if (typeof checkForUpdate_ === 'function') {
     try { checkForUpdate_(); } catch (e) { /* ohne Netz oder GitHub weiter */ }
+    // eine neue Version gleich im Dashboard zeigen (der Preislauf hat es vor der Prüfung geschrieben)
+    try { refreshDashboard_(readData_(sheet_(SHEETS.data))); } catch (e) { /* beim nächsten Neuaufbau */ }
   }
 }
 
