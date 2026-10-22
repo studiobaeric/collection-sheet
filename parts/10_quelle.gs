@@ -389,7 +389,9 @@ function quTabsOf_(src) {
   return src.getSheets().map(function (sh) {
     let hidden = false;
     try { hidden = sh.isSheetHidden(); } catch (e) { hidden = false; }
-    return { name: sh.getName(), rows: sh.getLastRow(), cols: sh.getLastColumn(), hidden: hidden };
+    let ext = { rows: 0, cols: 0 };
+    try { ext = quUsedExtent_(sh); } catch (e) { ext = { rows: sh.getLastRow(), cols: sh.getLastColumn() }; }
+    return { name: sh.getName(), rows: ext.rows, cols: ext.cols, hidden: hidden };
   });
 }
 
@@ -533,9 +535,52 @@ function quTrimValues_(values) {
   });
 }
 
+/** Ab so vielen Zellen wird der benutzte Bereich eines Tabs erst abgetastet statt ganz gelesen. */
+const QU_SCAN_CELLS = 100000;
+/** So viele leere Zeilen am Stück nach der letzten Zeile mit Inhalt beenden das Abtasten. */
+const QU_SCAN_GAP = 5000;
+
+/** true, wenn die Zelle echten Inhalt hat (leerer Text und nicht angehakte Kästchen zählen nicht). */
+function quRealCell_(v) {
+  if (v === '' || v == null || v === false) return false;
+  if (typeof v === 'string') return v.trim() !== '';
+  return true;
+}
+
+/**
+ * Bereich eines Tabs, in dem wirklich etwas steht: {rows, cols}. Aus .xlsx umgewandelte Tabs melden oft
+ * 1048576 Zeilen (Kästchen oder Formeln bis ganz unten); alles zu lesen sprengt den Speicher. Große Tabs
+ * werden darum stückweise abgetastet; nach QU_SCAN_GAP leeren Zeilen am Stück ist Schluss.
+ */
+function quUsedExtent_(sheet) {
+  const lr = sheet.getLastRow(), lc = sheet.getLastColumn();
+  if (!lr || !lc) return { rows: 0, cols: 0 };
+  if (lr * lc <= QU_SCAN_CELLS) return { rows: lr, cols: lc };
+  const chunk = Math.max(50, Math.floor(QU_SCAN_CELLS / lc));
+  let lastRow = 0, lastCol = 0;
+  for (let start = 1; start <= lr; start += chunk) {
+    const n = Math.min(chunk, lr - start + 1);
+    const vals = sheet.getRange(start, 1, n, lc).getValues();
+    for (let i = 0; i < vals.length; i++) {
+      const r = vals[i];
+      for (let j = r.length - 1; j >= 0; j--) {
+        if (quRealCell_(r[j])) {
+          lastRow = start + i;
+          if (j + 1 > lastCol) lastCol = j + 1;
+          break;
+        }
+      }
+    }
+    if (start + n - 1 - lastRow >= QU_SCAN_GAP) break;
+  }
+  return { rows: lastRow, cols: lastCol };
+}
+
 /** Anzeigewerte eines Tabs mit angehängten Links, Ränder abgeschnitten. */
 function quReadTab_(sheet) {
-  const range = sheet.getDataRange();
+  const ext = quUsedExtent_(sheet);
+  if (!ext.rows || !ext.cols) return [];
+  const range = sheet.getRange(1, 1, ext.rows, ext.cols);
   const shown = range.getDisplayValues();
   let rich = null, formulas = null;
   try { rich = range.getRichTextValues(); } catch (e) { rich = null; }

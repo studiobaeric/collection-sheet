@@ -676,6 +676,50 @@ t.section('Sperre belegt');
 }
 
 // ===========================================================================
+// Riesiger benutzter Bereich (.xlsx mit Kästchen bis Zeile 1048576): nur bis zur letzten echten Zeile lesen
+{
+  const env = mkEnv();
+  const c = env.ctx;
+  const MAXR = 1048576, W = 6, DATA = 1328;
+  let cellsRead = 0, maxBlock = 0;
+  const cell = (r, j) => {
+    if (j === W) return r === 1 ? 'Vorhanden' : (r <= DATA && r % 2 === 0); // Kästchen bis ganz unten
+    if (r === 1) return 'Spalte ' + j;
+    if (r <= DATA) return j === 1 ? 'Pokémon ' + r : (j === 2 ? r : '');
+    return '';
+  };
+  const big = {
+    getName: () => 'Pokedex', isSheetHidden: () => false,
+    getLastRow: () => MAXR, getLastColumn: () => W,
+    getDataRange() { throw new Error('getDataRange darf bei großen Tabs nicht benutzt werden'); },
+    getRange(r0, c0, n, w) {
+      cellsRead += n * w; maxBlock = Math.max(maxBlock, n * w);
+      const grid = f => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => f(cell(r0 + i, c0 + j))));
+      return {
+        getValues: () => grid(v => v),
+        getDisplayValues: () => grid(v => v === true ? 'TRUE' : v === false ? 'FALSE' : String(v)),
+        getRichTextValues: () => grid(() => null),
+        getFormulas: () => grid(() => '')
+      };
+    }
+  };
+  const ext = c.quUsedExtent_(big);
+  t.eq('großer Tab: echte Zeilen und Spalten', J(ext), J({ rows: DATA, cols: W }));
+  t.ok('großer Tab: nicht bis Zeile 1048576 gelesen', cellsRead < 200000);
+  t.ok('großer Tab: Lesestücke klein', maxBlock <= 100000);
+  const tabs = c.quTabsOf_({ getSheets: () => [big] });
+  t.eq('Tab-Liste zeigt echte Zeilenzahl', J([tabs[0].rows, tabs[0].cols]), J([DATA, W]));
+  cellsRead = 0;
+  const vals = c.quReadTab_(big);
+  t.eq('quReadTab_: Zeilen bis zur letzten echten', vals.length, DATA);
+  t.eq('quReadTab_: Kästchenspalte bleibt', vals[1][W - 1], 'TRUE');
+  t.ok('quReadTab_: wenig gelesen', cellsRead < 200000);
+  const small = c.quUsedExtent_({ getLastRow: () => 10, getLastColumn: () => 3 });
+  t.eq('kleiner Tab: wie gemeldet', J(small), J({ rows: 10, cols: 3 }));
+  t.eq('leerer Tab', J(c.quUsedExtent_({ getLastRow: () => 0, getLastColumn: () => 0 })), J({ rows: 0, cols: 0 }));
+}
+
+// ===========================================================================
 // Info: Zusammenspiel mit dem echten Teil „Erkennung“, falls er schon lädt (zählt nicht als Test)
 {
   const p = path.join(__dirname, '..', 'parts', '20_erkennung.gs');
