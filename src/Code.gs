@@ -1,3 +1,8 @@
+/* ==========================================================================
+ *  Pokémon-Sammlung · Version 1.1.0
+ *  https://github.com/studiobaeric/collection-sheet
+ * ========================================================================== */
+
 /**
  * Pokémon-Sammlung – Google Sheets + tcgdex (https://tcgdex.dev)
  *

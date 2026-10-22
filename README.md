@@ -59,7 +59,7 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 2. Öffne deine Tabelle und klicke auf **Erweiterungen > Apps Script**.
 3. Klicke links auf das Zahnrad (**Projekteinstellungen**) und hake **Manifestdatei „appsscript.json“ im Editor anzeigen** an.
 4. Ersetze den Inhalt dieser Dateien jeweils komplett durch den aus `src`: `Code.gs`, `Import.gs`, `Update.gs`, `Ui.html`, `ImportUi.html` und `appsscript.json`. Fehlt eine Datei, lege sie über **+** an (Skript oder HTML) und gib ihr den Namen ohne Endung, zum Beispiel `Update` oder `ImportUi`.
-5. Speichere mit dem Disketten-Symbol.
+5. Speichere mit dem Disketten-Symbol. Ab 1.1.0 steht ganz oben in jeder Script- und HTML-Datei „Pokémon-Sammlung · Version …“, so siehst du, ob alle Dateien auf demselben Stand sind (`appsscript.json` hat keinen Kommentar, JSON kennt keine).
 6. Lade die Tabelle neu und öffne **Pokémon > Karten erfassen**. Google fragt nach neuen Berechtigungen, falls die Version welche braucht (bei „Google hat diese App nicht überprüft“: **Erweitert**, **Weiter zu … (unsicher)**, **Zulassen**). Die Blätter bringt das Tool dabei selbst auf den neuen Stand.
 7. Nutzt du die Web-App: **Bereitstellen > Bereitstellungen verwalten**, auf den Stift klicken, prüfen, ob „Ausführen als“ und „Zugriff“ noch stimmen, bei Version **Neue Version** wählen und **Bereitstellen**. Der Link bleibt gleich.
 

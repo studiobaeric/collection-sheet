@@ -1,3 +1,8 @@
+/* ==========================================================================
+ *  Pokémon-Sammlung · Version 1.1.0
+ *  https://github.com/studiobaeric/collection-sheet
+ * ========================================================================== */
+
 /**
  * Import.gs: Import-Werkzeug für bestehende Sammlungen (Assistent, Erkennung, Prüfliste, Vorschau, Zurücknehmen).
  * Teilt sich den globalen Bereich mit Code.gs und nutzt dessen Helfer (withLock_, rowObj_, appendDataRows_ ...).

@@ -19,11 +19,12 @@ Zum Ausprobieren am besten in einer Kopie deiner Tabelle (**Datei > Kopie erstel
 
 ## Kurz prüfen
 
-1. **Dashboard** ist das erste Blatt, und beim Öffnen der Tabelle springt sie dorthin. Oben steht „Pokémon-Sammlung“ mit Version 1.1.0, darunter wann es zuletzt neu gerechnet hat und von wann die Preise sind.
-2. Die vier Kacheln: **Gesamtwert** (darunter die Veränderung seit 7 Tagen, grün oder rot), **Karten** (Exemplare, darunter wie viele verschiedene), **Pokédex** (wie viele der 1025 Pokémon, mit Balken), **Wertverlauf** (Linie der letzten 90 Tage, erst ab zwei Tagen im Verlauf).
-3. Klicke auf **Karten erfassen**: Die Seitenleiste geht auf. **Importieren** öffnet sie gleich im Tab Import.
-4. Klicke auf **Pokédex**: Das Blatt Pokédex ist offen. **Pokémon > Dashboard** bringt dich zurück.
-5. Füge eine Karte hinzu und schau aufs Dashboard: Karten und Gesamtwert sind schon mitgezählt.
+1. In Apps Script steht ganz oben in `Code.gs`, `Import.gs`, `Update.gs`, `Ui.html` und `ImportUi.html` „Pokémon-Sammlung · Version 1.1.0“. Zeigt eine Datei nichts oder eine ältere Version, hast du sie noch nicht ersetzt.
+2. **Dashboard** ist das erste Blatt, und beim Öffnen der Tabelle springt sie dorthin. Oben steht „Pokémon-Sammlung“ mit Version 1.1.0, darunter wann es zuletzt neu gerechnet hat und von wann die Preise sind.
+3. Die vier Kacheln: **Gesamtwert** (darunter die Veränderung seit 7 Tagen, grün oder rot), **Karten** (Exemplare, darunter wie viele verschiedene), **Pokédex** (wie viele der 1025 Pokémon, mit Balken), **Wertverlauf** (Linie der letzten 90 Tage, erst ab zwei Tagen im Verlauf).
+4. Klicke auf **Karten erfassen**: Die Seitenleiste geht auf. **Importieren** öffnet sie gleich im Tab Import.
+5. Klicke auf **Pokédex**: Das Blatt Pokédex ist offen. **Pokémon > Dashboard** bringt dich zurück.
+6. Füge eine Karte hinzu und schau aufs Dashboard: Karten und Gesamtwert sind schon mitgezählt.
 
 ## Gut zu wissen
 

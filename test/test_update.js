@@ -939,6 +939,21 @@ t.section('Release-Werkzeug und Kanal im Repo');
   t.ok('Dateiliste existiert', R.FILES.every(f => fs.existsSync(path.join(SRC, '..', f))));
   const c = R.check();
   t.ok('releases/channel.json passt zur Version in src/Code.gs (sonst: node tools/release.js)', !c.missing && c.diffs.length === 0, c);
+  t.ok('oben in jeder Script- und HTML-Datei steht TOOL_VERSION (sonst: node tools/release.js --stamp)', c.headers.length === 0, c.headers);
+  const srcFiles = fs.readdirSync(SRC).filter(f => /\.(gs|html)$/.test(f));
+  t.ok('Kopf mit Version: alle Script- und HTML-Dateien aus src sind erfasst', srcFiles.length === 5 && srcFiles.every(f => R.HEADER_FILES.indexOf('src/' + f) >= 0), srcFiles);
+  const partsDir = path.join(SRC, '..', 'parts');
+  t.ok('src/Import.gs ist aus parts gebaut (sh build_import.sh), der Kopf kommt aus parts/00_shared.gs',
+    ['00_shared.gs', '10_quelle.gs', '20_erkennung.gs', '30_protokoll.gs'].map(f => fs.readFileSync(path.join(partsDir, f), 'utf8')).join('') === read('src/Import.gs'));
+  t.eq('headerDiffs: andere Version, jede Datei gemeldet', R.headerDiffs('9.9.9').length, R.HEADER_FILES.length);
+  // stampText: Kopf neu setzen, Version ersetzen, HTML nach <!DOCTYPE>
+  const gs = R.stampText('/**\n * Datei\n */\nconst A = 1;\n', '1.2.0', false);
+  t.ok('stampText .gs: Block-Kommentar ganz oben, Rest bleibt', /^\/\* =+\n \*  Pokémon-Sammlung · Version 1\.2\.0\n/.test(gs) && /\*\/\n\n\/\*\*\n \* Datei\n \*\/\nconst A = 1;\n$/.test(gs), gs);
+  t.eq('stampText: ersetzt nur die Version', R.stampText(gs, '1.3.0-beta.1', false), gs.replace('1.2.0', '1.3.0-beta.1'));
+  t.eq('headerVersion', [R.headerVersion(gs), R.headerVersion('const A = 1;'), R.headerVersion('\n'.repeat(10) + '// Pokémon-Sammlung · Version 1.0.0')], ['1.2.0', null, null]);
+  const ui = R.stampText('<!DOCTYPE html>\n<html>\n</html>\n', '1.2.0', true);
+  t.ok('stampText .html: Kommentar direkt nach <!DOCTYPE html>', /^<!DOCTYPE html>\n<!-- =+\n     Pokémon-Sammlung · Version 1\.2\.0\n[^]*?-->\n<html>\n<\/html>\n$/.test(ui), ui);
+  t.ok('stampText .html ohne DOCTYPE: Kommentar ganz oben', /^<!-- =+\n[^]*?-->\n<style>/.test(R.stampText('<style>\n</style>\n', '1.2.0', true)));
   const ch = JSON.parse(fs.readFileSync(path.join(SRC, '..', 'releases', 'channel.json'), 'utf8'));
   const clean = env.ctx.updCleanChannel_(ch);
   t.ok('Kanal: alle Einträge gültig, Repo, Anleitung', clean.releases.length === ch.releases.length && clean.repo === REPO && /#von-hand-aktualisieren$/.test(clean.guideUrl));
@@ -988,9 +1003,16 @@ t.section('Release-Werkzeug und Kanal im Repo');
   // Kommandozeile: Exit 1 bei Abweichung (in einer Kopie des Repos)
   const cp = require('child_process');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-'));
-  ['src', 'tools', 'releases'].forEach(d => fs.cpSync(path.join(SRC, '..', d), path.join(tmp, d), { recursive: true }));
+  ['src', 'tools', 'releases', 'parts'].forEach(d => fs.cpSync(path.join(SRC, '..', d), path.join(tmp, d), { recursive: true }));
   const cli = args => cp.spawnSync(process.execPath, [path.join(tmp, 'tools', 'release.js')].concat(args), { encoding: 'utf8' });
   t.eq('CLI --check: passt, Exit 0', cli(['--check']).status, 0);
+  const upd = path.join(tmp, 'src', 'Update.gs');
+  fs.writeFileSync(upd, fs.readFileSync(upd, 'utf8').replace(/Version \S+/, 'Version 0.0.1'));
+  const badHead = cli(['--check']);
+  t.ok('CLI --check: Kopf mit alter Version, Exit 1 und Hinweis auf --stamp', badHead.status === 1 && /src\/Update\.gs: Version 0\.0\.1/.test(badHead.stdout) && /--stamp/.test(badHead.stdout), badHead.stdout);
+  const st = cli(['--stamp']);
+  t.ok('CLI --stamp: nur Update.gs geändert, danach passt --check', st.status === 0 && /geändert in src\/Update\.gs\.$/m.test(st.stdout) &&
+    R.headerVersion(fs.readFileSync(upd, 'utf8')) === v && cli(['--check']).status === 0, st.stdout + st.stderr);
   const chPath = path.join(tmp, 'releases', 'channel.json');
   const ch0 = JSON.parse(fs.readFileSync(chPath, 'utf8'));
   ch0.releases.find(r => r.version === v).schema = '99';

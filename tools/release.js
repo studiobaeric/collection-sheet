@@ -5,12 +5,14 @@
  *
  *   node tools/release.js --notes "Erster Punkt" --notes "Zweiter Punkt" [--prerelease|--final] [--template URL] [--date 2026-10-21]
  *   node tools/release.js --main-template URL   nur die Hauptvorlage des Kanals (templateUrl) setzen
- *   node tools/release.js --check     prüft nur, ob die aktuelle Version im Kanal steht und dazu passt (sonst Exit 1)
+ *   node tools/release.js --check     prüft nur, ob die aktuelle Version im Kanal und oben in den Dateien steht (sonst Exit 1)
+ *   node tools/release.js --stamp     schreibt nur die Version in den Kopfkommentar der Script- und HTML-Dateien
  *
  * Die Tabellen lesen den Kanal und zeigen neuere Versionen an. „Neue Version holen“ kopiert die Vorlage des
  * Releases (--template, sonst templateUrl des Kanals; eine Vorabversion braucht ihre eigene). Steht die Version
  * schon im Kanal, bleiben Notizen, Datum, Vorabversion und Vorlage, solange keine Option sie ändert. Fehlt eine
  * Vorlage, warnt --check nur (Exit 0): Dann erscheint in den Tabellen „Neue Version holen“ nicht.
+ * Jeder Release-Eintrag schreibt die Version auch oben in die Script- und HTML-Dateien (HEADER_FILES).
  * Schritte: docs/RELEASE.md.
  */
 const fs = require('fs');
@@ -22,6 +24,10 @@ const REPO = 'studiobaeric/collection-sheet';
 /** Dateien, die ins Apps-Script-Projekt gehören (für die Anleitung „Von Hand aktualisieren“). */
 const FILES = ['src/appsscript.json', 'src/Code.gs', 'src/Import.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
 const SHEET_URL = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]{20,}/;
+/** Dateien mit der Version im Kopfkommentar; parts/00_shared.gs ist der Anfang von src/Import.gs (build_import.sh). */
+const HEADER_FILES = ['src/Code.gs', 'src/Import.gs', 'parts/00_shared.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
+const HEADER_RE = /Pokémon-Sammlung · Version (\S+)/;
+const HEADER_LINES = 8; // der Kopf muss in den ersten Zeilen stehen
 
 function codeConst(code, name) {
   const m = code.match(new RegExp('^const ' + name + " = '([^']*)';", 'm'));
@@ -75,19 +81,63 @@ function cmp(a, b) {
   return 0;
 }
 
+/** Kopfkommentar mit der Version: für .gs ein Block-Kommentar, für .html ein HTML-Kommentar */
+function header(version, html) {
+  const bar = '='.repeat(74);
+  const lines = ['Pokémon-Sammlung · Version ' + version, 'https://github.com/' + REPO];
+  return html
+    ? '<!-- ' + bar + '\n' + lines.map(l => '     ' + l + '\n').join('') + '     ' + bar + ' -->\n'
+    : '/* ' + bar + '\n' + lines.map(l => ' *  ' + l + '\n').join('') + ' * ' + bar + ' */\n\n';
+}
+
+/** Version im Kopfkommentar von text, sonst null */
+function headerVersion(text) {
+  const m = HEADER_RE.exec(String(text).split('\n').slice(0, HEADER_LINES).join('\n'));
+  return m ? m[1] : null;
+}
+
+/** text mit version im Kopf: ersetzt die Version im vorhandenen Kopf, sonst kommt der Kopf an den Anfang (bei HTML nach <!DOCTYPE>) */
+function stampText(text, version, html) {
+  if (headerVersion(text) !== null) return text.replace(HEADER_RE, 'Pokémon-Sammlung · Version ' + version);
+  const m = html && text.match(/^<!DOCTYPE[^>]*>\r?\n/i);
+  return m ? m[0] + header(version, true) + text.slice(m[0].length) : header(version, html) + text;
+}
+
+const isHtml = f => /\.html$/.test(f);
+const readRepo = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+
+/** -> Abweichungen der Kopfkommentare von version, je Datei eine Zeile (read: Datei -> Inhalt, sonst aus dem Repo) */
+function headerDiffs(version, read) {
+  read = read || readRepo;
+  return HEADER_FILES.map(f => {
+    const v = headerVersion(read(f));
+    return v === version ? null : f + ': ' + (v === null ? 'kein Kopf mit der Version' : 'Version ' + v);
+  }).filter(Boolean);
+}
+
+/** Schreibt version in den Kopf aller HEADER_FILES -> die geänderten Dateien */
+function stamp(version) {
+  return HEADER_FILES.filter(f => {
+    const old = readRepo(f), text = stampText(old, version, isHtml(f));
+    if (text !== old) fs.writeFileSync(path.join(ROOT, f), text);
+    return text !== old;
+  });
+}
+
 const cleanNotes = notes => (notes || []).map(n => String(n == null ? '' : n).trim()).filter(Boolean);
 
 /**
- * -> {version, missing, diffs, warnings}: Abweichungen zwischen dem Kanal-Eintrag der aktuellen Version und dem Code
- * (diffs: Exit 1), warnings: keine Vorlage für diese Version. code/ch: zum Testen, sonst aus dem Repo.
+ * -> {version, missing, diffs, headers, warnings}: Abweichungen zwischen dem Kanal-Eintrag der aktuellen Version und
+ * dem Code (diffs: Exit 1), Köpfe mit anderer Version (headers: Exit 1), warnings: keine Vorlage für diese Version.
+ * code/ch/read: zum Testen, sonst aus dem Repo.
  */
-function check(code, ch) {
+function check(code, ch, read) {
   const entry = buildEntry({}, code);
   ch = ch || readChannel();
-  const diffs = [], warnings = [];
+  const diffs = [], warnings = [], headers = headerDiffs(entry.version, read);
   if (ch.templateUrl && !SHEET_URL.test(ch.templateUrl)) diffs.push('templateUrl des Kanals ist kein Tabellen-Link');
   const rel = (ch.releases || []).find(r => r.version === entry.version);
-  if (!rel) return { version: entry.version, missing: true, diffs, warnings };
+  if (!rel) return { version: entry.version, missing: true, diffs, headers, warnings };
   if (rel.tag !== entry.tag) diffs.push('tag ' + rel.tag + ' statt ' + entry.tag);
   if (String(rel.schema) !== entry.schema) diffs.push('schema ' + rel.schema + ' statt ' + entry.schema);
   if (!cleanNotes(rel.notes).length) diffs.push('keine Notizen');
@@ -96,7 +146,7 @@ function check(code, ch) {
   const tpl = rel.templateUrl || (rel.prerelease ? '' : ch.templateUrl);
   if (!tpl) warnings.push(rel.prerelease ? 'Diese Vorabversion hat keine eigene Vorlage (--template): Freiwillige bekommen sie nur von Hand.'
     : 'Der Kanal hat noch keine Vorlage (--main-template): „Neue Version holen“ erscheint in den Tabellen nicht.');
-  return { version: entry.version, missing: false, diffs, warnings };
+  return { version: entry.version, missing: false, diffs, headers, warnings };
 }
 
 function parseArgs(argv) {
@@ -109,6 +159,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--check') o.check = true;
+    else if (a === '--stamp') o.stamp = true;
     else if (a === '--prerelease') o.prerelease = true;
     else if (a === '--final') o.prerelease = false;
     else if (a === '--notes') o.notes.push(value(a, ++i));
@@ -148,9 +199,18 @@ function writeChannel(ch) {
 
 function main() {
   const o = parseArgs(process.argv.slice(2));
+  if (o.stamp) {
+    const version = codeConst(readCode(), 'TOOL_VERSION');
+    const files = stamp(version);
+    console.log('Version ' + version + ' oben in den Dateien: ' + (files.length ? 'geändert in ' + files.join(', ') : 'schon überall') + '.');
+    return 0;
+  }
   if (o.check) {
     const r = check();
     r.warnings.forEach(w => console.log('Hinweis: ' + w));
+    if (r.headers.length) {
+      console.log('Oben in diesen Dateien steht nicht Version ' + r.version + ':\n  ' + r.headers.join('\n  ') + '\nBitte node tools/release.js --stamp ausführen.');
+    }
     if (r.missing) {
       console.log('Version ' + r.version + ' steht noch nicht in releases/channel.json. Bitte node tools/release.js --notes "…" ausführen.');
       return 1;
@@ -159,7 +219,8 @@ function main() {
       console.log('releases/channel.json passt nicht zu Version ' + r.version + ':\n  ' + r.diffs.join('\n  ') + '\nBitte node tools/release.js erneut ausführen.');
       return 1;
     }
-    console.log('releases/channel.json passt zu Version ' + r.version + '.');
+    if (r.headers.length) return 1;
+    console.log('releases/channel.json und die Köpfe der Dateien passen zu Version ' + r.version + '.');
     return 0;
   }
   const ch = readChannel();
@@ -173,7 +234,9 @@ function main() {
   }
   const { entry, old } = nextChannel(ch, buildEntry(o), o);
   writeChannel(ch);
+  const stamped = stamp(entry.version);
   console.log((old ? 'Aktualisiert' : 'Neu') + ': ' + entry.version + (entry.prerelease ? ' (Vorabversion)' : '') + ', Datenformat ' + entry.schema + '.');
+  if (stamped.length) console.log('Version oben eingetragen in ' + stamped.join(', ') + '.');
   if (entry.prerelease && !entry.templateUrl) console.log('Achtung: Ohne --template können Freiwillige diese Vorabversion nur von Hand einfügen.');
   console.log('Weiter: ' + (entry.prerelease
     ? 'nur die Vorlage der Vorabversion (--template) auf diese Version bringen, die Hauptvorlage nicht anfassen'
@@ -185,4 +248,4 @@ if (require.main === module) {
   try { process.exitCode = main(); } catch (e) { console.error(e.message); process.exitCode = 1; }
 }
 
-module.exports = { FILES, buildEntry, check, cleanNotes, cmp, nextChannel, parseArgs };
+module.exports = { FILES, HEADER_FILES, buildEntry, check, cleanNotes, cmp, header, headerDiffs, headerVersion, nextChannel, parseArgs, stampText };

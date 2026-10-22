@@ -8,6 +8,8 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
    - Fehlerbehebung: `1.0.0` → `1.0.1`
    - Neue Funktion: `1.0.1` → `1.1.0`
    - Vorabversion für Freiwillige: `1.1.0-beta.1`, `1.1.0-beta.2` …, danach `1.1.0`
+
+   Die Version steht außerdem oben in jeder Script- und HTML-Datei (Kopfkommentar „Pokémon-Sammlung · Version …“). Den schreibt Schritt 3 selbst; nur die Köpfe nachziehen: `node tools/release.js --stamp`.
 2. `SCHEMA_VERSION` nur erhöhen, wenn sich das Format des Blatts „Daten“ ändert (mit Umstellung in `migrateSchema_`). Die Übernahme stellt alte Daten dann selbst um. Eine ältere Version kann eine Tabelle mit neuerem Datenformat nicht übernehmen.
 3. Den Kanal schreiben:
 
@@ -15,7 +17,7 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
    node tools/release.js --notes "Was ist neu, Punkt 1" --notes "Punkt 2"
    ```
 
-   Eine Version mit Bindestrich (`1.1.0-beta.1`) wird automatisch als Vorabversion eingetragen, `--prerelease` und `--final` legen es ausdrücklich fest. Eine Vorabversion braucht ihre eigene Vorlage: `--template https://docs.google.com/spreadsheets/d/<ID>/copy`. Für die erste Vorabversion gibt es die noch nicht: zuerst anlegen (Abschnitt „Die Vorlage“, Schritte 1 bis 3) oder den Befehl danach mit `--template` wiederholen. Ruft man das Werkzeug für dieselbe Version noch einmal auf, bleiben Notizen, Datum, Vorabversion und Vorlage. `npm test` und `node tools/release.js --check` melden, wenn der Kanal nicht zur Version im Code passt (Exit 1). Fehlt für die Version eine Vorlage, gibt `--check` nur einen Hinweis aus: Dann zeigen die Tabellen „Neue Version holen“ nicht.
+   Eine Version mit Bindestrich (`1.1.0-beta.1`) wird automatisch als Vorabversion eingetragen, `--prerelease` und `--final` legen es ausdrücklich fest. Eine Vorabversion braucht ihre eigene Vorlage: `--template https://docs.google.com/spreadsheets/d/<ID>/copy`. Für die erste Vorabversion gibt es die noch nicht: zuerst anlegen (Abschnitt „Die Vorlage“, Schritte 1 bis 3) oder den Befehl danach mit `--template` wiederholen. Ruft man das Werkzeug für dieselbe Version noch einmal auf, bleiben Notizen, Datum, Vorabversion und Vorlage. `npm test` und `node tools/release.js --check` melden, wenn der Kanal oder ein Kopfkommentar nicht zur Version im Code passt (Exit 1). Fehlt für die Version eine Vorlage, gibt `--check` nur einen Hinweis aus: Dann zeigen die Tabellen „Neue Version holen“ nicht.
 4. `npm test` muss grün sein (erst nach Schritt 3: Ein Test prüft, dass der Kanal zur Version passt).
 5. Committen, pushen, Pull Request, Tests grün, Review.
 6. **Vor dem Mergen** die Vorlage auf die neue Version bringen (Abschnitt „Die Vorlage“), mit dem Code aus dem Ordner `src` des Pull-Request-Branchs: Der Tag entsteht erst nach dem Mergen. Bei einer Vorabversion nur ihre eigene Vorlage (die bei `--template`), die Hauptvorlage bekommt nur fertige Versionen. Sobald `channel.json` auf `main` steht, sehen alle Tabellen die Version und kopieren die Vorlage.
@@ -40,6 +42,7 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
 - Die Namen der Auslöser-Funktionen (`naechtlicherPreislauf`, `continuePriceRun`, `beiStrukturAenderung`) bleiben gleich, sonst laufen bestehende Auslöser nach einem Update von Hand ins Leere.
 - Die Funktionen der Dashboard-Knöpfe (`fn` in `DASH_BUTTONS`, `src/Code.gs`) bleiben öffentlich und behalten ihren Namen. Jede Tabelle hat den Namen am Bild gespeichert; bis sie nach einem Update ihre Blätter neu aufbaut, ruft der Knopf noch den alten.
 - Neue Bilder für die Dashboard-Knöpfe: `NODE_PATH="$(npm root -g)" node tools/dashboard-knoepfe.js` (braucht Playwright mit Chromium; zeichnet den aktiven Look aus `docs/dashboard/looks.json`, ein anderer Look: `docs/dashboard/README.md`), die PNGs in `assets/dashboard/` committen und pushen, `DASH_ASSETS` auf genau diesen Commit stellen und `DASH_ASSET_VERSION` erhöhen. Prüfen, dass `DASH_ASSETS` + `erfassen.png` im Browser ein Bild zeigt. Den Pull Request mit einem Merge-Commit mergen (nicht „Squash“ oder „Rebase“), dann bleibt der Commit für immer in `main`.
+- Eine neue Script- oder HTML-Datei in `src` kommt in `HEADER_FILES` (`tools/release.js`) und bekommt mit `--stamp` den Kopf mit der Version. Ein Test meldet Dateien ohne Kopf. Den Kopf von `Import.gs` schreibt das Werkzeug auch in `parts/00_shared.gs`, sonst wäre er nach `sh build_import.sh` weg.
 - Neue Rechte (`oauthScopes` in `src/appsscript.json`) nur, wenn nötig: Google fragt jeden Nutzer bei jeder neuen Tabelle danach.
 - Alles, was zur Tabelle gehört, steht im Blatt „Tool-Einstellungen“ (`settingGet_`/`settingSet_`), nicht in den Skript-Eigenschaften. Die sind nur für laufende Vorgänge da.
 

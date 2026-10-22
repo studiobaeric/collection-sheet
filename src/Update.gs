@@ -1,3 +1,8 @@
+/* ==========================================================================
+ *  Pokémon-Sammlung · Version 1.1.0
+ *  https://github.com/studiobaeric/collection-sheet
+ * ========================================================================== */
+
 /**
  * Update.gs – neue Versionen auf GitHub finden, neue Tabelle aus der Vorlage anlegen, Übernahme aus einer alten
  * Tabelle, alte Tabelle stilllegen und wieder benutzen. Braucht Code.gs (TOOL_VERSION, Einstellungen aus
