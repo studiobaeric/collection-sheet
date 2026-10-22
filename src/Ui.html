@@ -83,6 +83,15 @@
   .dex .s { font-size: 12px; color: var(--muted); }
   .dex.miss .t { color: #9aa0a6; font-weight: 400; }
   .dexx { border-left: 3px solid var(--soft); margin: 2px 0 10px; padding: 0 0 4px 10px; }
+  .updbar { display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 12px; background: #e8f0fe; color: #174ea6; font-size: 14px; border-bottom: 1px solid var(--line); }
+  .updbar .grow { flex: 1; min-width: 0; }
+  .updbar .btn { min-height: 40px; padding: 6px 10px; font-size: 14px; flex: none; }
+  .updbar .x { border: 0; background: none; font-size: 20px; min-width: 44px; min-height: 40px; cursor: pointer; color: inherit; flex: none; }
+  .ptitle { font-size: 17px; margin: 12px 0 4px; }
+  ul.rel { margin: 4px 0 8px 18px; padding: 0; font-size: 14px; }
+  .foot { text-align: center; font-size: 12px; color: var(--muted); padding: 18px 12px 24px; }
+  input.copyurl { margin-top: 6px; font-size: 13px; }
+  .lnk { border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: inherit; padding: 8px 4px; min-height: 36px; }
 </style>
 </head>
 <body>
@@ -92,6 +101,7 @@
   <button id="tabDex" onclick="showTab('dex')">Pokédex</button>
   <button id="tabImport" class="hidden" onclick="showTab('import')">Import</button>
 </div>
+<div id="updBar" class="updbar hidden"></div>
 
 <!-- Hinzufügen -->
 <div id="paneAdd" class="panel">
@@ -163,8 +173,28 @@
   <div id="dexList"></div>
 </div>
 
+<!-- Updates: kein eigener Tab, erreichbar über Fußzeile, Hinweis-Leiste und Menü Pokémon > Updates -->
+<div id="paneUpd" class="panel hidden">
+  <button class="btn" type="button" id="updBack" onclick="showTab(lastTab)">← Zurück</button>
+  <h2 class="ptitle">Updates</h2>
+  <div id="updInfo"></div>
+  <div id="updMsg"></div>
+  <label class="check"><input type="checkbox" id="updPre" onchange="updSetPre()"> Vorabversionen bekommen (zum Ausprobieren, können noch Fehler haben)</label>
+  <div id="takeBox" class="box hidden">
+    <h3>Aus alter Tabelle übernehmen</h3>
+    <div class="notes">Für eine neue Tabelle (über „Neue Version holen“ oder eine Kopie der Vorlage): holt alle Karten, Importe, den Verlauf und deine eigenen Blätter aus deiner alten Tabelle. Die alte Tabelle wird danach stillgelegt (ab Version 1.0 von selbst, ältere mit ein paar Klicks). Eigene Änderungen am Skript kommen nicht mit.</div>
+    <form onsubmit="takePreview(event)">
+      <label for="takeUrl">Link der alten Tabelle</label>
+      <input type="text" id="takeUrl" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/d/…">
+      <div class="actions"><button class="btn" type="submit" id="takeCheck">Prüfen</button></div>
+    </form>
+    <div id="takeMsg"></div>
+  </div>
+</div>
+
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
+var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd' oder 'takeover' (Menü Updates)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
   '<text x="122" y="178" font-size="24" text-anchor="middle" fill="#80868b" font-family="Arial">kein Bild</text></svg>');
@@ -277,18 +307,22 @@ function rememberVersion(v) {
   if (v && UI_CONFIG.versions.indexOf(v) < 0) { UI_CONFIG.versions.push(v); fillVersionList(); }
 }
 
+var lastTab = 'add'; // für „Zurück“ aus dem Bereich Updates
+
 function showTab(t) {
   if (t === 'remove') t = 'coll';
   if (t === 'import' && MODE !== 'sidebar') t = 'add'; // Import gibt es nur in der Seitenleiste
-  var tabs = { add: ['tabAdd', 'paneAdd'], coll: ['tabColl', 'paneColl'], dex: ['tabDex', 'paneDex'], 'import': ['tabImport', 'paneImport'] };
+  if (t !== 'upd') lastTab = t;
+  var tabs = { add: ['tabAdd', 'paneAdd'], coll: ['tabColl', 'paneColl'], dex: ['tabDex', 'paneDex'], 'import': ['tabImport', 'paneImport'], upd: ['', 'paneUpd'] };
   Object.keys(tabs).forEach(function (k) {
-    var b = $(tabs[k][0]), p = $(tabs[k][1]);
+    var b = tabs[k][0] ? $(tabs[k][0]) : null, p = $(tabs[k][1]);
     if (b) b.classList.toggle('active', k === t);
     if (p) p.classList.toggle('hidden', k !== t);
   });
   if (t === 'coll') { loadCollection(); $('colQuery').focus(); }
   else if (t === 'dex') loadDex();
   else if (t === 'import') { if (typeof impInit === 'function') impInit(); }
+  else if (t === 'upd') updRender();
   else $('fName').focus();
 }
 
@@ -1279,16 +1313,256 @@ function dexAdd(nr) {
   $('fSet').value = '';
 }
 
+// ---------- Updates ----------
+
+var UPD = null; // Antwort von getUpdateInfo
+var updBarClosed = false, updBusy = false, takeUrlChecked = '', updLoadErr = '', takeAutoDone = false;
+var takeBusy = false, takeGen = 0; // Übernahme läuft; Zähler, damit eine späte Vorschau nichts überschreibt
+
+function updLink(url, text) { return '<a target="_blank" href="' + esc(url) + '">' + esc(text) + '</a>'; }
+function dateDe(s) { var m = String(s || '').match(/^(\d{4})-(\d\d)-(\d\d)/); return m ? m[3] + '.' + m[2] + '.' + m[1] : String(s || ''); }
+
+/** Stand von GitHub holen (force: nicht aus dem Cache). Während eine neue Tabelle angelegt wird, bleibt deren Meldung stehen. */
+function updLoad(force) {
+  if (force && !updBusy) spinner('updMsg', 'Suche nach Updates …');
+  return call('getUpdateInfo', !!force).then(function (info) {
+    UPD = info || null;
+    updLoadErr = '';
+    if (force && !updBusy) setMsg('updMsg', '');
+    updBar();
+    updFoot();
+    if (!$('paneUpd').classList.contains('hidden')) updRender();
+    updAutoTake();
+    return info;
+  }).catch(function (e) {
+    updLoadErr = errText(e);
+    if (force && !updBusy) setMsg('updMsg', 'Prüfen ging nicht: ' + esc(updLoadErr), 'err');
+    if (!$('paneUpd').classList.contains('hidden')) updRender();
+    return null;
+  });
+}
+
+/** Hinweis-Leiste unter den Tabs: veralteter Code, ausstehende Übernahme, neue Version oder leere Tabelle. */
+function updBar() {
+  var html = '';
+  if (UPD && !updBarClosed) {
+    if (UPD.outdated) {
+      html = '<span class="grow">' + updOutdatedText() + '</span>';
+    } else if (MODE === 'sidebar' && UPD.pendingTake && !takeBusy) {
+      html = '<span class="grow">Neue Tabelle: Übernimm jetzt die Daten aus deiner alten Tabelle.</span><button class="btn" type="button" onclick="updOpenTakeover(true)">Übernehmen</button>';
+    } else if (UPD.banner) {
+      html = '<span class="grow">Version ' + esc(UPD.banner) + ' ist da.</span><button class="btn" type="button" onclick="showTab(\'upd\')">Ansehen</button>';
+    } else if (MODE === 'sidebar' && UPD.collectionEmpty && !UPD.takenFrom && !takeBusy) {
+      html = '<span class="grow">Neue Tabelle? Du kannst deine Karten aus einer alten Tabelle übernehmen.</span><button class="btn" type="button" onclick="updOpenTakeover()">Übernehmen</button>';
+    }
+  }
+  if (html) html += '<button class="x" type="button" title="Ausblenden" aria-label="Ausblenden" onclick="updCloseBar()">×</button>';
+  $('updBar').innerHTML = html;
+  $('updBar').classList.toggle('hidden', !html);
+}
+function updCloseBar() { updBarClosed = true; updBar(); }
+function updOutdatedText() {
+  return MODE === 'sidebar'
+    ? 'Diese Seitenleiste ist noch von Version ' + esc(UPD.installed) + ', die Tabelle hat schon ' + esc(UPD.codeVersion) + '. Bitte schließen und über Pokémon > Karten erfassen neu öffnen.'
+    : 'Diese Seite läuft noch mit Version ' + esc(UPD.installed) + ', die Tabelle schon mit ' + esc(UPD.codeVersion) + '. Am Computer umstellen: Erweiterungen > Apps Script > Bereitstellen > Bereitstellungen verwalten, Stift, Version „Neue Version“, Bereitstellen.';
+}
+function updFoot() { $('updVer').textContent = UPD && UPD.installed ? 'Version ' + UPD.installed + ' · ' : ''; }
+
+/** Was nach „Neue Version holen“ in der neuen Tabelle zu tun ist. */
+function updSteps(url) {
+  return '<ol class="rel"><li>' + (url ? updLink(url, 'Neue Tabelle öffnen') : 'Die neue Tabelle öffnen') + '.</li>' +
+    '<li>Dort auf Pokémon > Karten erfassen klicken und den Zugriff erlauben. Google fragt bei jeder neuen Tabelle einmal.</li>' +
+    '<li>Die Seitenleiste bietet dir die Übernahme an: Jetzt übernehmen. Danach ist diese Tabelle stillgelegt.</li>' +
+    '<li>Nutzt du die Handy-Seite: In der neuen Tabelle neu bereitstellen (Erweiterungen > Apps Script > Bereitstellen > Neue Bereitstellung > Web-App). Den Link dann in der neuen Tabelle unter Pokémon > Web-App-Link anzeigen einfügen und am Handy als Lesezeichen speichern.</li></ol>';
+}
+
+function updRender() {
+  var i = UPD;
+  if (!i) {
+    $('updInfo').innerHTML = updLoadErr
+      ? '<div class="msg err">Prüfen ging nicht: ' + esc(updLoadErr) + '</div><div class="actions"><button class="btn" type="button" id="updCheck" onclick="updLoad(true)">Noch einmal versuchen</button></div>'
+      : '<div class="spin">Lade …</div>';
+    updButtons(!updBusy);
+    return;
+  }
+  var h = '<div class="notes">Installiert: Version ' + esc(i.installed) + (i.outdated ? ' (die Tabelle hat schon Version ' + esc(i.codeVersion) + ')' : '') + '</div>';
+  if (i.outdated) h += '<div class="msg warn">' + updOutdatedText() + '</div>';
+  if (i.error) {
+    h += '<div class="msg err">Prüfen ging nicht: ' + esc(i.error) + '</div>';
+  } else if (i.available) {
+    h += '<div class="box"><h3>Neu: Version ' + esc(i.available) + '</h3>';
+    (i.newer || []).forEach(function (r) {
+      h += '<div class="notes"><b>' + esc(r.version) + '</b>' + (r.prerelease ? ' (Vorabversion)' : '') + (r.date ? ' · ' + esc(dateDe(r.date)) : '') + '</div>';
+      if (r.notes && r.notes.length) h += '<ul class="rel">' + r.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
+    });
+    if (MODE !== 'sidebar') {
+      h += '<div class="hint">Die neue Version holst du am Computer: Tabelle öffnen, dann Pokémon > Updates > Nach Updates suchen.</div>';
+    } else if (i.newCopy) {
+      h += '<div class="notes">Die neue Tabelle für Version ' + esc(i.newCopy.version) + ' ist schon angelegt. So geht es weiter:</div>' + updSteps(i.newCopy.url) +
+        '<div class="actions"><button class="btn" type="button" id="updGo" onclick="updCopy()">Noch einmal anlegen</button></div>';
+    } else if (i.templateUrl) {
+      if (i.copyVersion && i.copyVersion !== i.available) {
+        h += '<div class="hint">Für Version ' + esc(i.available) + ' gibt es noch keine Vorlage zum Kopieren. „Neue Version holen“ legt Version ' + esc(i.copyVersion) + ' an.</div>';
+      }
+      h += '<div class="actions"><button class="btn primary" type="button" id="updGo" onclick="updCopy()">Neue Version holen</button></div>' +
+        '<div class="hint">Das Tool legt eine neue Tabelle mit Version ' + esc(i.copyVersion || i.available) + ' im selben Ordner an. Dort übernimmst du mit einem Klick alle Daten von hier. Bis dahin bleibt hier alles, wie es ist, und auch danach bleiben die Daten hier zum Nachsehen.</div>';
+    } else {
+      h += '<div class="hint">Für diese Version gibt es noch keine Vorlage zum Kopieren.' + (i.guideUrl ? ' Du kannst sie ' + updLink(i.guideUrl, 'von Hand einfügen') + '.' : '') + '</div>';
+    }
+    if (MODE === 'sidebar' && i.guideUrl && (i.newCopy || i.templateUrl)) {
+      h += '<div class="hint">Oder ' + updLink(i.guideUrl, 'von Hand aktualisieren') + ': Dann bleiben Tabelle und Handy-Link gleich, du fügst den Code aber selbst ein.</div>';
+    }
+    h += '</div>';
+  } else if (!i.outdated) {
+    h += '<div class="msg ok">Du hast die neueste Version.</div>';
+  }
+  if (i.checkedAt) h += '<div class="hint">Zuletzt geprüft: ' + esc(i.checkedAt) + '</div>';
+  h += '<div class="actions"><button class="btn" type="button" id="updCheck" onclick="updLoad(true)">Nach Updates suchen</button></div>';
+  $('updInfo').innerHTML = h;
+  $('updPre').checked = !!i.prereleases;
+  updButtons(!updBusy);
+}
+
+function updSetPre() {
+  var on = $('updPre').checked;
+  call('setPrereleases', on).then(function (info) { UPD = info; updBar(); updRender(); })
+    .catch(function (e) { $('updPre').checked = !on; setMsg('updMsg', esc(errText(e)), 'err'); });
+}
+
+function updButtons(on) { ['updGo', 'updBack', 'updCheck', 'updPre'].forEach(function (id) { if ($(id)) $(id).disabled = !on; }); }
+
+/** Neue Version holen: neue Tabelle aus der Vorlage anlegen (nur Seitenleiste). */
+function updCopy() {
+  if (updBusy) return;
+  updBusy = true;
+  updButtons(false);
+  spinner('updMsg', 'Lege die neue Tabelle an … das dauert einen Moment.');
+  call('updateCopy').then(function (r) {
+    updBusy = false;
+    updButtons(true);
+    updCopyResult(r || {});
+  }).catch(function (e) {
+    updBusy = false;
+    updButtons(true);
+    setMsg('updMsg', esc(errText(e)), 'err');
+  });
+}
+
+function updCopyResult(r) {
+  if (r.state === 'copied') {
+    setMsg('updMsg', esc(r.message) + updSteps(r.url), 'ok');
+    // der Bereich darüber zeigt die Schritte gleich selbst („schon angelegt“): hier dann nur die Meldung
+    updLoad(false).then(function (info) { if (!updBusy && info && info.newCopy && info.newCopy.url === r.url) setMsg('updMsg', esc(r.message), 'ok'); });
+  } else if (r.state === 'none') {
+    setMsg('updMsg', esc(r.message), 'ok');
+    // die Liste auf GitHub hat sich geändert: Leiste und Bereich neu zeichnen; sagt der Bereich dasselbe, Meldung weg
+    updLoad(false).then(function (info) { if (!updBusy && info && !info.error && !info.available) setMsg('updMsg', ''); });
+  } else if (r.state === 'notemplate') {
+    setMsg('updMsg', esc(r.message) + (r.guideUrl ? ' Du kannst sie ' + updLink(r.guideUrl, 'von Hand einfügen') + '.' : ''), 'warn');
+    updLoad(false).then(function (info) { if (!updBusy && info && !info.error && info.available && !info.templateUrl) setMsg('updMsg', ''); });
+  } else {
+    var h = esc(r.message || 'Das hat nicht geklappt.');
+    if (r.templateUrl && UPD && UPD.sheetUrl) {
+      h += '<br>So geht es von Hand: ' + updLink(r.templateUrl, 'Vorlage öffnen') + ', „Kopie erstellen“ wählen, in der Kopie Pokémon > Updates > Aus alter Tabelle übernehmen öffnen und diesen Link einfügen:' +
+        '<input type="text" readonly class="copyurl" value="' + esc(UPD.sheetUrl) + '" onclick="this.select()">';
+    }
+    setMsg('updMsg', h, 'err');
+  }
+}
+
+/** Übernahme-Feld zeigen; pending: Link der alten Tabelle eintragen und gleich prüfen. */
+function updOpenTakeover(pending) {
+  showTab('upd');
+  if (MODE !== 'sidebar') return;
+  if (pending && UPD && UPD.pendingTake && !takeBusy) {
+    $('takeUrl').value = UPD.pendingTake;
+    takePreview();
+  }
+  if ($('takeBox').scrollIntoView) $('takeBox').scrollIntoView();
+  $('takeUrl').focus();
+}
+
+/** Start mit start=takeover in einer von „Neue Version holen“ angelegten Tabelle: Vorschau sofort. */
+function updAutoTake() {
+  if (takeAutoDone || MODE !== 'sidebar' || START !== 'takeover' || !UPD || !UPD.pendingTake) return;
+  takeAutoDone = true;
+  updOpenTakeover(true);
+}
+
+/** Übernahme: erst prüfen (Vorschau), dann mit genau diesem Link übernehmen. */
+function takePreview(ev) {
+  if (ev) ev.preventDefault();
+  if (takeBusy) return;
+  var url = $('takeUrl').value.trim();
+  takeUrlChecked = '';
+  if (!url) { setMsg('takeMsg', 'Bitte den Link der alten Tabelle einfügen.', 'err'); return; }
+  var gen = ++takeGen;
+  spinner('takeMsg', 'Prüfe die alte Tabelle …');
+  call('takeoverPreview', url).then(function (p) {
+    if (gen !== takeGen || takeBusy) return;
+    takeUrlChecked = url;
+    var h = '<b>' + esc(p.name) + '</b> (' + (p.version ? 'Version ' + esc(p.version) : 'Version vor 1.0') + ')<br>' +
+      esc(p.cards) + ' Einträge mit ' + esc(p.copies) + ' Karten.';
+    if (p.sheets && p.sheets.length) h += '<br>Dazu: ' + p.sheets.map(function (s) { return esc(s.name) + ' (' + esc(s.rows) + ')'; }).join(', ') + '.';
+    if (p.own && p.own.length) h += '<br>Eigene Blätter: ' + esc(p.own.join(', ')) + '.';
+    h += (p.warnings || []).map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('');
+    h += '<div class="hint">' + (p.version
+      ? 'Danach ist die alte Tabelle stillgelegt: Sie zeigt nur noch einen Hinweis auf diese Tabelle und ruft keine Preise mehr ab. Über ihr Menü kannst du sie wieder benutzen.'
+      : 'Die alte Tabelle hat eine Version vor 1.0 und legt sich nicht selbst still. Sie bekommt vorne ein Blatt mit einem Hinweis auf diese Tabelle. Damit sie nachts keine Preise mehr abruft, löschst du danach dort die Trigger (die Schritte stehen im Hinweisblatt).') + '</div>' +
+      '<div class="actions"><button class="btn primary" type="button" id="takeGo" onclick="takeRun()">Jetzt übernehmen</button></div>';
+    setMsg('takeMsg', h);
+  }).catch(function (e) { if (gen === takeGen && !takeBusy) setMsg('takeMsg', esc(errText(e)), 'err'); });
+}
+
+function takeLock(on) {
+  takeBusy = on;
+  ['takeUrl', 'takeCheck', 'takeGo'].forEach(function (id) { if ($(id)) $(id).disabled = on; });
+  updBar();
+}
+
+function takeRun() {
+  if (!takeUrlChecked || takeBusy) return;
+  if ($('takeUrl').value.trim() !== takeUrlChecked) { takePreview(); return; } // Link wurde geändert: neu prüfen
+  var url = takeUrlChecked;
+  takeUrlChecked = '';
+  takeGen++;
+  takeLock(true);
+  spinner('takeMsg', 'Übernehme die Daten … das kann eine Minute dauern.');
+  call('takeoverRun', url).then(function (r) {
+    // bis die neue Info da ist: nichts mehr zum Übernehmen anbieten
+    if (UPD) { UPD.pendingTake = ''; UPD.collectionEmpty = false; UPD.takenFrom = url; }
+    takeLock(false);
+    setMsg('takeMsg', esc(r.message) + '<br>Nutzt du die Handy-Seite: Sie braucht in dieser Tabelle einen neuen Link. Dafür Erweiterungen > Apps Script > Bereitstellen > Neue Bereitstellung > Web-App wählen, den Link unter Pokémon > Web-App-Link anzeigen einfügen und am Handy als Lesezeichen speichern.' +
+      '<div class="actions"><button class="btn" type="button" onclick="showTab(\'coll\')">Zur Sammlung</button></div>', 'ok');
+    loadUiConfig();
+    updLoad(false);
+  }).catch(function (e) {
+    takeLock(false);
+    var msg = errText(e);
+    // nur ein angefangener Lauf lässt sich wiederholen (z. B. Zeitlimit); andere Fehler ändert ein neuer Versuch nicht
+    setMsg('takeMsg', esc(msg) + (/nicht fertig geworden/.test(msg)
+      ? '<div class="actions"><button class="btn" type="button" onclick="takePreview()">Noch einmal versuchen</button></div>' : ''), 'err');
+    updLoad(false);
+  });
+}
+
 // ---------- Start ----------
 
-if (MODE === 'sidebar') $('tabImport').classList.remove('hidden');
+if (MODE === 'sidebar') {
+  $('tabImport').classList.remove('hidden');
+  $('takeBox').classList.remove('hidden');
+}
 initSort();
 initDex();
 call('getSetSuggestions').then(function (names) {
   $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
 }).catch(function () { /* ohne Vorschläge weiter */ });
 loadUiConfig();
+updLoad(START === 'upd'); // Menü „Nach Updates suchen“: frisch von GitHub
+if (START === 'upd') showTab('upd');
+else if (START === 'takeover') updOpenTakeover();
 </script>
 <?!= include('ImportUi') ?>
+<div class="foot"><span id="updVer"></span><button type="button" class="lnk" onclick="showTab('upd')">Updates</button></div>
 </body>
 </html>

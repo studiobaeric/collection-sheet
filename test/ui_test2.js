@@ -9,6 +9,7 @@ const SRC = path.join(__dirname, '..', 'src', 'Ui.html');
 const RAW = fs.readFileSync(SRC, 'utf8');
 const MODE_LET = "<?!= mode ?>";
 const INCLUDE_LET = "<?!= include('ImportUi') ?>";
+const START_LET = '<?!= typeof start === "string" ? start : "" ?>';
 
 let pass = 0, failCount = 0;
 function ok(label, cond, extra) {
@@ -195,6 +196,19 @@ function makeServer() {
     return { gkey: S.gkey(rs[0]) };
   };
   S.adjustCount = () => { throw new Error('adjustCount sollte die neue UI nicht mehr benutzen'); };
+  // Updates (Update.gs), Vertrag aus SPEC §11
+  S.updInfo = {
+    installed: '1.0.0', codeVersion: '1.0.0', outdated: false, available: '', banner: '', newer: [], prereleases: false, copyVersion: '', templateUrl: '', newCopy: null,
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/ALT0/edit', checkedAt: '21.10.2026 10:00', error: '', guideUrl: 'https://github.com/x/y#von-hand',
+    collectionEmpty: false, takenFrom: '', pendingTake: ''
+  };
+  S.getUpdateInfo = () => S.updInfo;
+  S.setPrereleases = on => Object.assign(S.updInfo, { prereleases: !!on });
+  S.updateCopy = () => ({ state: 'copied', version: '1.1.0', url: 'https://docs.google.com/spreadsheets/d/NEUNEU/edit', name: 'Pokémon-Sammlung (neu, Version 1.1.0)',
+    message: 'Die neue Tabelle mit Version 1.1.0 liegt im selben Ordner wie diese.' });
+  S.takeoverPreview = url => ({ name: '<i>Alte Sammlung</i>', url, version: '', cards: 2, copies: 3, sheets: [{ name: 'Verlauf', rows: 1 }], own: ['Notizen'], warnings: ['<b>Achtung</b> Import 3'] });
+  S.takeoverRun = () => ({ cards: 2, sheets: ['Verlauf'], own: ['Notizen'], message: '2 Einträge und 2 weitere Blätter übernommen. Die alte Tabelle ist jetzt stillgelegt.' });
+  S.kartenErfassen = () => null;
   return S;
 }
 
@@ -221,8 +235,8 @@ function seedCollection(S) {
 // ---------------------------------------------------------------------------
 const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-PANE</div><script>var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
-function render(mode, include) {
-  return RAW.replace(MODE_LET, mode).replace(INCLUDE_LET, include == null ? IMPORT_STUB : include);
+function render(mode, include, start) {
+  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(INCLUDE_LET, include == null ? IMPORT_STUB : include);
 }
 
 function boot(mode, opts) {
@@ -240,7 +254,8 @@ function boot(mode, opts) {
     const px = new Proxy(t, { get: (o, p) => p in o ? o[p] : (...args) => { pending.push({ fn: p, args: JSON.parse(JSON.stringify(args)), ok: okH, fail: failH }); } });
     return px;
   }
-  const dom = new JSDOM(render(mode, opts.include), {
+  if (opts.server) opts.server(S);
+  const dom = new JSDOM(render(mode, opts.include, opts.start), {
     runScripts: 'dangerously', virtualConsole: vc,
     beforeParse(win) {
       const timers = []; let tid = 0, now = 0;
@@ -286,7 +301,7 @@ function boot(mode, opts) {
     pick(el, v) { if (!el) throw new Error('Auswahl fehlt'); el.value = v; el.dispatchEvent(new win.Event('change', { bubbles: true })); },
     gi(name) { return win.state.groups.findIndex(g => g.name === name); },
     gIdx(pred) { return win.state.groups.findIndex(pred); },
-    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); },
+    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo'); },
     async openColl() {
       E.click(E.$('tabColl'));
       await E.respond('searchCollection');
@@ -304,9 +319,10 @@ function boot(mode, opts) {
   {
     const idxs = []; let k = -1;
     while ((k = RAW.indexOf('<?', k + 1)) >= 0) idxs.push(k);
-    ok('genau zwei Scriptlets in Ui.html', idxs.length === 2, idxs);
+    ok('genau drei Scriptlets in Ui.html', idxs.length === 3, idxs);
     ok('Scriptlet 1 ist MODE', RAW.substr(idxs[0], MODE_LET.length) === MODE_LET && /var MODE = '<\?!= mode \?>';/.test(RAW));
-    ok('Scriptlet 2 ist include(ImportUi)', RAW.substr(idxs[1], INCLUDE_LET.length) === INCLUDE_LET);
+    ok('Scriptlet 2 ist START (fehlt start, bleibt es leer)', RAW.substr(idxs[1], START_LET.length) === START_LET && RAW.indexOf("var START = '" + START_LET + "';") >= 0);
+    ok('Scriptlet 3 ist include(ImportUi)', RAW.substr(idxs[2], INCLUDE_LET.length) === INCLUDE_LET);
     const incAt = RAW.indexOf(INCLUDE_LET);
     ok('include steht nach dem Skript am Ende von body', incAt > RAW.lastIndexOf('</script>') && incAt < RAW.indexOf('</body>'));
     ok('kein Gedankenstrich (—) in Ui.html', RAW.indexOf('—') < 0);
@@ -964,6 +980,249 @@ function boot(mode, opts) {
     E.click(E.btn($('gr' + gi), 'Bearbeiten'));
     ok('neue Zusatzspalte im Bearbeiten-Formular', !!$('eX' + gi + '_2') && /Fach/.test($('ge' + gi).textContent));
     ok('keine Skriptfehler (weitere Fälle)', E.errors.length === 0, E.errors);
+  }
+
+  // ---- Updates: Hinweis-Leiste, Bereich, Neue Version holen ----
+  {
+    const NEW = { available: '1.1.0', banner: '1.1.0', copyVersion: '1.1.0', templateUrl: 'https://docs.google.com/spreadsheets/d/TPL/copy',
+      newer: [{ version: '1.1.0', date: '2026-10-22', prerelease: false, notes: ['<b>fett</b> neu', 'Zweiter Punkt'] }] };
+    const E = boot('sidebar', { server: S => Object.assign(S.updInfo, NEW) });
+    const { $ } = E;
+    ok('Start: getUpdateInfo(false) angefragt', E.calls('getUpdateInfo').length === 1 && J(E.calls('getUpdateInfo')[0].args) === J([false]));
+    await E.startup();
+    ok('Hinweis-Leiste: neue Version', !$('updBar').classList.contains('hidden') && /Version 1\.1\.0 ist da\./.test($('updBar').textContent));
+    ok('Fußzeile: Version und Updates', /Version 1\.0\.0 · Updates/.test(E.doc.querySelector('.foot').textContent));
+    E.click(E.btn($('updBar'), 'Ansehen'));
+    ok('Bereich Updates offen, alle Tabs inaktiv', !$('paneUpd').classList.contains('hidden') && $('paneAdd').classList.contains('hidden') &&
+      !E.doc.querySelector('.tabs button.active'));
+    ok('Neuheiten mit Datum, escaped', /Neu: Version 1\.1\.0/.test($('updInfo').textContent) && /1\.1\.0 · 22\.10\.2026/.test($('updInfo').textContent) &&
+      /<b>fett<\/b>/.test($('updInfo').textContent) && !$('updInfo').querySelector('ul.rel b'));
+    ok('Sidebar: Knopf Neue Version holen, Erklärung, Weg von Hand', !!E.btn($('updInfo'), 'Neue Version holen') && /im selben Ordner/.test($('updInfo').textContent) &&
+      $('updInfo').querySelector('a[href="https://github.com/x/y#von-hand"]') && /Handy-Link gleich/.test($('updInfo').textContent));
+    E.click(E.btn($('updInfo'), 'Neue Version holen'));
+    E.click(E.btn($('updInfo'), 'Neue Version holen'));
+    ok('Holen: ein Aufruf, Knöpfe gesperrt, Hinweis', E.calls('updateCopy').length === 1 && E.btn($('updInfo'), 'Neue Version holen').disabled && $('updBack').disabled &&
+      E.btn($('updInfo'), 'Nach Updates suchen').disabled && $('updPre').disabled && /Lege die neue Tabelle an/.test($('updMsg').textContent));
+    E.win.updLoad(true);
+    await E.respond('getUpdateInfo');
+    ok('während des Anlegens: Suchen überschreibt die Meldung nicht, Knöpfe bleiben gesperrt', /Lege die neue Tabelle an/.test($('updMsg').textContent) &&
+      E.btn($('updInfo'), 'Neue Version holen').disabled);
+    E.S.updInfo.newCopy = { url: 'https://docs.google.com/spreadsheets/d/NEUNEU/edit', version: '1.1.0' };
+    await E.respond('updateCopy');
+    const m = $('updMsg');
+    ok('angelegt: Meldung, Link, Schritte', m.querySelector('.msg.ok') && m.querySelector('a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]') &&
+      /Karten erfassen/.test(m.textContent) && /Jetzt übernehmen/.test(m.textContent) && /Neue Bereitstellung/.test(m.textContent) && !E.btn($('updInfo'), 'Neue Version holen').disabled);
+    ok('danach: getUpdateInfo neu', E.calls('getUpdateInfo').length === 1);
+    await E.respond('getUpdateInfo');
+    ok('Bereich: Kopie schon angelegt, Link, Noch einmal anlegen', /schon angelegt/.test($('updInfo').textContent) &&
+      $('updInfo').querySelector('a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]') && !!E.btn($('updInfo'), 'Noch einmal anlegen') && !E.btn($('updInfo'), 'Neue Version holen'));
+    ok('Schritte und Link nur einmal, Meldung bleibt', E.doc.querySelectorAll('#paneUpd ol.rel').length === 1 &&
+      E.doc.querySelectorAll('#paneUpd a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]').length === 1 && /liegt im selben Ordner/.test($('updMsg').textContent));
+    // Zustände
+    const states = [
+      [{ state: 'none', message: 'Du hast schon die neueste Version (1.1.0).' }, m => m.querySelector('.msg.ok') && /neueste/.test(m.textContent)],
+      [{ state: 'notemplate', message: 'Für Version 1.1.0 gibt es noch keine Vorlage zum Kopieren.', guideUrl: 'https://github.com/x/y#von-hand' },
+        m => m.querySelector('.msg.warn') && m.querySelector('a[href="https://github.com/x/y#von-hand"]')],
+      [{ state: 'error', message: 'Die Vorlage von Version 1.1.0 ließ sich nicht öffnen.', templateUrl: 'https://docs.google.com/spreadsheets/d/TPL/copy' },
+        m => m.querySelector('.msg.err') && m.querySelector('a[href="https://docs.google.com/spreadsheets/d/TPL/copy"]') &&
+          m.querySelector('input.copyurl').value === 'https://docs.google.com/spreadsheets/d/ALT0/edit' && /Aus alter Tabelle übernehmen/.test(m.textContent)],
+      [{ state: 'error', message: '<img src=x onerror="window.__xss=9">kaputt' }, m => m.querySelector('.msg.err') && !m.querySelector('img') && /kaputt/.test(m.textContent)]
+    ];
+    for (const [value, check] of states) {
+      E.click(E.btn($('updInfo'), 'Noch einmal anlegen'));
+      await E.respond('updateCopy', { value });
+      ok('Zustand ' + value.state + ' ' + (value.templateUrl ? 'mit Vorlage' : ''), !!check($('updMsg')), $('updMsg').innerHTML);
+      if (value.state === 'none' || value.state === 'notemplate') {
+        ok('Zustand ' + value.state + ': Bereich wird neu geladen', E.calls('getUpdateInfo').length === 1 && J(E.calls('getUpdateInfo')[0].args) === J([false]));
+        await E.respond('getUpdateInfo');
+        ok('Zustand ' + value.state + ': Meldung bleibt, solange der Bereich noch anderes zeigt', !!check($('updMsg')));
+      }
+    }
+    E.click(E.btn($('updInfo'), 'Noch einmal anlegen'));
+    await E.respond('updateCopy', { error: 'Das Sheet ist gerade beschäftigt.' });
+    ok('Serverfehler: Meldung, Knöpfe frei', /beschäftigt/.test($('updMsg').textContent) && !E.btn($('updInfo'), 'Noch einmal anlegen').disabled);
+    // Vorabversionen
+    E.click($('updPre'));
+    ok('Vorabversionen: setPrereleases(true)', J(E.calls('setPrereleases')[0].args) === J([true]));
+    await E.respond('setPrereleases');
+    ok('Vorabversionen: Haken bleibt', $('updPre').checked === true);
+    E.click($('updPre'));
+    await E.respond('setPrereleases', { error: 'nein' });
+    ok('Vorabversionen: Fehler setzt Haken zurück', $('updPre').checked === true && /nein/.test($('updMsg').textContent));
+    // Suchen
+    E.click(E.btn($('updInfo'), 'Nach Updates suchen'));
+    ok('Nach Updates suchen: getUpdateInfo(true)', J(E.calls('getUpdateInfo')[0].args) === J([true]) && /Suche nach Updates/.test($('updMsg').textContent));
+    await E.respond('getUpdateInfo', { value: Object.assign({}, E.S.updInfo, { available: '', banner: '', newer: [], error: 'GitHub antwortet nicht wie erwartet (500).' }) });
+    ok('Fehler beim Prüfen sichtbar, Leiste weg', /Prüfen ging nicht: GitHub/.test($('updInfo').textContent) && $('updBar').classList.contains('hidden'));
+    E.click(E.btn($('updInfo'), 'Nach Updates suchen'));
+    await E.respond('getUpdateInfo', { error: 'offline' });
+    ok('Aufruf scheitert: Meldung', /Prüfen ging nicht: offline/.test($('updMsg').textContent));
+    // ohne Vorlage für die neue Version
+    E.S.updInfo.newCopy = null;
+    E.S.updInfo.templateUrl = '';
+    E.win.updLoad(false);
+    await E.respond('getUpdateInfo');
+    ok('ohne Vorlage: kein Knopf, Hinweis mit Anleitung', !E.btn($('updInfo'), 'Neue Version holen') && /noch keine Vorlage/.test($('updInfo').textContent) &&
+      $('updInfo').querySelector('a[href="https://github.com/x/y#von-hand"]'));
+    E.click($('updBack'));
+    ok('Zurück: wieder Hinzufügen', !$('paneAdd').classList.contains('hidden') && $('paneUpd').classList.contains('hidden') && $('tabAdd').classList.contains('active'));
+    ok('keine Skriptfehler (Updates)', E.errors.length === 0 && !E.win.__xss, E.errors);
+  }
+  {
+    // Hinweis ausblenden, Start im Bereich
+    const E = boot('sidebar', { start: 'upd', server: S => Object.assign(S.updInfo, { available: '1.1.0', banner: '1.1.0', newer: [{ version: '1.1.0', notes: [] }],
+      templateUrl: 'https://docs.google.com/spreadsheets/d/TPL/copy' }) });
+    const { $ } = E;
+    ok('start=upd: Bereich sofort offen, lädt', !$('paneUpd').classList.contains('hidden') && /Lade/.test($('updInfo').textContent));
+    await E.startup();
+    ok('start=upd: gerendert nach getUpdateInfo', /Neu: Version 1\.1\.0/.test($('updInfo').textContent));
+    E.click(E.btn($('updBar'), '×'));
+    ok('× blendet die Leiste aus', $('updBar').classList.contains('hidden'));
+    // Vorabversion ohne Vorlage: Holen legt die neueste Version mit Vorlage an
+    Object.assign(E.S.updInfo, { available: '1.2.0-beta.1', banner: '1.2.0-beta.1', copyVersion: '1.1.0', newer: [{ version: '1.2.0-beta.1', prerelease: true, notes: [] }, { version: '1.1.0', notes: [] }] });
+    E.win.updLoad(false);
+    await E.respond('getUpdateInfo');
+    ok('ohne Vorlage der neuesten: Hinweis, welche Version angelegt wird', /Für Version 1\.2\.0-beta\.1 gibt es noch keine Vorlage/.test($('updInfo').textContent) &&
+      /legt Version 1\.1\.0 an/.test($('updInfo').textContent) && /neue Tabelle mit Version 1\.1\.0/.test($('updInfo').textContent) && !!E.btn($('updInfo'), 'Neue Version holen'));
+    ok('keine Skriptfehler (Start im Bereich)', E.errors.length === 0, E.errors);
+  }
+  {
+    // neue Tabelle, von „Neue Version holen“ angelegt: Übernahme sofort mit Vorschau
+    const OLD = 'https://docs.google.com/spreadsheets/d/ALT/edit';
+    const E = boot('sidebar', { start: 'takeover', server: S => Object.assign(S.updInfo, { collectionEmpty: true, pendingTake: OLD }) });
+    const { $ } = E;
+    await E.startup();
+    ok('ausstehende Übernahme: Link eingetragen, Vorschau läuft', $('takeUrl').value === OLD && E.calls('takeoverPreview').length === 1 &&
+      J(E.calls('takeoverPreview')[0].args) === J([OLD]) && !$('paneUpd').classList.contains('hidden'));
+    ok('Leiste: Übernahme', /Übernimm jetzt die Daten/.test($('updBar').textContent));
+    await E.respond('takeoverPreview');
+    ok('Vorschau da, Knopf Jetzt übernehmen', !!E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    E.win.updLoad(false);
+    await E.respond('getUpdateInfo');
+    ok('erneutes Laden startet die Vorschau nicht noch einmal', E.calls('takeoverPreview').length === 0);
+    E.click(E.btn($('updBar'), 'Übernehmen'));
+    ok('Leistenknopf prüft erneut', E.calls('takeoverPreview').length === 1);
+    await E.respond('takeoverPreview');
+    // zweimal schnell prüfen: nur die letzte Antwort zählt
+    E.click(E.btn($('takeBox'), 'Prüfen'));
+    E.click(E.btn($('takeBox'), 'Prüfen'));
+    await E.respond('takeoverPreview', { error: 'alte Antwort' });
+    ok('späte erste Vorschau überschreibt nichts', !/alte Antwort/.test($('takeMsg').textContent) && /Prüfe/.test($('takeMsg').textContent));
+    await E.respond('takeoverPreview');
+    // während der Übernahme: nichts doppelt, Leiste ohne Übernehmen, Feld gesperrt
+    E.click(E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    ok('Übernahme läuft: Feld und Prüfen gesperrt, Leiste ohne Übernehmen', E.calls('takeoverRun').length === 1 && $('takeUrl').disabled && $('takeCheck').disabled &&
+      !E.btn($('updBar'), 'Übernehmen'));
+    E.win.updOpenTakeover(true);
+    E.win.takePreview();
+    E.win.takeRun();
+    ok('Übernahme läuft: keine Vorschau, kein zweiter Lauf', E.calls('takeoverPreview').length === 0 && E.calls('takeoverRun').length === 1 && /Übernehme/.test($('takeMsg').textContent));
+    await E.respond('takeoverRun', { error: 'Die alte Tabelle lässt sich mit deinem Konto nicht bearbeiten.' });
+    ok('Fehler, den ein neuer Versuch nicht behebt: kein Noch-einmal-Knopf', /nicht bearbeiten/.test($('takeMsg').textContent) && !E.btn($('takeMsg'), 'Noch einmal versuchen'));
+    await E.respond('getUpdateInfo');
+    E.click(E.btn($('takeBox'), 'Prüfen'));
+    await E.respond('takeoverPreview');
+    E.click(E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    await E.respond('takeoverRun', { error: 'Die Übernahme ist nicht fertig geworden (Zeit). Bitte versuch es noch einmal.' });
+    ok('abgebrochen: Meldung, Noch einmal versuchen, Feld frei, Info neu', /nicht fertig geworden/.test($('takeMsg').textContent) && !!E.btn($('takeMsg'), 'Noch einmal versuchen') &&
+      !$('takeUrl').disabled && !$('takeCheck').disabled && E.calls('getUpdateInfo').length === 1);
+    await E.respond('getUpdateInfo');
+    E.click(E.btn($('takeMsg'), 'Noch einmal versuchen'));
+    ok('Noch einmal versuchen: neue Vorschau', E.calls('takeoverPreview').length === 1 && J(E.calls('takeoverPreview')[0].args) === J([OLD]));
+    await E.respond('takeoverPreview');
+    E.click(E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    await E.respond('takeoverRun');
+    ok('fertig: Leiste bietet bis zur neuen Info keine Übernahme an', !E.btn($('updBar'), 'Übernehmen') && /stillgelegt/.test($('takeMsg').textContent));
+    await E.respond('getUiConfig');
+    await E.respond('getUpdateInfo');
+    ok('keine Skriptfehler (ausstehende Übernahme)', E.errors.length === 0, E.errors);
+  }
+  {
+    // Übernahme aus einer alten Tabelle
+    const E = boot('sidebar', { server: S => Object.assign(S.updInfo, { collectionEmpty: true }) });
+    const { $ } = E;
+    await E.startup();
+    ok('leere Tabelle: Leiste bietet Übernahme an', /Neue Tabelle\?/.test($('updBar').textContent));
+    E.click(E.btn($('updBar'), 'Übernehmen'));
+    ok('Übernehmen öffnet den Bereich mit Feld', !$('paneUpd').classList.contains('hidden') && E.doc.activeElement === $('takeUrl'));
+    E.click(E.btn($('takeBox'), 'Prüfen'));
+    ok('ohne Link: Fehler, kein Aufruf', /Bitte den Link/.test($('takeMsg').textContent) && E.calls('takeoverPreview').length === 0);
+    E.type($('takeUrl'), ' https://docs.google.com/spreadsheets/d/ALT/edit ');
+    E.click(E.btn($('takeBox'), 'Prüfen'));
+    ok('Prüfen: takeoverPreview mit Link', J(E.calls('takeoverPreview')[0].args) === J(['https://docs.google.com/spreadsheets/d/ALT/edit']) && /Prüfe/.test($('takeMsg').textContent));
+    await E.respond('takeoverPreview');
+    const tm = $('takeMsg');
+    ok('Vorschau vor 1.0: Hinweis auf Trigger statt „stillgelegt“', /legt sich nicht selbst still/.test(tm.textContent) && /Trigger/.test(tm.textContent));
+    ok('Vorschau: Name escaped, Version vor 1.0, Zahlen, Blätter, Warnungen', !tm.querySelector('i') && /<i>Alte Sammlung<\/i>/.test(tm.textContent) && /Version vor 1\.0/.test(tm.textContent) &&
+      /2 Einträge mit 3 Karten/.test(tm.textContent) && /Verlauf \(1\)/.test(tm.textContent) && /Eigene Blätter: Notizen/.test(tm.textContent) && tm.querySelectorAll('.warn').length === 1 && !tm.querySelector('.warn b'));
+    E.type($('takeUrl'), 'https://docs.google.com/spreadsheets/d/ANDERS/edit');
+    E.click(E.btn(tm, 'Jetzt übernehmen'));
+    ok('Link geändert: erst neu prüfen', E.calls('takeoverRun').length === 0 && E.calls('takeoverPreview').length === 1 &&
+      J(E.calls('takeoverPreview')[0].args) === J(['https://docs.google.com/spreadsheets/d/ANDERS/edit']));
+    await E.respond('takeoverPreview');
+    E.click(E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    ok('Übernehmen: takeoverRun mit geprüftem Link', J(E.calls('takeoverRun')[0].args) === J(['https://docs.google.com/spreadsheets/d/ANDERS/edit']) && /Übernehme/.test($('takeMsg').textContent));
+    E.S.updInfo.collectionEmpty = false;
+    E.S.updInfo.takenFrom = 'https://docs.google.com/spreadsheets/d/ANDERS/edit';
+    await E.respond('takeoverRun');
+    ok('fertig: Meldung, Hinweis Handy-Seite, Zur Sammlung', /2 Einträge/.test($('takeMsg').textContent) && /neuen Link/.test($('takeMsg').textContent) && !!E.btn($('takeMsg'), 'Zur Sammlung'));
+    ok('danach: getUiConfig und getUpdateInfo neu', E.calls('getUiConfig').length === 1 && E.calls('getUpdateInfo').length === 1);
+    await E.respond('getUiConfig');
+    await E.respond('getUpdateInfo');
+    ok('Leiste weg nach der Übernahme', $('updBar').classList.contains('hidden'));
+    E.click(E.btn($('takeMsg'), 'Zur Sammlung'));
+    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('searchCollection').length === 1);
+    E.click(E.btn($('takeBox'), 'Prüfen'));
+    await E.respond('takeoverPreview', { error: 'In dieser Tabelle sind schon Karten.' });
+    ok('Vorschau-Fehler', $('takeMsg').querySelector('.msg.err') && /schon Karten/.test($('takeMsg').textContent));
+    ok('keine Skriptfehler (Übernahme)', E.errors.length === 0, E.errors);
+  }
+  {
+    // Web-App: kein Holen, keine Übernahme
+    const E = boot('web', { start: 'takeover', server: S => Object.assign(S.updInfo, { available: '1.1.0', banner: '1.1.0', newer: [{ version: '1.1.0', notes: ['x'] }], collectionEmpty: true,
+      templateUrl: 'https://docs.google.com/spreadsheets/d/TPL/copy', pendingTake: 'https://docs.google.com/spreadsheets/d/ALT/edit' }) });
+    const { $ } = E;
+    await E.startup();
+    ok('Web: Leiste mit neuer Version, keine Übernahme', /Version 1\.1\.0 ist da/.test($('updBar').textContent));
+    ok('Web: start=takeover öffnet nur den Bereich, ohne Übernahme-Feld', !$('paneUpd').classList.contains('hidden') && $('takeBox').classList.contains('hidden') &&
+      E.calls('takeoverPreview').length === 0);
+    ok('Web: kein Holen, Hinweis auf den Computer', !E.btn($('updInfo'), 'Neue Version holen') && /am Computer/.test($('updInfo').textContent));
+    E.S.updInfo.banner = '';
+    E.win.updLoad(false);
+    await E.respond('getUpdateInfo');
+    ok('Web: leere Tabelle ohne Übernahme-Hinweis', $('updBar').classList.contains('hidden'));
+    ok('keine Skriptfehler (Web, Updates)', E.errors.length === 0, E.errors);
+  }
+  {
+    // Start über „Nach Updates suchen“ fragt frisch, Fehler beim Laden mit „Noch einmal versuchen“
+    const E = boot('sidebar', { start: 'upd' });
+    const { $ } = E;
+    await E.respond('getSetSuggestions'); await E.respond('getUiConfig');
+    ok('start=upd: getUpdateInfo(true)', J(E.calls('getUpdateInfo')[0].args) === J([true]));
+    await E.respond('getUpdateInfo', { error: 'offline' });
+    ok('Laden scheitert: Fehler und Knopf im Bereich', /Prüfen ging nicht: offline/.test($('updInfo').textContent) && !!E.btn($('updInfo'), 'Noch einmal versuchen'));
+    E.click(E.btn($('updInfo'), 'Noch einmal versuchen'));
+    ok('Noch einmal: getUpdateInfo(true)', J(E.calls('getUpdateInfo')[0].args) === J([true]));
+    await E.respond('getUpdateInfo');
+    ok('danach normal', /neueste Version/.test($('updInfo').textContent));
+    ok('keine Skriptfehler (Laden)', E.errors.length === 0, E.errors);
+  }
+  {
+    // Tabelle hat schon neueren Code: Hinweis statt Update
+    const E = boot('sidebar', { server: S => Object.assign(S.updInfo, { codeVersion: '1.1.0', outdated: true, available: '1.1.0', banner: '1.1.0', newer: [{ version: '1.1.0', notes: [] }] }) });
+    const { $ } = E;
+    await E.startup();
+    ok('veraltete Seitenleiste: Hinweis neu öffnen', /noch von Version 1\.0\.0/.test($('updBar').textContent) && /Karten erfassen neu öffnen/.test($('updBar').textContent) &&
+      !/ist da/.test($('updBar').textContent));
+    E.win.showTab('upd');
+    ok('Bereich nennt beide Versionen', /Version 1\.0\.0 \(die Tabelle hat schon Version 1\.1\.0\)/.test($('updInfo').textContent));
+    const W2 = boot('web', { server: S => Object.assign(S.updInfo, { codeVersion: '1.1.0', outdated: true }) });
+    await W2.startup();
+    ok('veraltete Web-App: Hinweis neu bereitstellen', /Diese Seite läuft noch mit Version 1\.0\.0/.test(W2.$('updBar').textContent) && /Neue Version/.test(W2.$('updBar').textContent));
+    W2.win.showTab('upd');
+    ok('veraltete Web-App: Bereich sagt neu bereitstellen, nicht „neueste Version“', W2.$('updInfo').querySelector('.msg.warn') &&
+      /Bereitstellungen verwalten/.test(W2.$('updInfo').textContent) && !/neueste Version/.test(W2.$('updInfo').textContent) && !/am Computer: Tabelle öffnen/.test(W2.$('updInfo').textContent));
+    ok('keine Skriptfehler (veraltet)', E.errors.length === 0 && W2.errors.length === 0, [E.errors, W2.errors]);
   }
 
   console.log('\n' + pass + ' UI-Prüfungen ok, ' + failCount + ' fehlgeschlagen');

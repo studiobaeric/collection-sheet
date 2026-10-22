@@ -257,6 +257,7 @@ t.section('Fehler im Pokédex verhindern das Speichern nicht');
 function boot(env, mode, storage) {
   const raw = fs.readFileSync(path.join(H.SRC_DIR, 'Ui.html'), 'utf8')
     .replace("<?!= mode ?>", mode)
+    .replace(/<\?!= typeof start[^?]*\?>/, '')
     .replace("<?!= include('ImportUi') ?>", '<div id="paneImport" class="panel hidden"></div><script>function impInit() {}</script>');
   const pending = [], errors = [], log = [];
   const vc = new VirtualConsole();

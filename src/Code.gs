@@ -5,6 +5,7 @@
  *   1. Konstanten und Hilfsfunktionen
  *   1a. Datenmodell (Daten-Zeilen, Schlüssel, Umstellung auf Version 2)
  *   1b. Import-Protokoll (gemeinsam mit Import.gs)
+ *   1c. Einstellungen (Blatt „Tool-Einstellungen“) und Stilllegen nach einer Übernahme
  *   2. Menü, Sidebar, Web-App, onEdit
  *   3. Einrichtung (Blätter, Gruppen, Ansicht, Trigger)
  *   4. tcgdex-API
@@ -17,6 +18,7 @@
  *
  * Erste Schritte: Funktion `einrichtung` einmal im Apps-Script-Editor ausführen.
  * Das Import-Werkzeug steht in Import.gs / ImportUi.html und nutzt die Hilfsfunktionen hier.
+ * Versionsprüfung, „Neue Version holen“ und Übernahme aus einer alten Tabelle stehen in Update.gs.
  */
 
 // ---------------------------------------------------------------------------
@@ -24,6 +26,9 @@
 // ---------------------------------------------------------------------------
 
 const API = 'https://api.tcgdex.net/v2/';
+
+// Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
+const TOOL_VERSION = '1.0.0';
 
 const SHEETS = {
   view: 'Sammlung',
@@ -38,7 +43,9 @@ const SHEETS = {
   dex: 'Pokédex',
   dexData: 'Pokédex-Daten',
   dexIds: 'Pokédex-Nummern',
-  rarity: 'Seltenheiten'
+  rarity: 'Seltenheiten',
+  settings: 'Tool-Einstellungen',
+  takenOver: 'Übernommen'
 };
 
 const DATA_HEADERS = [
@@ -918,9 +925,20 @@ function originLabel_(origin, info) {
 // Umstellung des Datenblatts auf Version 2 (Eintrag-ID, Sprache, Herkunft …)
 // ---------------------------------------------------------------------------
 
-/** Günstige Prüfung am Anfang jeder öffentlichen Funktion, die Daten liest oder schreibt. */
+/**
+ * Günstige Prüfung am Anfang jeder öffentlichen Funktion, die Daten liest oder schreibt. Eine stillgelegte Tabelle
+ * nimmt nichts mehr an (z. B. aus einer Seite, die vor der Übernahme schon offen war), und älterer Code fasst Daten
+ * in einem neueren Format nicht an.
+ */
 function ensureSchema_() {
-  if (PropertiesService.getScriptProperties().getProperty('SCHEMA_VERSION') === SCHEMA_VERSION) return;
+  if (takenOverBy_()) throw new Error(takenOverText_());
+  const stored = settingGet_('SCHEMA_VERSION');
+  if (stored === SCHEMA_VERSION) return;
+  if (Number(stored) > Number(SCHEMA_VERSION)) {
+    throw new Error('Diese Seite läuft mit älterem Code als die Tabelle. Am Handy: am Computer die Web-App neu bereitstellen ' +
+      '(Erweiterungen > Apps Script > Bereitstellen > Bereitstellungen verwalten > Bearbeiten > Neue Version). ' +
+      'In der Seitenleiste: Bitte füge den Code der neueren Version wieder ein (Erweiterungen > Apps Script).');
+  }
   migrateSchema_();
 }
 
@@ -930,7 +948,6 @@ function ensureSchema_() {
  */
 function migrateSchema_() {
   const ss = ss_();
-  const props = PropertiesService.getScriptProperties();
   return withLock_(function () {
     let sh = ss.getSheetByName(SHEETS.data);
     let msg;
@@ -977,7 +994,7 @@ function migrateSchema_() {
         migrated = true;
       }
     }
-    props.setProperty('SCHEMA_VERSION', SCHEMA_VERSION);
+    settingSet_('SCHEMA_VERSION', SCHEMA_VERSION);
     rebuildGroups_();
     // Die alte Ansichtsformel las Daten!A2:W. Wird zum ersten Mal umgestellt (z. B. weil die Seitenleiste vor
     // „Einrichtung“ geöffnet wurde), gleich auf die neue Formel mit Gruppen wechseln. Suchfelder bleiben.
@@ -1097,15 +1114,250 @@ function setProtoStatus_(ids, status) {
 }
 
 // ---------------------------------------------------------------------------
+// 1c. Einstellungen (verstecktes Blatt „Tool-Einstellungen“) und Stilllegen nach einer Übernahme
+// ---------------------------------------------------------------------------
+// Dauerhafte Einstellungen gehören zur Tabelle, nicht zum Skript: Eine Kopie (Vorlage, neue Version) bringt sie mit,
+// und ein späteres Add-on kann sie lesen. In den Skript-Eigenschaften bleiben nur laufende Vorgänge (Preislauf,
+// Import) und SPREADSHEET_ID, die die Web-App braucht, bevor sie die Tabelle kennt.
+
+const SETTINGS_HEADERS = ['Schlüssel', 'Wert'];
+const SETTING_SHEET_ID = 'Tabellen-ID';
+/** Gelten nur für genau diese Tabelle. In einer Kopie lesen sie sich leer und werden beim ersten Schreiben gelöscht. */
+const SETTINGS_LOCAL = ['WEBAPP_URL', 'NEW_COPY_URL', 'NEW_COPY_VERSION', 'TAKE_FROM', 'TAKE_RUN',
+  'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT'];
+/** Standen früher in den Skript-Eigenschaften; settingGet_ liest dort weiter, bis sie im Blatt stehen. */
+const SETTINGS_FROM_PROPS = ['SCHEMA_VERSION', 'WEBAPP_URL', 'VIEW_EXTRAS'];
+/** Auslöser des Tools. Die Namen bleiben über alle Versionen gleich, sonst laufen alte Auslöser ins Leere. */
+const TRIGGER_HANDLERS = ['naechtlicherPreislauf', 'continuePriceRun', 'beiStrukturAenderung'];
+
+let settingsCache_ = null;
+
+/** Einstellungen dieser Ausführung: {map, exists, copy}. copy = das Blatt stammt aus einer anderen Tabelle. */
+function settingsAll_() {
+  if (settingsCache_) return settingsCache_;
+  const ss = ss_();
+  const sh = ss.getSheetByName(SHEETS.settings);
+  const map = {};
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r) {
+      const k = String(r[0] == null ? '' : r[0]).trim();
+      if (k && !(k in map)) map[k] = r[1] == null ? '' : String(r[1]);
+    });
+  }
+  const stored = map[SETTING_SHEET_ID] || '';
+  settingsCache_ = { map: map, exists: !!sh, copy: !!(stored && stored !== ss.getId()) };
+  return settingsCache_;
+}
+
+/** Wert als Text, '' wenn er fehlt. */
+function settingGet_(key) {
+  const all = settingsAll_();
+  if (all.copy && SETTINGS_LOCAL.indexOf(key) >= 0) return '';
+  if (key in all.map) return all.map[key];
+  if (!all.copy && SETTINGS_FROM_PROPS.indexOf(key) >= 0) {
+    return PropertiesService.getScriptProperties().getProperty(key) || '';
+  }
+  return '';
+}
+
+function settingSet_(key, value) {
+  const o = {};
+  o[key] = value;
+  settingsSetMany_(o);
+}
+
+/** Mehrere Einstellungen schreiben ('' leert einen Wert). Eine Kopie wird dabei zu einer eigenen Tabelle. */
+function settingsSetMany_(obj) {
+  const ss = ss_();
+  const wasCopy = writeSettings_(ss, obj || {});
+  if (wasCopy) PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+  settingsCache_ = null;
+}
+
+/** Diese Tabelle ist eine Kopie (Vorlage, neue Version, „Kopie erstellen“): lokale Einstellungen der alten löschen. */
+function adoptCopy_() {
+  settingsSetMany_({});
+}
+
+function settingsSheet_(ss) {
+  let sh = ss.getSheetByName(SHEETS.settings);
+  if (sh) return sh;
+  sh = ss.insertSheet(SHEETS.settings);
+  writeHeaders_(sh, SETTINGS_HEADERS);
+  sh.getRange(2, 1, 1, 2).setNumberFormat('@').setValues([[SETTING_SHEET_ID, ss.getId()]]);
+  sh.setColumnWidth(1, 170);
+  sh.setColumnWidth(2, 420);
+  sh.protect().setDescription('Wird nur vom Skript beschrieben').setWarningOnly(true);
+  sh.hideSheet();
+  return sh;
+}
+
+/**
+ * Einstellungen in eine Tabelle schreiben (auch eine andere, z. B. neue Kopie oder alte Tabelle). Setzt dabei die
+ * Tabellen-ID; stammte das Blatt aus einer anderen Tabelle, werden dessen lokale Werte geleert. -> war es eine Kopie
+ */
+function writeSettings_(ss, obj) {
+  const sh = settingsSheet_(ss);
+  const last = sh.getLastRow();
+  const vals = last >= 2 ? sh.getRange(2, 1, last - 1, 2).getValues() : [];
+  const idx = {};
+  vals.forEach(function (r, i) {
+    const k = String(r[0] == null ? '' : r[0]).trim();
+    if (k && !(k in idx)) idx[k] = i;
+  });
+  const id = ss.getId();
+  const isCopy = idx[SETTING_SHEET_ID] !== undefined && String(vals[idx[SETTING_SHEET_ID]][1]) !== id;
+  if (isCopy) SETTINGS_LOCAL.forEach(function (k) { if (idx[k] !== undefined) vals[idx[k]][1] = ''; });
+  const put = function (k, v) {
+    v = v == null ? '' : String(v);
+    if (idx[k] === undefined) { idx[k] = vals.length; vals.push([k, v]); } else vals[idx[k]][1] = v;
+  };
+  put(SETTING_SHEET_ID, id);
+  Object.keys(obj).forEach(function (k) { put(k, obj[k]); });
+  if (sh.getMaxRows() < vals.length + 1) sh.insertRowsAfter(sh.getMaxRows(), vals.length + 1 - sh.getMaxRows());
+  sh.getRange(2, 1, vals.length, 2).setNumberFormat('@').setValues(vals);
+  return isCopy;
+}
+
+/**
+ * Werte aus den alten Skript-Eigenschaften ins Blatt übernehmen (Einrichtung, Update). Legt das Blatt an.
+ * prevId: SPREADSHEET_ID, bevor setupAll_ sie überschrieben hat (sonst die gespeicherte).
+ */
+function migrateSettingsFromProps_(prevId) {
+  const all = settingsAll_();
+  if (all.copy) { adoptCopy_(); return; }
+  const props = PropertiesService.getScriptProperties();
+  const pid = prevId != null ? String(prevId) : (props.getProperty('SPREADSHEET_ID') || '');
+  // „Kopie erstellen“ einer Tabelle vor 1.0: Die Skript-Eigenschaften kommen mit und nennen die andere Tabelle.
+  // Deren lokale Werte (Web-App-Link) gelten hier nicht, und eingerichtet ist die Kopie auch nicht (keine Auslöser).
+  const foreign = !!pid && pid !== ss_().getId();
+  const add = {};
+  SETTINGS_FROM_PROPS.forEach(function (k) {
+    const v = props.getProperty(k);
+    if (foreign && SETTINGS_LOCAL.indexOf(k) >= 0) return;
+    if (v && !(k in all.map)) add[k] = v;
+  });
+  if (foreign && !('WEBAPP_URL' in all.map)) add.WEBAPP_URL = ''; // sonst liest settingGet_ weiter den alten Link
+  // Code vor 1.0 kannte CODE_VERSION nicht; hat seine Einrichtung hier SPREADSHEET_ID oder SCHEMA_VERSION
+  // hinterlassen, ist diese Tabelle schon eingerichtet (Auslöser und Sets nicht noch einmal)
+  const legacy = !foreign && !all.map.CODE_VERSION && (props.getProperty('SCHEMA_VERSION') || pid === ss_().getId());
+  if (legacy && !all.map.SETUP_AT) add.SETUP_AT = 'vor 1.0';
+  if (Object.keys(add).length || !all.exists) settingsSetMany_(add);
+}
+
+/** Link der neuen Tabelle, wenn diese hier übernommen und stillgelegt wurde, sonst ''. */
+function takenOverBy_() {
+  try { return settingGet_('TAKEN_OVER_BY'); } catch (e) { return ''; }
+}
+
+/** Stilllegen: die Auslöser des Tools löschen (die des eigenen Kontos; fremde hören beim nächsten Lauf hier auf). */
+function stopTriggers_() {
+  TRIGGER_HANDLERS.forEach(function (fn) { deleteTriggersFor_(fn); });
+}
+
+function htmlEsc_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function takenOverText_() {
+  const at = settingGet_('TAKEN_OVER_AT');
+  return 'Diese Tabelle wurde ' + (at ? 'am ' + at + ' ' : '') + 'in eine neue Tabelle übernommen. ' +
+    'Bitte mach nur noch dort weiter. Die Daten hier bleiben zum Nachsehen.';
+}
+
+/** Menüpunkt einer stillgelegten Tabelle. */
+function uebernommenHinweis() {
+  alert_(takenOverText_() + '\n\n' + takenOverBy_());
+}
+
+/** Seite für Seitenleiste und Web-App (web) einer stillgelegten Tabelle. Die Web-App verlinkt die neue Handy-Seite. */
+function takenOverPage_(web) {
+  const url = takenOverBy_();
+  let more = '';
+  if (web) {
+    let app = '', closed = false;
+    try { app = typeof updReadSettings_ === 'function' ? updReadSettings_(SpreadsheetApp.openByUrl(url)).map.WEBAPP_URL || '' : ''; } catch (e) { closed = true; }
+    more = /^https:\/\/script\.google\.com\//.test(app)
+      ? '<br><br><a target="_top" href="' + htmlEsc_(app) + '">Zur neuen Handy-Seite</a> (bitte als Lesezeichen speichern)'
+      : closed
+        ? '<br><br>Die neue Tabelle lässt sich von hier nicht öffnen. Hast du noch keinen Zugriff, frag bitte die Person, der sie gehört, ob sie sie mit dir teilt.'
+        : '<br><br>Die neue Tabelle hat noch keine Handy-Seite. Am Computer in der neuen Tabelle: Erweiterungen > Apps Script > Bereitstellen > Neue Bereitstellung > Web-App, dann Pokémon > Web-App-Link anzeigen.';
+  }
+  return HtmlService.createHtmlOutput('<div style="font-family:Roboto,Arial,sans-serif;font-size:15px;padding:16px;line-height:1.5">' +
+    htmlEsc_(takenOverText_()) + '<br><br><a target="_top" href="' + htmlEsc_(url) + '">Zur neuen Tabelle</a>' + more + '</div>')
+    .setTitle('Pokémon-Sammlung');
+}
+
+/**
+ * Nach einem Update von Hand (oder nach Einfügen älteren Codes) einmal die Blätter auf den Stand dieses Codes bringen, ohne Auslöser
+ * und ohne tcgdex-Abruf. onlyUpgrade (Web-App): nie auf eine ältere Version zurückbauen. Eine Web-App-Bereitstellung
+ * läuft mit fester Version, Seitenleiste und Auslöser immer mit dem neuesten Code. -> true, wenn etwas lief
+ */
+function upgradeIfNeeded_(onlyUpgrade) {
+  const code = settingGet_('CODE_VERSION');
+  if (code === TOOL_VERSION) return false;
+  if (onlyUpgrade && codeIsNewer_(code)) return false;
+  ensureSchema_();
+  migrateSettingsFromProps_();
+  setupSheets_(ss_(), true);
+  settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()) });
+  return true;
+}
+
+/** Läuft in der Tabelle schon neuerer Code als dieser (z. B. eine Web-App, die noch nicht neu bereitgestellt ist)? */
+function codeIsNewer_(version) {
+  return !!version && typeof updCompare_ === 'function' && updCompare_(version, TOOL_VERSION) > 0;
+}
+
+/**
+ * Wurde diese Tabelle noch nie eingerichtet (Auslöser, Sets)? SETUP_AT gilt nur für diese Tabelle: Wird eine frische
+ * Kopie schon vor der Seitenleiste zu einer eigenen Tabelle (z. B. Web-App-Link gespeichert), bleibt es leer.
+ */
+function needsSetup_() {
+  return !settingGet_('SETUP_AT');
+}
+
+/** Eine frische Kopie (Vorlage oder „Kopie erstellen“), die noch keine eigene Tabelle ist. */
+function isFreshCopy_() {
+  return settingsAll_().copy;
+}
+
+/**
+ * Alle Blätter, die dieser Code anlegt (ohne das Hinweisblatt einer Übernahme). Steht als TOOL_SHEETS in den
+ * Einstellungen: Eine spätere Version erkennt daran bei der Übernahme, welche Blätter dem Nutzer gehören, auch wenn
+ * sie selbst ein neues Blatt mit gleichem Namen hat.
+ */
+function toolSheetNames_() {
+  const out = [];
+  const add = function (n) { if (n && out.indexOf(n) < 0) out.push(n); };
+  Object.keys(SHEETS).forEach(function (k) { if (k !== 'takenOver') add(SHEETS[k]); });
+  if (typeof IMP_SHEETS !== 'undefined') Object.keys(IMP_SHEETS).forEach(function (k) { add(IMP_SHEETS[k]); });
+  ['Import-Begriffe', 'Import-Sets', 'Import-Vorlagen', 'Import-Antworten', 'Diagnose'].forEach(add);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 2. Menü, Sidebar, Web-App, onEdit
 // ---------------------------------------------------------------------------
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('Pokémon')
+  const ui = SpreadsheetApp.getUi();
+  if (takenOverBy_()) {
+    ui.createMenu('Pokémon').addItem('Diese Tabelle wurde übernommen', 'uebernommenHinweis')
+      .addItem('Diese Tabelle wieder benutzen', 'wiederBenutzen').addToUi();
+    return;
+  }
+  const menu = ui.createMenu('Pokémon')
     .addItem('Karten erfassen', 'kartenErfassen')
     .addItem('Preise jetzt aktualisieren', 'preiseJetztAktualisieren')
     .addItem('Übersetzung und Sets aktualisieren', 'uebersetzungUndSetsAktualisieren')
-    .addSeparator()
+    .addSeparator();
+  menu.addSubMenu(ui.createMenu('Updates')
+    .addItem('Nach Updates suchen', 'updatesAnzeigen')
+    .addItem('Aus alter Tabelle übernehmen', 'uebernahmeAnzeigen'));
+  menu
     .addItem('Einrichtung', 'einrichtung')
     .addItem('Ansicht neu aufbauen', 'ansichtNeuAufbauen')
     .addItem('API prüfen', 'apiPruefen')
@@ -1113,19 +1365,59 @@ function onOpen() {
     .addToUi();
 }
 
-/** Seitenleiste (mit Import-Tab). Ui.html ist eine Vorlage: `mode` steuert, was sie zeigt. */
-function kartenErfassen() {
+/** Seitenleiste (mit Import-Tab). Ui.html ist eine Vorlage: `mode` steuert, was sie zeigt, `start` den ersten Tab. */
+function kartenErfassen(start) {
+  const ui = SpreadsheetApp.getUi();
+  if (takenOverBy_()) { ui.showSidebar(takenOverPage_()); return; }
+  if (isFreshCopy_()) {
+    // frische Kopie der Vorlage: einmal alles einrichten, auch die Auslöser
+    notify_('Neue Tabelle: Einrichtung läuft …');
+    if (!setupAll_(false)) return;
+  } else {
+    upgradeIfNeeded_();
+    if (needsSetup_()) {
+      notify_('Neue Tabelle: Einrichtung läuft …');
+      if (!setupAll_(false)) return;
+    }
+  }
   const t = HtmlService.createTemplateFromFile('Ui');
   t.mode = 'sidebar';
-  SpreadsheetApp.getUi().showSidebar(t.evaluate().setTitle('Pokémon-Karten'));
+  t.start = ['upd', 'takeover'].indexOf(start) >= 0 ? start : ''; // Menü ruft ohne Argument auf
+  // von „Neue Version holen“ angelegt und noch leer (oder eine Übernahme brach ab): gleich die Übernahme zeigen
+  if (!t.start && typeof updPendingTake_ === 'function') {
+    try { if (updPendingTake_()) t.start = 'takeover'; } catch (e) { /* normaler Start */ }
+  }
+  ui.showSidebar(t.evaluate().setTitle('Pokémon-Karten'));
+}
+
+/** Menü Updates: Seitenleiste mit dem Bereich Updates. */
+function updatesAnzeigen() {
+  kartenErfassen('upd');
+}
+
+/** Menü Updates: Seitenleiste mit der Übernahme aus einer alten Tabelle. */
+function uebernahmeAnzeigen() {
+  kartenErfassen('takeover');
 }
 
 function doGet() {
+  if (takenOverBy_()) return takenOverPage_(true).addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  // Einrichten (mit Auslösern) nur über die Seitenleiste, sonst fehlt der nächtliche Preislauf
+  if (isFreshCopy_()) return newSheetPage_();
+  upgradeIfNeeded_(true);
+  if (needsSetup_()) return newSheetPage_();
   const t = HtmlService.createTemplateFromFile('Ui');
   t.mode = 'web';
+  t.start = '';
   return t.evaluate()
     .setTitle('Pokémon-Sammlung')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function newSheetPage_() {
+  return HtmlService.createHtmlOutput('<div style="font-family:Roboto,Arial,sans-serif;font-size:15px;padding:16px;line-height:1.5">' +
+    'Diese Tabelle ist neu. Bitte öffne sie einmal am Computer und klicke auf Pokémon &gt; Karten erfassen. Danach funktioniert die Handy-Seite.</div>')
+    .setTitle('Pokémon-Sammlung').addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /** Für den Aufruf include('ImportUi') in der Vorlage Ui.html. Fehlt die Datei noch, bleibt die Stelle leer. */
@@ -1143,8 +1435,7 @@ function include(name) {
  * einmal eingefügt und in den Script Properties gespeichert.
  */
 function webAppLinkAnzeigen() {
-  const props = PropertiesService.getScriptProperties();
-  const saved = props.getProperty('WEBAPP_URL');
+  const saved = settingGet_('WEBAPP_URL');
   const ui = SpreadsheetApp.getUi();
   const res = ui.prompt('Web-App fürs Handy',
     (saved ? 'Gespeicherter Link:\n' + saved + '\n\nZum Ändern einen neuen Link einfügen, sonst einfach OK.'
@@ -1155,7 +1446,7 @@ function webAppLinkAnzeigen() {
   const url = res.getResponseText().trim();
   if (!url) return;
   if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { ui.alert('Das sieht nicht nach einem Web-App-Link aus (https://script.google.com/…/exec).'); return; }
-  props.setProperty('WEBAPP_URL', url);
+  settingSet_('WEBAPP_URL', url);
   ui.alert('Gespeichert:\n' + url + '\n\nAm Handy öffnen und „Zum Startbildschirm hinzufügen".');
 }
 
@@ -1192,6 +1483,7 @@ function onEdit(e) {
  */
 function beiStrukturAenderung(e) {
   try {
+    if (takenOverBy_()) { stopTriggers_(); return; }
     const type = String((e && e.changeType) || '');
     if (['REMOVE_ROW', 'REMOVE_COLUMN', 'INSERT_COLUMN', 'OTHER'].indexOf(type) < 0) return;
     rebuildAfterEdit_();
@@ -1199,7 +1491,7 @@ function beiStrukturAenderung(e) {
 }
 
 function rebuildAfterEdit_() {
-  if (PropertiesService.getScriptProperties().getProperty('SCHEMA_VERSION') !== SCHEMA_VERSION) return;
+  if (settingGet_('SCHEMA_VERSION') !== SCHEMA_VERSION) return;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return;
   try {
@@ -1232,15 +1524,53 @@ function applyRowHeights_(sh) {
 // ---------------------------------------------------------------------------
 
 function einrichtung() {
+  if (takenOverBy_()) { uebernommenHinweis(); return; }
+  const msg = setupAll_(true);
+  if (msg) alert_(msg);
+}
+
+/**
+ * Alles einrichten: Datenformat, Einstellungen, Blätter, Auslöser, Sets und Übersetzung. Für „Einrichtung“ und
+ * für eine frische Kopie der Vorlage. withHint: Hinweis zur Web-App anhängen. -> Text für die Meldung, '' bei Abbruch
+ */
+function setupAll_(withHint) {
   const ss = ss_();
-  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+  if (Number(settingGet_('SCHEMA_VERSION')) > Number(SCHEMA_VERSION)) {
+    // älterer Code als die Daten (z. B. eine alte Version von Hand eingefügt): nichts umbauen
+    alert_('Diese Tabelle wurde schon mit einer neueren Version des Tools benutzt. Damit keine Daten verloren gehen, richtet dieser ältere Code hier nichts ein. ' +
+      'Bitte füge den Code der neueren Version wieder ein (Erweiterungen > Apps Script).');
+    return '';
+  }
+  const props = PropertiesService.getScriptProperties();
+  const prevId = props.getProperty('SPREADSHEET_ID') || ''; // nennt sie eine andere Tabelle, ist das hier eine Kopie
+  props.setProperty('SPREADSHEET_ID', ss.getId());
+  if (settingsAll_().copy) adoptCopy_();
   let migMsg = '';
   try {
     migMsg = migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
   } catch (e) {
     alert_('Das Datenblatt konnte nicht auf das neue Format umgestellt werden (' + e.message + '). Es wurde nichts geändert.');
-    return;
+    return '';
   }
+  migrateSettingsFromProps_(prevId);
+  setupSheets_(ss, false);
+  setupTriggers_();
+  settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm') });
+  let msg = 'Einrichtung fertig.' + (migMsg && /^[1-9]\d* Einträge .*umgestellt/.test(migMsg) ? ' ' + migMsg : '');
+  try {
+    msg += ' ' + buildTranslationAndSets_();
+  } catch (e) {
+    msg += ' Sets und Übersetzung konnten nicht geladen werden (' + e.message + '). Bitte später „Pokémon > Übersetzung und Sets aktualisieren" starten.';
+  }
+  if (withHint) msg += redeployHint_();
+  return msg;
+}
+
+/**
+ * Alle Blätter des Tools anlegen bzw. auf den Stand dieses Codes bringen (ohne Auslöser, ohne tcgdex-Abruf).
+ * keepControls: Suchfelder in Sammlung und Pokédex stehen lassen (Update); sonst wie bisher bei der Einrichtung.
+ */
+function setupSheets_(ss, keepControls) {
   setupDataSheet_(ss);
   setupSimpleSheet_(ss, SHEETS.sets, SET_HEADERS, [0, 1, 2, 3, 4, 7], true);
   setupSimpleSheet_(ss, SHEETS.tr, TR_HEADERS, [0, 1, 3], true);
@@ -1249,18 +1579,9 @@ function einrichtung() {
   setupPokedexDataSheet_(ss);
   if (typeof setupImportSheets_ === 'function') setupImportSheets_(ss);
   withLock_(function () { rebuildGroups_(); });
-  setupViewSheet_(ss);
+  setupViewSheet_(ss, !!keepControls);
   setupPokedexSheet_(ss, true);
   removeDefaultSheet_(ss);
-  setupTriggers_();
-  let msg = 'Einrichtung fertig.' + (migMsg && /^[1-9]\d* Einträge .*umgestellt/.test(migMsg) ? ' ' + migMsg : '');
-  try {
-    msg += ' ' + buildTranslationAndSets_();
-  } catch (e) {
-    msg += ' Sets und Übersetzung konnten nicht geladen werden (' + e.message + '). Bitte später „Pokémon > Übersetzung und Sets aktualisieren" starten.';
-  }
-  msg += redeployHint_();
-  alert_(msg);
 }
 
 /**
@@ -1268,7 +1589,7 @@ function einrichtung() {
  * läuft mit dem alten Code weiter, bis sie auf „Neue Version“ gestellt wird. Offene Seitenleisten auch.
  */
 function redeployHint_() {
-  let url = PropertiesService.getScriptProperties().getProperty('WEBAPP_URL') || '';
+  let url = settingGet_('WEBAPP_URL');
   if (!url) {
     try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
   }
@@ -1438,9 +1759,9 @@ function setupHistorySheet_(ss) {
 // Gruppen (verstecktes Hilfsblatt): eine Zeile pro Karte + Variante + Sonderversion
 // ---------------------------------------------------------------------------
 
-/** Namen der Zusatzspalten, die die Sammlung zeigt (Script Property VIEW_EXTRAS). */
+/** Namen der Zusatzspalten, die die Sammlung zeigt (Einstellung VIEW_EXTRAS). */
 function getViewExtras_() {
-  const raw = PropertiesService.getScriptProperties().getProperty('VIEW_EXTRAS');
+  const raw = settingGet_('VIEW_EXTRAS');
   if (!raw) return [];
   let list;
   try { list = JSON.parse(raw); } catch (e) { return []; }
@@ -1459,7 +1780,7 @@ function setViewExtras_(names) {
   const seen = {};
   const list = (Array.isArray(names) ? names : []).map(function (n) { return String(n == null ? '' : n).trim(); })
     .filter(function (n) { if (!n || seen[n] || existing.indexOf(n) < 0) return false; seen[n] = true; return true; });
-  PropertiesService.getScriptProperties().setProperty('VIEW_EXTRAS', JSON.stringify(list));
+  settingSet_('VIEW_EXTRAS', JSON.stringify(list));
   rebuildGroups_();
   setupViewSheet_(ss_(), true);
   return list;
@@ -2861,9 +3182,13 @@ function translateName_(name) {
 // 8. Preislauf und Wertverlauf
 // ---------------------------------------------------------------------------
 
-/** Zeit-Trigger (täglich 3–4 Uhr). */
+/** Zeit-Trigger (täglich 3–4 Uhr). Schaut danach auch nach einer neuen Version (nur Hinweis, kein Update). */
 function naechtlicherPreislauf() {
+  if (takenOverBy_()) { stopTriggers_(); return; }
   startPriceRun_();
+  if (typeof checkForUpdate_ === 'function') {
+    try { checkForUpdate_(); } catch (e) { /* ohne Netz oder GitHub weiter */ }
+  }
 }
 
 function startPriceRun_() {
@@ -2907,6 +3232,7 @@ function priceTargets_() {
 /** Läuft in Paketen; nach ~5 Minuten Pause und Fortsetzung per Einmal-Trigger. */
 function continuePriceRun() {
   deleteTriggersFor_('continuePriceRun');
+  if (takenOverBy_()) { stopTriggers_(); return 'Diese Tabelle wurde übernommen.'; }
   const props = PropertiesService.getScriptProperties();
   const raw = props.getProperty('PRICE_RUN');
   if (!raw) return 'Kein Preislauf aktiv.';

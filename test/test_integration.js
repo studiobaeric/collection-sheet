@@ -22,7 +22,8 @@ const H = require('./harness2');
 const t = H.runner('test_integration');
 const J = x => JSON.stringify(x);
 const SRC = path.join(__dirname, '..', 'src');
-const FILES = ['Code.gs'].concat(process.env.IMPORT && fs.existsSync(path.join(SRC, 'Import.gs')) ? ['Import.gs'] : []);
+const FILES = ['Code.gs'].concat(process.env.IMPORT && fs.existsSync(path.join(SRC, 'Import.gs')) ? ['Import.gs'] : [])
+  .concat(fs.existsSync(path.join(SRC, 'Update.gs')) ? ['Update.gs'] : []);
 const REAL_IMPORTUI = !!process.env.IMPORTUI;
 const TODAY = H.formatDate(new Date(), '', 'yyyy-MM-dd');
 const TODAY_DMY = H.formatDate(new Date(), '', 'dd.MM.yyyy');
@@ -40,8 +41,8 @@ function evaluateTemplate(env, tpl, includeImpl) {
   const html = content.replace(/<\?(!=|=)?([\s\S]*?)\?>/g, (m, kind, expr) => {
     seen.push(m);
     if (!kind) throw new Error('Scriptlet ohne Ausgabe wird hier nicht unterstützt: ' + m);
-    // Vorlagen-Eigenschaften (mode) + globale Serverfunktionen (include)
-    const val = new Function('mode', 'include', 'return (' + expr + ');')(tpl.mode, includeImpl);
+    // Vorlagen-Eigenschaften (mode, start) + globale Serverfunktionen (include)
+    const val = new Function('mode', 'start', 'include', 'return (' + expr + ');')(tpl.mode, tpl.start, includeImpl);
     return kind === '!=' ? String(val) : escHtml(val);
   });
   return { html, scriptlets: seen };
@@ -90,7 +91,8 @@ function boot(env, mode) {
     return name === 'ImportUi' && !(REAL_IMPORTUI && real) ? IMPORT_STUB : real;
   };
   const ev = evaluateTemplate(env, tpl, includeImpl);
-  t.ok(mode + ': genau zwei Scriptlets ausgewertet', ev.scriptlets.length === 2, ev.scriptlets);
+  t.ok(mode + ': genau drei Scriptlets ausgewertet (mode, start, include)', ev.scriptlets.length === 3, ev.scriptlets);
+  t.ok(mode + ': START ist leer', /var START = '';/.test(ev.html));
   t.ok(mode + ': include(ImportUi) aufgerufen', J(includeCalls) === J(['ImportUi']), includeCalls);
   t.ok(mode + ': kein "<?" mehr im fertigen HTML', ev.html.indexOf('<?') < 0);
 
@@ -312,13 +314,13 @@ function seedImport(env) {
     t.ok('Code.gs kompiliert', !err, err);
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
     ['sidebar', 'web'].forEach(mode => {
-      const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!=\s*include\('ImportUi'\)\s*\?>/g, IMPORT_STUB);
+      const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '').replace(/<\?!=\s*include\('ImportUi'\)\s*\?>/g, IMPORT_STUB);
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
       let bad = [];
       scripts.forEach((s, i) => { try { new vm.Script(s, { filename: 'Ui.html#' + i }); } catch (e) { bad.push(i + ': ' + e.message); } });
       t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= 2 && bad.length === 0, bad);
     });
-    t.ok('Ui.html: "<?" nur in den zwei Scriptlets', (raw.match(/<\?/g) || []).length === 2);
+    t.ok('Ui.html: "<?" nur in den drei Scriptlets', (raw.match(/<\?/g) || []).length === 3);
     t.ok('Ui.html: kein Gedankenstrich (—)', raw.indexOf('—') < 0);
   }
 
@@ -331,7 +333,8 @@ function seedImport(env) {
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
     const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getPokedex', 'getSetSuggestions',
-      'getUiConfig', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice'];
+      'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
+      'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
     // Argumentreihenfolge wie in Code.gs
     const code = fs.readFileSync(path.join(SRC, 'Code.gs'), 'utf8');
@@ -350,7 +353,7 @@ function seedImport(env) {
   env.ctx.onOpen();
   env.ctx.einrichtung();
   t.ok('Einrichtung ohne Fehlermeldung', env.ui.alerts.length === 1 && /Einrichtung fertig/.test(env.ui.alerts[0]), env.ui.alerts);
-  t.ok('Schema v2', env.props.SCHEMA_VERSION === '2');
+  t.ok('Schema v2', env.setting('SCHEMA_VERSION') === '2');
   t.ok('Daten und Gruppen versteckt, Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden && env.ss.list[0].name === 'Sammlung');
   t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 13), env.run('VIEW_HEADERS'));
   t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:W,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
@@ -836,7 +839,7 @@ function seedImport(env) {
   t.ok('Sperre nie verschachtelt (gesamt)', env.lock.nested === 0, env.lock);
   env.promptResponse = 'https://script.google.com/macros/s/ABC/exec';
   env.ctx.webAppLinkAnzeigen();
-  t.ok('Web-App-Link speichern (unverändert)', env.props.WEBAPP_URL === 'https://script.google.com/macros/s/ABC/exec' && /Gespeichert/.test(env.ui.alerts[env.ui.alerts.length - 1]));
+  t.ok('Web-App-Link speichern (unverändert)', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/ABC/exec' && /Gespeichert/.test(env.ui.alerts[env.ui.alerts.length - 1]));
 
   // ---- 13. Web-App (Handy): ohne Import, mit Bearbeiten ----
   t.section('Web-App');
@@ -891,7 +894,7 @@ function seedImport(env) {
     t.ok('vor dem Öffnen: Schema noch alt', !nu.props.SCHEMA_VERSION && nu.values('Daten')[0].length === 23);
     const U = boot(nu, 'sidebar');
     await U.settle();
-    t.ok('Seitenleiste: getUiConfig stellt Daten um', nu.props.SCHEMA_VERSION === '2' && nu.values('Daten')[0][23] === 'Eintrag-ID', nu.values('Daten')[0]);
+    t.ok('Seitenleiste: getUiConfig stellt Daten um', nu.setting('SCHEMA_VERSION') === '2' && nu.values('Daten')[0][23] === 'Eintrag-ID', nu.values('Daten')[0]);
     const nd = nu.data();
     t.ok('alte Einträge: Schlüssel v2, Herkunft Hand', nd.length === 3 && nd.every(r => r.origin === 'Hand' && r.lang === 'DE' && /^E[0-9a-f]{10}$/.test(r.eid)) &&
       nd.map(r => r.key).join(',') === 'swsh3-025|normal||NM|DE,swsh3-025|reverse|||DE,base1-4|holo||LP|DE', nd.map(r => r.key));

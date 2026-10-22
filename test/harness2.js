@@ -8,7 +8,7 @@
  *   env.data();                           // Blatt Daten als Objekte
  *
  * createEnv(opts):
- *   files     Liste der .gs-Dateien (Standard: Code.gs und Import.gs, falls es sie gibt)
+ *   files     Liste der .gs-Dateien (Standard: Code.gs, dazu Import.gs und Update.gs, falls es sie gibt)
  *   srcDir    Ordner der Dateien (Standard: ../src)
  *   noUi      true: SpreadsheetApp.getUi() wirft (wie in Triggern)
  *   drive     'v3' (Standard) | 'v2' | false (kein erweiterter Dienst Drive)
@@ -18,6 +18,9 @@
  * Wichtigste Teile von env: ctx, ss, DB, props, cache, ui, lock, fetchLog, triggers, templates, files (Drive),
  * sheet(name), values(name), objects(name), data(), groups(), proto(), addSource(spec), uiCall(fn, ...args),
  * run(code), setFormulaDisplay(fn).
+ *
+ * Andere Adressen als tcgdex (GitHub, Apps-Script-API …): env.http = (url, options) => {code, body} | undefined.
+ * Kopien über DriveApp.makeCopy landen in env.sources (und env.backups).
  */
 const fs = require('fs');
 const vm = require('vm');
@@ -363,6 +366,25 @@ class Sheet {
   removeChart() { return this; }
   activate() { this.ss.active = this; return this; }
   setTabColor() { return this; }
+  copyTo(ss2) {
+    let n = 'Kopie von ' + this.name;
+    let i = 2;
+    while (ss2.byName[n]) n = 'Kopie von ' + this.name + ' ' + (i++);
+    return cloneSheet(this, ss2, n);
+  }
+}
+
+/** Blatt mit Werten, Formaten, Formeln und Größe in eine Tabelle kopieren (für copyTo und makeCopy). */
+function cloneSheet(sh, ss2, name) {
+  const c = ss2.insertSheet(name, { maxRows: sh.maxRows, maxCols: sh.maxCols });
+  c.d = sh.d.map(r => (r ? r.map(v => (v instanceof Date ? new Date(v.getTime()) : v)) : r));
+  c.f = sh.f.map(r => (r ? r.slice() : r));
+  c.formulas = Object.assign({}, sh.formulas);
+  c.links = Object.assign({}, sh.links);
+  c.checkboxes = Object.assign({}, sh.checkboxes);
+  c.hidden = sh.hidden;
+  c.frozen = sh.frozen;
+  return c;
 }
 
 class FakeSpreadsheet {
@@ -374,10 +396,13 @@ class FakeSpreadsheet {
   getSheetByName(n) { return this.byName[n] || null; }
   insertSheet(n, opts) {
     if (n && typeof n === 'object') { opts = n; n = null; }
+    let index = null;
+    if (typeof opts === 'number') { index = opts; opts = null; } // insertSheet(name, index), index ab 0
     if (!n) { let i = this.list.length + 1; while (this.byName['Tabellenblatt' + i]) i++; n = 'Tabellenblatt' + i; }
     if (this.byName[n]) throw new Error('Ein Tabellenblatt mit dem Namen „' + n + '“ existiert bereits.');
     const sh = new Sheet(this, n, opts);
-    this.list.push(sh); this.byName[n] = sh;
+    if (index == null) this.list.push(sh); else this.list.splice(index, 0, sh);
+    this.byName[n] = sh;
     return sh;
   }
   getSheets() { return this.list.slice(); }
@@ -385,6 +410,7 @@ class FakeSpreadsheet {
   deleteSheet(sh) { this.list = this.list.filter(s => s !== sh); delete this.byName[sh.name]; }
   getId() { return this.id; }
   getName() { return this.name; }
+  rename(n) { this.name = String(n); if (this.env && this.env.driveFiles && this.env.driveFiles[this.id]) this.env.driveFiles[this.id].name = this.name; }
   getUrl() { return 'https://docs.google.com/spreadsheets/d/' + this.id + '/edit'; }
   getSpreadsheetTimeZone() { return 'Europe/Berlin'; }
   getSpreadsheetLocale() { return 'de_DE'; }
@@ -448,6 +474,7 @@ function createEnv(opts) {
   if (!files) {
     files = ['Code.gs'];
     if (fs.existsSync(path.join(srcDir, 'Import.gs'))) files.push('Import.gs');
+    if (fs.existsSync(path.join(srcDir, 'Update.gs'))) files.push('Update.gs');
   }
 
   const env = {
@@ -456,7 +483,8 @@ function createEnv(opts) {
     fetchLog: [], fetchFail: null, triggers: [], templates: [], outputs: [], sleeps: 0,
     lock: { depth: 0, acquired: 0, nested: 0, busy: false, maxDepth: 0 },
     formulaDisplay: null, promptResponse: '', promptButton: 'OK',
-    driveFiles: {}, sources: {}, drive: opts.drive === undefined ? 'v3' : opts.drive, driveCopies: []
+    driveFiles: {}, sources: {}, drive: opts.drive === undefined ? 'v3' : opts.drive, driveCopies: [],
+    http: null, httpLog: [], backups: [], perms: {}, permCreates: [], makeCopyFails: 0
   };
   env.DB = opts.db || defaultDb();
 
@@ -470,14 +498,23 @@ function createEnv(opts) {
     alerts: [], sidebars: [], prompts: [], dialogs: [], menus: [],
     ButtonSet: { OK: 'OK', OK_CANCEL: 'OK_CANCEL', YES_NO: 'YES_NO', YES_NO_CANCEL: 'YES_NO_CANCEL' },
     Button: { OK: 'OK', CANCEL: 'CANCEL', YES: 'YES', NO: 'NO', CLOSE: 'CLOSE' },
-    alert(a, b) { ui.alerts.push(b === undefined ? String(a) : String(a) + ': ' + String(b)); return 'OK'; },
+    // mit Knöpfen (YES_NO …) antwortet env.alertAnswer, sonst Ja bzw. OK
+    alert(a, b, c) { ui.alerts.push(b === undefined ? String(a) : String(a) + ': ' + String(b)); return c ? (env.alertAnswer || (c === 'YES_NO' ? 'YES' : 'OK')) : 'OK'; },
     showSidebar(h) { ui.sidebars.push(h); },
     showModalDialog(h, t) { ui.dialogs.push({ h, t }); },
     showModelessDialog(h, t) { ui.dialogs.push({ h, t }); },
     prompt(title, msg) { ui.prompts.push({ title, msg }); return { getSelectedButton: () => env.promptButton, getResponseText: () => env.promptResponse }; },
     createMenu(name) {
-      const items = []; ui.menus.push({ name, items });
-      const m = { addItem(l, f) { items.push([l, f]); return m; }, addSeparator() { return m; }, addSubMenu() { return m; }, addToUi() { return m; } };
+      const items = [], subs = [];
+      const entry = { name, items, subs };
+      ui.menus.push(entry);
+      const m = {
+        __entry: entry,
+        addItem(l, f) { items.push([l, f]); return m; }, addSeparator() { return m; },
+        // Untermenü: gehört zum Hauptmenü, nicht in ui.menus
+        addSubMenu(sub) { if (sub && sub.__entry) { ui.menus = ui.menus.filter(x => x !== sub.__entry); subs.push(sub.__entry); } return m; },
+        addToUi() { return m; }
+      };
       return m;
     }
   };
@@ -520,7 +557,16 @@ function createEnv(opts) {
   };
 
   // --- tcgdex
-  function resp(url) {
+  function resp(url, opt) {
+    if (env.http) {
+      const r = env.http(url, opt || {});
+      if (r !== undefined) {
+        env.httpLog.push({ url, method: String((opt && opt.method) || 'get').toLowerCase(), payload: opt && opt.payload, headers: opt && opt.headers });
+        if (r === 'throw') throw new Error('Address unavailable: ' + url);
+        const text = typeof r.body === 'string' ? r.body : r.body === undefined ? '' : JSON.stringify(r.body);
+        return { getResponseCode: () => r.code || 200, getContentText: () => text, getHeaders: () => ({}) };
+      }
+    }
     env.fetchLog.push(url);
     if (env.fetchFail) {
       const f = env.fetchFail(url);
@@ -537,8 +583,8 @@ function createEnv(opts) {
     return { getResponseCode: () => (body === undefined ? 404 : 200), getContentText: () => text, getHeaders: () => ({}) };
   }
   const UrlFetchApp = {
-    fetch: (u) => resp(u),
-    fetchAll: (rs) => rs.map(r => resp(typeof r === 'string' ? r : r.url))
+    fetch: (u, o) => resp(u, o),
+    fetchAll: (rs) => rs.map(r => (typeof r === 'string' ? resp(r) : resp(r.url, r)))
   };
 
   // --- Properties / Cache / Lock
@@ -586,18 +632,34 @@ function createEnv(opts) {
   const LockService = { getScriptLock: () => lockObj, getDocumentLock: () => lockObj, getUserLock: () => lockObj };
 
   // --- Drive
+  const rootFolder = { getId: () => 'ROOT', getName: () => 'Meine Ablage' };
   function driveFile(id) {
-    const f = env.driveFiles[id];
+    const f = env.driveFiles[id] || (id === env.ss.id ? { name: env.ss.name, mime: MIME.GOOGLE_SHEETS, main: true } : null);
     if (!f) throw new Error('No item with the given ID could be found, or you do not have permission to access it. (' + id + ')');
+    const book = env.sources[id] || (id === env.ss.id ? env.ss : null);
     return {
-      getId: () => id, getName: () => f.name, getMimeType: () => f.mime, getUrl: () => 'https://drive.google.com/file/d/' + id + '/view',
+      getId: () => id, getName: () => f.name, getMimeType: () => f.mime,
+      getUrl: () => (book ? book.getUrl() : 'https://drive.google.com/file/d/' + id + '/view'),
       setTrashed(b) { f.trashed = !!b; return this; }, isTrashed: () => !!f.trashed, getSize: () => 1000,
-      getLastUpdated: () => new Date(2026, 9, 1)
+      getLastUpdated: () => new Date(2026, 9, 1),
+      getParents() { let done = !!env.noParents; return { hasNext: () => !done, next: () => { done = true; return rootFolder; } }; },
+      // Kopie einer Google-Tabelle: alle Blätter mit Werten, Formaten und Formeln (wie Drive, Skript inklusive)
+      makeCopy(name, folder) {
+        if (!book) throw new Error('makeCopy nur für Tabellen nachgebildet');
+        if (env.makeCopyFails > 0) { env.makeCopyFails--; throw new Error('Drive: Kopieren nicht erlaubt'); }
+        const nid = 'BACKUP' + (++env.uuidSeq) + 'xxxxxxxxxxxxxxxxxxxx';
+        const copy = new FakeSpreadsheet(env, nid, name);
+        book.list.forEach(sh => cloneSheet(sh, copy, sh.name));
+        env.sources[nid] = copy;
+        env.driveFiles[nid] = { name, mime: MIME.GOOGLE_SHEETS, tabs: {}, trashed: false };
+        env.backups.push({ id: nid, name, folder: folder && folder.getId ? folder.getId() : null });
+        return driveFile(nid);
+      }
     };
   }
   const DriveApp = {
     getFileById: driveFile,
-    getRootFolder: () => chainObj()
+    getRootFolder: () => rootFolder
   };
   function driveCopy(resource, id, extra) {
     const src = env.driveFiles[id];
@@ -609,9 +671,20 @@ function createEnv(opts) {
     registerSource({ id: newId, name, mime: conv ? MIME.GOOGLE_SHEETS : src.mime, tabs: src.tabs });
     return { id: newId, name, title: name, mimeType: conv ? MIME.GOOGLE_SHEETS : src.mime };
   }
+  // Freigaben (Drive v3): env.perms[id] = [{type, role, emailAddress?, domain?}], sonst nur der Besitzer
+  const permsOf = id => env.perms[id] || [{ type: 'user', role: 'owner', emailAddress: 'ich@example.org' }];
+  const Permissions = {
+    list: (id) => ({ permissions: permsOf(id).map(p => Object.assign({}, p)) }),
+    create(res, id, args) {
+      if (env.permFail && env.permFail(res)) throw new Error('Freigabe nicht erlaubt');
+      env.perms[id] = permsOf(id).concat([Object.assign({}, res)]);
+      env.permCreates.push({ id, res: Object.assign({}, res), args: Object.assign({}, args) });
+      return res;
+    }
+  };
   let Drive;
   if (env.drive === 'v3') {
-    Drive = { Files: {
+    Drive = { Permissions, Files: {
       copy: (resource, id, extra) => driveCopy(resource, id, extra),
       create: (resource) => { const nid = 'new' + (++env.uuidSeq); env.driveFiles[nid] = { name: resource && resource.name, mime: resource && resource.mimeType }; return { id: nid }; },
       get: id => { driveFile(id); const f = env.driveFiles[id]; return { id, name: f.name, mimeType: f.mime }; },
@@ -702,6 +775,7 @@ function createEnv(opts) {
     },
     getService: () => ({ getUrl: () => null }),
     getScriptId: () => 'SCRIPTID',
+    getOAuthToken: () => 'TOKEN',
     AuthMode: { FULL: 'FULL', LIMITED: 'LIMITED' }
   };
 
@@ -759,6 +833,12 @@ function createEnv(opts) {
     return out;
   };
   env.groups = () => env.objects('Gruppen');
+  /** Einstellung aus dem Blatt „Tool-Einstellungen“ (erster Eintrag), sonst wie settingGet_ die alte Skript-Eigenschaft. */
+  env.setting = key => {
+    const v = env.values('Tool-Einstellungen');
+    if (v) { const row = v.slice(1).find(r => String(r[0]) === key); if (row) return String(row[1]); }
+    return env.props[key];
+  };
   env.proto = () => env.objects('Import-Protokoll');
   /** Wie google.script.run: Ergebnis muss JSON-fähig sein, Rückgabe als JSON-Kopie. */
   env.uiCall = (fn, ...args) => {
