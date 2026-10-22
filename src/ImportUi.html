@@ -271,7 +271,7 @@ function impLiveDraft(st) {
 function impRenderStart() {
   var st = impS.st || {};
   var html = '';
-  if (st.needsSetup) html += '<div class="warn">Die Import-Blätter fehlen noch. Bitte einmal „Pokémon &gt; Einrichtung“ ausführen.</div>';
+  if (st.needsSetup) html += '<div class="warn">Die Import-Blätter fehlen. Schließe die Seitenleiste und öffne sie über „Pokémon &gt; Karten erfassen“ neu, dann legt das Tool sie wieder an.</div>';
   if (st.busy) {
     var b = st.busy;
     html += '<div class="warn">' + (b.phase === 'undo' ? 'Gerade wird Import ' + esc(b.nr) + ' zurückgenommen.' :

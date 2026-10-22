@@ -352,7 +352,7 @@ function extractRow_(rec, cfg, terms) {
   const fromCols = {};
   const direct = {
     variant: erVariantCode_, cond: erCondCode_, lang: erLangCode_,
-    version: function (x) { return ''; }
+    version: function () { return ''; }
   };
   ['variant', 'cond', 'lang', 'version'].forEach(function (f) {
     const t = get(f);
@@ -1612,12 +1612,10 @@ function importSetsVorbelegen() {
       if (Array.isArray(r.data.cards)) erCachePutSet_(lang, batch[j], erCompactSet_(r.data));
     });
   }
-  let seeded = 0;
   Object.keys(ER_CODE_SEED).forEach(function (id) {
     if (codes[id]) return;
     if (!sets.en[id] && !sets.de[id]) return;
     codes[id] = ER_CODE_SEED[id];
-    seeded++;
   });
   const result = withLock_(function () {
     const ss = ss_();

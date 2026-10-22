@@ -1,7 +1,7 @@
 const H = require('./harness2');
 const env = H.createEnv({ files: ['Code.gs', '../parts/00_shared.gs'] });
 const c = env.ctx;
-c.einrichtung && c.einrichtung();
+c.setupAll_();
 c.answersUpsert_('SRC1', [{fp: 'aaa', decision: {type: 'karte', id: 'x1', lang: 'de'}, card: {id: 'x1'}}, {fp: 'bbb', decision: {type: 'skip'}}]);
 c.answersUpsert_('SRC2', [{fp: 'aaa', decision: {type: 'frei'}, card: {free: true, name: 'X'}}]);
 c.answersUpsert_('SRC1', [{fp: 'bbb', decision: null}, {fp: 'aaa', decision: {type: 'karte', id: 'x2', lang: 'en'}, card: {id: 'x2'}}]);

@@ -4,6 +4,19 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.0.3",
+      "tag": "v1.0.3",
+      "date": "2026-10-22",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Die neue Tabelle von „Neue Version holen“ heißt nach der Version, die wirklich in der Vorlage steckt",
+        "Ist die Vorlage noch nicht auf der angekündigten Version, legt das Tool keine Kopie an und sagt das",
+        "Die Update-Schritte und die Übernahme erklären die gelbe Google-Leiste zu „Daten externer Nutzer“ (Kartenbilder)",
+        "Der Menüpunkt „Einrichtung“ ist weg: „Karten erfassen“ richtet alles ein und legt fehlende Blätter und den nächtlichen Preislauf von selbst wieder an"
+      ]
+    },
+    {
       "version": "1.0.2",
       "tag": "v1.0.2",
       "date": "2026-10-22",

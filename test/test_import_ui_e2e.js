@@ -516,7 +516,7 @@ function missingPaths(res, paths) {
   const env = H.createEnv({ db: makeDb() });
   const c = env.ctx;
   addV1Data(env);
-  c.einrichtung();
+  c.setupAll_();
   addXlsx(env);
   const VERLAUF = J(env.values('Verlauf'));
   const handRows0 = env.data().filter((d) => d.origin === 'Hand');
@@ -549,7 +549,7 @@ function missingPaths(res, paths) {
   await E.clickSettle(E.$('tabImport'), 'Tab Import');
   t.ok('Import-Tab: importState geladen', E.calls('importState').length === 1 && !E.$('paneImport').classList.contains('hidden'));
   t.ok('Übersicht: keine Importe, Knopf „Neuer Import“', /Noch keine Importe/.test(E.text()) && !!E.btn(E.main(), 'Neuer Import'), E.text().slice(0, 300));
-  t.ok('Übersicht: kein Banner, kein Hinweis auf fehlende Blätter', !/Import in Arbeit/.test(E.text()) && !/Einrichtung/.test(E.text()));
+  t.ok('Übersicht: kein Banner, kein Hinweis auf fehlende Blätter', !/Import in Arbeit/.test(E.text()) && !/Import-Blätter fehlen/.test(E.text()));
   eyes(E, 'Übersicht leer');
   // Einstellungen: Set-Zuordnung vorbelegen (füllt die Kürzel für "DS 62", "HGSS 01" …)
   await E.clickSettle(E.btn(E.main(), 'Einstellungen ▼'), 'Einstellungen');
@@ -1053,7 +1053,7 @@ function missingPaths(res, paths) {
 
   t.section('14. Vertrag: Antworten der echten Serverfunktionen');
   const used = [...new Set(ALL_CALLS.map((x) => x.fn))].sort();
-  const unused = uiCalls.filter((fn) => used.indexOf(fn) < 0 && fn !== 'importDeleteTemplate');
+  const unused = uiCalls.filter((fn) => used.indexOf(fn) < 0);
   t.ok('jede Serverfunktion aus ImportUi.html wurde im Ablauf aufgerufen', unused.length === 0, unused);
   const miss = [];
   ALL_CALLS.forEach((x) => {

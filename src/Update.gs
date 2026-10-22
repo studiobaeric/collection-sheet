@@ -165,8 +165,7 @@ function getUpdateInfo(force) {
     if (target) {
       info.copyVersion = target.version;
       info.templateUrl = updTemplateFor_(ch, target);
-      const url = updExistingCopy_(target.version);
-      if (url) info.newCopy = { url: url, version: target.version };
+      info.newCopy = updExistingCopy_(target.version);
     }
   }
   return info;
@@ -203,14 +202,21 @@ function updateCopy() {
   }
 }
 
-/** Die schon angelegte neue Tabelle dieser Version, solange es sie gibt (nicht im Papierkorb). -> Link oder '' */
+/**
+ * Die schon angelegte neue Tabelle mit dieser oder einer neueren Version, solange es sie gibt (nicht im Papierkorb).
+ * Eine neuere Vorabversion zählt nur, solange Vorabversionen an sind. -> {url, version} oder null
+ */
 function updExistingCopy_(version) {
   const url = settingGet_('NEW_COPY_URL');
-  if (!url || settingGet_('NEW_COPY_VERSION') !== version) return '';
+  const have = settingGet_('NEW_COPY_VERSION');
+  const h = updParse_(have);
+  if (!url || !h) return null;
+  const cmp = updCompare_(have, version);
+  if (cmp < 0 || (cmp > 0 && h.pre.length && settingGet_('PRERELEASES') !== '1')) return null;
   try {
-    return DriveApp.getFileById(updSheetId_(url)).isTrashed() ? '' : url;
+    return DriveApp.getFileById(updSheetId_(url)).isTrashed() ? null : { url: url, version: have };
   } catch (e) {
-    return '';
+    return null;
   }
 }
 
@@ -220,8 +226,8 @@ function updMakeCopy_(ch, rel) {
   const existing = updExistingCopy_(rel.version);
   if (existing) {
     return {
-      state: 'copied', existing: true, version: rel.version, url: existing, name: '',
-      message: 'Die neue Tabelle mit Version ' + rel.version + ' gibt es schon. Öffne sie und übernimm dort deine Daten.'
+      state: 'copied', existing: true, version: existing.version, url: existing.url, name: '',
+      message: 'Die neue Tabelle mit Version ' + existing.version + ' gibt es schon. Öffne sie und übernimm dort deine Daten.'
     };
   }
   const templateUrl = updTemplateFor_(ch, rel);
@@ -231,7 +237,8 @@ function updMakeCopy_(ch, rel) {
   try { file = DriveApp.getFileById(updSheetId_(templateUrl)); } catch (e) {
     return fail('Die Vorlage von Version ' + rel.version + ' ließ sich nicht öffnen.');
   }
-  const name = ss.getName().replace(/ \(alt\)$/, '') + UPD_NEW_SUFFIX + rel.version + ')';
+  const base = ss.getName().replace(/ \(alt\)$/, '');
+  let name = base + UPD_NEW_SUFFIX + rel.version + ')';
   let copy = null, where = 'im selben Ordner wie diese';
   try {
     const parents = DriveApp.getFileById(ss.getId()).getParents();
@@ -242,17 +249,35 @@ function updMakeCopy_(ch, rel) {
     try { copy = file.makeCopy(name, DriveApp.getRootFolder()); } catch (e2) { copy = null; }
   }
   if (!copy) return fail('Die neue Tabelle ließ sich nicht anlegen. Vielleicht ist dein Google Drive voll, oder die Vorlage darf nicht kopiert werden.');
+  // Die Version steht in der Kopie selbst (CODE_VERSION der Vorlage). Die Liste auf GitHub kann ein paar Minuten
+  // hinterherhinken, deshalb zählt für Name und Meldung die Version der Kopie.
+  let version = rel.version, copySs = null;
   try {
+    copySs = SpreadsheetApp.openById(copy.getId());
     // die neue Tabelle weiß damit, dass sie von hier übernehmen soll (ihre Seitenleiste bietet es gleich an)
-    writeSettings_(SpreadsheetApp.openById(copy.getId()), { TAKE_FROM: ss.getUrl() });
+    writeSettings_(copySs, { TAKE_FROM: ss.getUrl() });
+    const v = updReadSettings_(copySs).map.CODE_VERSION;
+    if (updParse_(v)) version = String(v).replace(/^v/i, '');
   } catch (e) {
     try { copy.setTrashed(true); } catch (e2) { /* dann bleibt sie liegen */ }
     return fail('Die neue Tabelle ließ sich nicht fertig anlegen. Bitte versuch es gleich noch einmal.');
   }
-  settingsSetMany_({ NEW_COPY_URL: copy.getUrl(), NEW_COPY_VERSION: rel.version });
+  if (updCompare_(version, rel.version) < 0) {
+    // Vorlage noch nicht auf der angekündigten Version: lieber keine Kopie als eine alte unter neuem Namen
+    try { copy.setTrashed(true); } catch (e) { /* dann bleibt sie liegen */ }
+    return {
+      state: 'error', version: rel.version,
+      message: 'Die Vorlage für Version ' + rel.version + ' ist noch nicht fertig (sie hat noch Version ' + version + '). Bitte versuch es später noch einmal.'
+    };
+  }
+  if (version !== rel.version) {
+    name = base + UPD_NEW_SUFFIX + version + ')';
+    try { copySs.rename(name); } catch (e) { /* dann bleibt der erste Name */ }
+  }
+  settingsSetMany_({ NEW_COPY_URL: copy.getUrl(), NEW_COPY_VERSION: version });
   return {
-    state: 'copied', version: rel.version, url: copy.getUrl(), name: name,
-    message: 'Die neue Tabelle mit Version ' + rel.version + ' liegt ' + where + '.'
+    state: 'copied', version: version, url: copy.getUrl(), name: name,
+    message: 'Die neue Tabelle mit Version ' + version + ' liegt ' + where + '.'
   };
 }
 

@@ -183,6 +183,7 @@
   <div id="takeBox" class="box hidden">
     <h3>Aus alter Tabelle übernehmen</h3>
     <div class="notes">Für eine neue Tabelle (über „Neue Version holen“ oder eine Kopie der Vorlage): holt alle Karten, Importe, den Verlauf und deine eigenen Blätter aus deiner alten Tabelle. Die alte Tabelle wird danach stillgelegt (ab Version 1.0 von selbst, ältere mit ein paar Klicks). Eigene Änderungen am Skript kommen nicht mit.</div>
+    <div class="hint" id="takeImgHint"></div>
     <form onsubmit="takePreview(event)">
       <label for="takeUrl">Link der alten Tabelle</label>
       <input type="text" id="takeUrl" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/d/…">
@@ -1368,10 +1369,16 @@ function updOutdatedText() {
 }
 function updFoot() { $('updVer').textContent = UPD && UPD.installed ? 'Version ' + UPD.installed + ' · ' : ''; }
 
+/** Gelbe Leiste von Google in jeder neuen Kopie: erklären, was sie meint (die IMAGE-Formeln der Kartenbilder). */
+var UPD_IMAGE_HINT = 'Zeigt Google oben eine gelbe Leiste „Einige Formeln erfordern das Versenden und Empfangen von Daten externer Nutzer“: ' +
+  'auf Zugriff erlauben klicken. Gemeint sind die Kartenbilder, die Tabelle lädt sie von tcgdex.net. Dabei geht nur die Bildadresse der Karte an tcgdex, ' +
+  'deine Sammlung bleibt in der Tabelle. Ohne Freigabe fehlen die Kartenbilder.';
+
 /** Was nach „Neue Version holen“ in der neuen Tabelle zu tun ist. */
 function updSteps(url) {
   return '<ol class="rel"><li>' + (url ? updLink(url, 'Neue Tabelle öffnen') : 'Die neue Tabelle öffnen') + '.</li>' +
     '<li>Dort auf Pokémon > Karten erfassen klicken und den Zugriff erlauben. Google fragt bei jeder neuen Tabelle einmal.</li>' +
+    '<li>' + UPD_IMAGE_HINT + '</li>' +
     '<li>Die Seitenleiste bietet dir die Übernahme an: Jetzt übernehmen. Danach ist diese Tabelle stillgelegt.</li>' +
     '<li>Nutzt du die Handy-Seite: In der neuen Tabelle neu bereitstellen (Erweiterungen > Apps Script > Bereitstellen > Neue Bereitstellung > Web-App). Den Link dann in der neuen Tabelle unter Pokémon > Web-App-Link anzeigen einfügen und am Handy als Lesezeichen speichern.</li></ol>';
 }
@@ -1558,6 +1565,7 @@ call('getSetSuggestions').then(function (names) {
   $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
 }).catch(function () { /* ohne Vorschläge weiter */ });
 loadUiConfig();
+$('takeImgHint').textContent = UPD_IMAGE_HINT;
 updLoad(START === 'upd'); // Menü „Nach Updates suchen“: frisch von GitHub
 if (START === 'upd') showTab('upd');
 else if (START === 'takeover') updOpenTakeover();

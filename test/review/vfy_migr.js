@@ -47,7 +47,7 @@ const groups = env => env.objects('Gruppen').map(g => [g['Gruppenschlüssel'], g
 {
   console.log('\n=== MIGR-1');
   const { env, old, nu } = world();
-  nu.einrichtung();
+  nu.setupAll_();
   console.log('Trigger nach Einrichtung:', J(env.triggers.map(t => t.fn)));
   const C = vm.runInContext('COL', nu);
   const v = env.values('Daten');
@@ -65,7 +65,7 @@ const groups = env => env.objects('Gruppen').map(g => [g['Gruppenschlüssel'], g
 {
   console.log('\n=== MIGR-2');
   const { env, old, nu } = world();
-  nu.einrichtung();
+  nu.setupAll_();
   const C = vm.runInContext('COL', nu);
   const rows = () => env.values('Daten').slice(1).filter(r => r[0]).map(r => [r[C.key], r[C.eid], r[C.origin], r[C.count]]);
   const before = groups(env).find(g => g[0] === 'neo2-13|normal|');
@@ -104,7 +104,7 @@ const groups = env => env.objects('Gruppen').map(g => [g['Gruppenschlüssel'], g
   const oldHist = () => env.values('Verlauf').slice(1).map(r => r.slice(1, 5));
   old.preiseJetztAktualisieren();
   const a = oldHist();
-  nu.einrichtung();
+  nu.setupAll_();
   nu.preiseJetztAktualisieren();
   const b = oldHist();
   console.log('alt [Wert, Karten, ohne Preis, failed]:', J(a[a.length - 1]), ' neu:', J(b[b.length - 1]));
@@ -115,7 +115,7 @@ const groups = env => env.objects('Gruppen').map(g => [g['Gruppenschlüssel'], g
 {
   console.log('\n=== MIGR-4');
   const { env, old, nu } = world();
-  nu.einrichtung();
+  nu.setupAll_();
   const res = JSON.parse(J(nu.searchCollection('', '')));
   console.log('Schlüssel der Antwort:', Object.keys(res));
   // renderCollection aus backup/Ui.html (Zeile 325-327) mit dieser Antwort
@@ -123,16 +123,13 @@ const groups = env => env.objects('Gruppen').map(g => [g['Gruppenschlüssel'], g
   const m = src.match(/function renderCollection\(res\) \{\n  state\.items = res\.items;\n  if \(!res\.items\.length\)/);
   console.log('alter Code liest res.items.length:', !!m);
   try { const state = {}; state.items = res.items; if (!res.items.length) {} console.log('kein Fehler'); } catch (e) { console.log('alter Client Fehler:', e.message); }
-  // alte adjustCount bleibt kompatibel
-  const k = env.values('Daten')[1][0];
-  console.log('adjustCount(alter Client) ok:', J(nu.adjustCount(k, 1)));
 }
 
 // ---------------- MIGR-5
 {
   console.log('\n=== MIGR-5');
   const { env, old, nu } = world();
-  nu.einrichtung();
+  nu.setupAll_();
   const C = vm.runInContext('COL', nu);
   const sh = env.sheet('Daten');
   const v = env.values('Daten');
@@ -163,7 +160,7 @@ const groups = env => env.objects('Gruppen').map(g => [g['Gruppenschlüssel'], g
 {
   console.log('\n=== MIGR-6');
   const { env, old, nu } = world();
-  nu.einrichtung();
+  nu.setupAll_();
   const C = vm.runInContext('COL', nu);
   // Daten-Zeiten künstlich altern: Celebi am ältesten, Mewtu am neuesten
   const sh = env.sheet('Daten');
