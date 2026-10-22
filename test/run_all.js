@@ -7,7 +7,7 @@ const path = require('path');
 const SUITES = [
   'shared_smoke', 'check_import', 'test_core', 'test_integration', 'test_import_quelle', 'test_import_erkennung',
   'test_import_protokoll', 'test_import_e2e', 'test_review_fixes', 'test_pokedex', 'ui_test2', 'importui_test',
-  'test_import_ui_e2e', 'test_update'
+  'test_import_ui_e2e', 'test_update', 'test_dashboard'
 ];
 
 let failed = 0;

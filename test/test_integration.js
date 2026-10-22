@@ -354,12 +354,13 @@ function seedImport(env) {
   env.ctx.einrichtung();
   t.ok('Einrichtung ohne Fehlermeldung', env.ui.alerts.length === 1 && /Einrichtung fertig/.test(env.ui.alerts[0]), env.ui.alerts);
   t.ok('Schema v2', env.setting('SCHEMA_VERSION') === '2');
-  t.ok('Daten und Gruppen versteckt, Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden && env.ss.list[0].name === 'Sammlung');
+  t.ok('Daten und Gruppen versteckt, Dashboard und Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden &&
+    env.ss.list[0].name === 'Dashboard' && env.ss.list[1].name === 'Sammlung', env.ss.list.map(x => x.name));
   t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 13), env.run('VIEW_HEADERS'));
   t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:W,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,einrichtung,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,einrichtung,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();
@@ -811,12 +812,14 @@ function seedImport(env) {
       pasted.push(r);
     }
     dsh.getRange(last + 1, 1, pasted.length, 30).setValues(pasted);
-    const w0 = env.writes;
+    const w0 = env.writes, d0 = env.writesBy['Dashboard'] || 0;
     env.ctx.onEdit({ range: dsh.getRange(last + 1, 1, pasted.length, 30) });
     const rep = dataRows(env).filter(r => /^P\d+$/.test(r.version));
     t.ok('eingefügte Zeilen repariert (ID, Herkunft, DE, NM, Schlüssel)', rep.length === 15 && rep.every(r => /^E[0-9a-f]{10}$/.test(r.eid) && r.origin === 'Hand' &&
       r.lang === 'DE' && r.cond === 'NM' && r.key === 'swsh3-025|normal|' + r.version + '|NM|DE'), rep.slice(0, 2));
-    t.ok('Reparatur in Blöcken geschrieben (wenige Schreibvorgänge)', env.writes - w0 <= 8, env.writes - w0);
+    // ohne die Kennzahlen des Dashboards (die haben eine eigene Prüfung in test_dashboard)
+    const dw = (env.writesBy['Dashboard'] || 0) - d0;
+    t.ok('Reparatur in Blöcken geschrieben (wenige Schreibvorgänge)', env.writes - w0 - dw <= 8, [env.writes - w0, dw]);
     t.ok('Gruppen: 15 neue Gruppen', env.groups().filter(g => /\|P\d+$/.test(g['Gruppenschlüssel'])).length === 15);
     checkSheets(env, 'nach Einfügen im Blatt');
     // wieder weg (direkt gelöscht), onEdit räumt Gruppen auf

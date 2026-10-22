@@ -295,6 +295,7 @@ function updOldToolSheets_(old, st) {
     names.forEach(function (n) { out[n] = true; });
   } else {
     toolSheetNames_().forEach(function (n) { out[n] = true; });
+    delete out[SHEETS.dash]; // das Dashboard gibt es erst seit 1.1.0, ein Blatt mit dem Namen gehört dem Nutzer
     const heads = updTakeoverHeads_();
     Object.keys(heads).forEach(function (n) {
       const sh = old.getSheetByName(n);

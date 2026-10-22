@@ -619,7 +619,7 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
-  ok('menu', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7);
+  ok('menu', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 8);
   ok('getSetSuggestions', env.uiCall('getSetSuggestions').indexOf('Darkness Ablaze') >= 0);
   ok('Hand row count', a.count === 1);
 }

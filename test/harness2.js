@@ -20,6 +20,7 @@
  * run(code), setFormulaDisplay(fn).
  *
  * Andere Adressen als tcgdex (GitHub, Apps-Script-API …): env.http = (url, options) => {code, body} | undefined.
+ * Die Bilder der Dashboard-Knöpfe (raw.githubusercontent.com/…/assets/dashboard/) kommen ohne env.http aus dem Repo.
  * Kopien über DriveApp.makeCopy landen in env.sources (und env.backups).
  */
 const fs = require('fs');
@@ -210,7 +211,9 @@ class Range {
         (v && v[0] && v[0].length) + ' statt ' + this.nr + 'x' + this.nc + ') in ' + this.sh.name);
     }
     v.forEach((row, i) => row.forEach((x, j) => this.sh.put(this.r + i, this.c + j, x)));
-    this.sh.ss.env.writes++;
+    const env = this.sh.ss.env;
+    env.writes++;
+    env.writesBy[this.sh.name] = (env.writesBy[this.sh.name] || 0) + 1;
     return this;
   }
   setValue(x) { return this.setValues(Array.from({ length: this.nr }, () => Array(this.nc).fill(x))); }
@@ -246,6 +249,50 @@ class Range {
   'clearDataValidations', 'setVerticalAlignment', 'setHorizontalAlignment', 'setWrap', 'setNote', 'merge', 'breakApart',
   'setFontFamily', 'setBackgrounds', 'setFontColors', 'setFontWeights', 'setRichTextValues', 'setRichTextValue',
   'setWrapStrategy', 'setTextStyle', 'removeCheckboxes', 'setFontLine'].forEach(m => { Range.prototype[m] = function () { return this; }; });
+/** Text mit Link (SpreadsheetApp.newRichTextValue): Wert = Text, der Link landet in sh.links. */
+Range.prototype.setRichTextValue = function (rt) {
+  this.cells((R, C) => {
+    this.sh.setCell(R, C, rt && rt.text != null ? String(rt.text) : '');
+    delete this.sh.formulas[R + ',' + C];
+    if (rt && rt.link) this.sh.links[R + ',' + C] = rt.link; else delete this.sh.links[R + ',' + C];
+  });
+  return this;
+};
+
+/** Schriftfarbe je Zelle, zum Prüfen (die übrigen Formate haben keine Wirkung). */
+Range.prototype.setFontColor = function (color) {
+  const fc = this.sh.fontColors = this.sh.fontColors || {};
+  this.cells((R, C) => { fc[R + ',' + C] = color; });
+  return this;
+};
+Range.prototype.getFontColor = function () { return (this.sh.fontColors || {})[this.r + ',' + this.c] || '#000000'; };
+
+/** Bild über den Zellen (Sheet.insertImage) mit zugewiesener Funktion, Alternativtext, Größe und Anker. */
+class FakeImage {
+  constructor(sh, src, col, row, ox, oy) {
+    this.sh = sh; this.src = src; this.col = col; this.row = row; this.ox = ox || 0; this.oy = oy || 0;
+    this.script = ''; this.title = ''; this.desc = ''; this.w = 100; this.h = 100; this.removed = false;
+  }
+  assignScript(fn) { this.script = String(fn); return this; }
+  getScript() { return this.script; }
+  setAltTextTitle(t) { this.title = String(t); return this; }
+  getAltTextTitle() { return this.title; }
+  setAltTextDescription(d) { this.desc = String(d); return this; }
+  getAltTextDescription() { return this.desc; }
+  setWidth(w) { this.w = w; return this; }
+  getWidth() { return this.w; }
+  setHeight(h) { this.h = h; return this; }
+  getHeight() { return this.h; }
+  setAnchorCell(range) { this.col = range.getColumn(); this.row = range.getRow(); return this; }
+  getAnchorCell() { return new Range(this.sh, this.row, this.col, 1, 1); }
+  setAnchorCellXOffset(x) { this.ox = x; return this; }
+  getAnchorCellXOffset() { return this.ox; }
+  setAnchorCellYOffset(y) { this.oy = y; return this; }
+  getAnchorCellYOffset() { return this.oy; }
+  getSheet() { return this.sh; }
+  getUrl() { return typeof this.src === 'string' ? this.src : null; }
+  remove() { this.removed = true; this.sh.images = this.sh.images.filter(i => i !== this); }
+}
 
 class Sheet {
   constructor(ss, name, opts) {
@@ -254,6 +301,7 @@ class Sheet {
     this.d = []; this.f = []; this.formulas = {}; this.links = {}; this.disp = null; this.checkboxes = {};
     this.maxRows = opts.maxRows || 1000; this.maxCols = opts.maxCols || 26;
     this.hidden = false; this.frozen = 0; this.hiddenCols = {}; this.rowHeights = {}; this.charts = []; this.rules = [];
+    this.images = []; this.gridHidden = false;
     this.id = ++ss.env.sheetSeq;
   }
   get(R, C) { const row = this.d[R - 1]; const v = row ? row[C - 1] : undefined; return v === undefined || v === null ? '' : v; }
@@ -366,6 +414,20 @@ class Sheet {
   removeChart() { return this; }
   activate() { this.ss.active = this; return this; }
   setTabColor() { return this; }
+  setHiddenGridlines(b) { this.gridHidden = !!b; return this; }
+  hasHiddenGridlines() { return this.gridHidden; }
+  /** src: Blob oder URL. Ein Blob ohne Bytes oder mit falschem Typ scheitert wie in Apps Script. */
+  insertImage(src, col, row, ox, oy) {
+    if (src && typeof src === 'object' && typeof src.getBytes === 'function') {
+      const type = String(src.getContentType ? src.getContentType() || '' : '');
+      if (!src.getBytes().length || !/^image\/(png|jpeg|gif)$/.test(type)) throw new Error('Das Bild konnte nicht eingefügt werden (' + (type || 'kein Typ') + ').');
+    }
+    const img = new FakeImage(this, src, col, row, ox, oy);
+    this.images.push(img);
+    this.ss.env.imagesInserted = (this.ss.env.imagesInserted || 0) + 1;
+    return img;
+  }
+  getImages() { return this.images.slice(); }
   copyTo(ss2) {
     let n = 'Kopie von ' + this.name;
     let i = 2;
@@ -384,6 +446,9 @@ function cloneSheet(sh, ss2, name) {
   c.checkboxes = Object.assign({}, sh.checkboxes);
   c.hidden = sh.hidden;
   c.frozen = sh.frozen;
+  c.gridHidden = sh.gridHidden;
+  c.images = sh.images.map(i => Object.assign(new FakeImage(c, i.src, i.col, i.row, i.ox, i.oy),
+    { script: i.script, title: i.title, desc: i.desc, w: i.w, h: i.h }));
   return c;
 }
 
@@ -478,7 +543,7 @@ function createEnv(opts) {
   }
 
   const env = {
-    srcDir, files, writes: 0, sheetSeq: 0, uuidSeq: 0, flushes: 0,
+    srcDir, files, writes: 0, writesBy: {}, sheetSeq: 0, uuidSeq: 0, flushes: 0,
     props: {}, userProps: {}, docProps: {}, cache: new Map(), cachePuts: [],
     fetchLog: [], fetchFail: null, triggers: [], templates: [], outputs: [], sleeps: 0,
     lock: { depth: 0, acquired: 0, nested: 0, busy: false, maxDepth: 0 },
@@ -557,14 +622,27 @@ function createEnv(opts) {
   };
 
   // --- tcgdex
+  /** Antwort mit Text oder Bytes (Buffer), wie HTTPResponse */
+  function httpResponse(code, body, type) {
+    const text = typeof body === 'string' ? body : body === undefined || Buffer.isBuffer(body) ? '' : JSON.stringify(body);
+    const bytes = Buffer.isBuffer(body) ? body : Buffer.from(text, 'utf8');
+    type = type || (Buffer.isBuffer(body) ? 'image/png' : 'text/plain');
+    return {
+      getResponseCode: () => code, getContentText: () => text, getHeaders: () => ({ 'Content-Type': type }),
+      getBlob: () => {
+        let ct = type, nm = null;
+        return { getBytes: () => signedBytes(bytes), getContentType: () => ct, setContentType(t) { ct = t; return this; },
+          getName: () => nm, setName(n) { nm = n; return this; }, getDataAsString: () => text };
+      }
+    };
+  }
   function resp(url, opt) {
     if (env.http) {
       const r = env.http(url, opt || {});
       if (r !== undefined) {
         env.httpLog.push({ url, method: String((opt && opt.method) || 'get').toLowerCase(), payload: opt && opt.payload, headers: opt && opt.headers });
         if (r === 'throw') throw new Error('Address unavailable: ' + url);
-        const text = typeof r.body === 'string' ? r.body : r.body === undefined ? '' : JSON.stringify(r.body);
-        return { getResponseCode: () => r.code || 200, getContentText: () => text, getHeaders: () => ({}) };
+        return httpResponse(r.code || 200, r.body, r.type);
       }
     }
     env.fetchLog.push(url);
@@ -572,6 +650,12 @@ function createEnv(opts) {
       const f = env.fetchFail(url);
       if (f === 'throw') throw new Error('Address unavailable: ' + url);
       if (typeof f === 'number') return { getResponseCode: () => f, getContentText: () => '', getHeaders: () => ({}) };
+    }
+    // Knöpfe des Dashboards: die Bilder aus assets/dashboard im Repo (egal auf welchem Commit)
+    const asset = /^https:\/\/raw\.githubusercontent\.com\/studiobaeric\/collection-sheet\/[^/]+\/(assets\/dashboard\/[\w-]+\.png)$/.exec(url);
+    if (asset) {
+      const file = path.join(__dirname, '..', asset[1]);
+      return fs.existsSync(file) ? httpResponse(200, fs.readFileSync(file), 'image/png') : httpResponse(404, '404: Not Found');
     }
     let body;
     if (url.indexOf(API) === 0) {
@@ -741,7 +825,16 @@ function createEnv(opts) {
     BorderStyle: { SOLID: 'SOLID', DASHED: 'DASHED' },
     newDataValidation: () => chainObj(),
     newConditionalFormatRule: () => chainObj(),
-    newRichTextValue: () => chainObj(),
+    newRichTextValue() {
+      const rt = { text: '', link: null };
+      const b = {
+        setText(t) { rt.text = String(t); return b; },
+        setLinkUrl(a, bb, c) { rt.link = c === undefined ? a : c; return b; },
+        setTextStyle() { return b; },
+        build: () => new FakeRichText(rt.text, rt.link)
+      };
+      return b;
+    },
     newTextStyle: () => chainObj(),
     WrapStrategy: { WRAP: 'WRAP', CLIP: 'CLIP' }
   };

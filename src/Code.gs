@@ -15,6 +15,7 @@
  *   8. Preislauf und Wertverlauf
  *   9. API-Prüfung ("Beim Bau zu prüfen")
  *  10. Pokédex, Seltenheiten und Sortierung der Sammlung
+ *  11. Dashboard (Kennzahlen und Knöpfe)
  *
  * Erste Schritte: Funktion `einrichtung` einmal im Apps-Script-Editor ausführen.
  * Das Import-Werkzeug steht in Import.gs / ImportUi.html und nutzt die Hilfsfunktionen hier.
@@ -31,6 +32,7 @@ const API = 'https://api.tcgdex.net/v2/';
 const TOOL_VERSION = '1.0.2';
 
 const SHEETS = {
+  dash: 'Dashboard',
   view: 'Sammlung',
   data: 'Daten',
   groups: 'Gruppen',
@@ -1351,6 +1353,7 @@ function onOpen() {
   }
   const menu = ui.createMenu('Pokémon')
     .addItem('Karten erfassen', 'kartenErfassen')
+    .addItem('Dashboard', 'zumDashboard')
     .addItem('Preise jetzt aktualisieren', 'preiseJetztAktualisieren')
     .addItem('Übersetzung und Sets aktualisieren', 'uebersetzungUndSetsAktualisieren')
     .addSeparator();
@@ -1382,9 +1385,9 @@ function kartenErfassen(start) {
   }
   const t = HtmlService.createTemplateFromFile('Ui');
   t.mode = 'sidebar';
-  t.start = ['upd', 'takeover'].indexOf(start) >= 0 ? start : ''; // Menü ruft ohne Argument auf
+  t.start = ['upd', 'takeover', 'import'].indexOf(start) >= 0 ? start : ''; // Menü und Knöpfe rufen ohne Argument auf
   // von „Neue Version holen“ angelegt und noch leer (oder eine Übernahme brach ab): gleich die Übernahme zeigen
-  if (!t.start && typeof updPendingTake_ === 'function') {
+  if ((!t.start || t.start === 'import') && typeof updPendingTake_ === 'function') {
     try { if (updPendingTake_()) t.start = 'takeover'; } catch (e) { /* normaler Start */ }
   }
   ui.showSidebar(t.evaluate().setTitle('Pokémon-Karten'));
@@ -1398,6 +1401,11 @@ function updatesAnzeigen() {
 /** Menü Updates: Seitenleiste mit der Übernahme aus einer alten Tabelle. */
 function uebernahmeAnzeigen() {
   kartenErfassen('takeover');
+}
+
+/** Knopf „Importieren“ im Dashboard: Seitenleiste gleich im Bereich Import. */
+function importAnzeigen() {
+  kartenErfassen('import');
 }
 
 function doGet() {
@@ -1553,10 +1561,11 @@ function setupAll_(withHint) {
     return '';
   }
   migrateSettingsFromProps_(prevId);
-  setupSheets_(ss, false);
+  const dashMissing = setupSheets_(ss, false);
   setupTriggers_();
   settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm') });
   let msg = 'Einrichtung fertig.' + (migMsg && /^[1-9]\d* Einträge .*umgestellt/.test(migMsg) ? ' ' + migMsg : '');
+  if (dashMissing) msg += ' ' + DASH_LOAD_FAILED;
   try {
     msg += ' ' + buildTranslationAndSets_();
   } catch (e) {
@@ -1581,7 +1590,9 @@ function setupSheets_(ss, keepControls) {
   withLock_(function () { rebuildGroups_(); });
   setupViewSheet_(ss, !!keepControls);
   setupPokedexSheet_(ss, true);
+  const missing = setupDashboardSheet_(ss);
   removeDefaultSheet_(ss);
+  return missing;
 }
 
 /**
@@ -1600,7 +1611,7 @@ function redeployHint_() {
     'und neu öffnen, die Handy-Seite neu laden.';
 }
 
-/** Baut Gruppen und die Blätter Sammlung und Pokédex neu auf (keine API-Abrufe, Daten bleiben). */
+/** Baut Gruppen und die Blätter Sammlung, Pokédex und Dashboard neu auf (keine tcgdex-Abrufe, Daten bleiben). */
 function ansichtNeuAufbauen() {
   ensureSchema_();
   setupRaritySheet_(ss_());
@@ -1608,10 +1619,11 @@ function ansichtNeuAufbauen() {
   withLock_(function () { rebuildGroups_(); });
   setupViewSheet_(ss_(), true);
   setupPokedexSheet_(ss_(), true);
+  const missing = setupDashboardSheet_(ss_());
   const err = sheet_(SHEETS.view).getRange('A6').getDisplayValue();
   alert_(err === '#ERROR!'
     ? 'Die Ansichtsformel hat noch einen Fehler. Details stehen im Blatt „Diagnose" – bitte Claude Bescheid geben.'
-    : 'Ansicht neu aufgebaut.');
+    : 'Ansicht neu aufgebaut.' + (missing ? ' ' + DASH_LOAD_FAILED : ''));
 }
 
 /**
@@ -1878,11 +1890,13 @@ function rebuildGroups_() {
   range.setValues(all);
   if (oldLastRow > all.length) sh.getRange(all.length + 1, 1, oldLastRow - all.length, Math.max(width, oldLastCol)).clearContent();
   if (oldLastCol > width) sh.getRange(1, width + 1, all.length, oldLastCol - width).clearContent();
-  // Pokédex und Seltenheiten nachziehen; ein Fehler dort darf das Speichern nie verhindern
+  // Pokédex, Seltenheiten und Dashboard nachziehen; ein Fehler dort darf das Speichern nie verhindern
+  let dex = null;
   try {
     syncRarities_(rows);
-    rebuildPokedex_(rows);
+    dex = rebuildPokedex_(rows) || null;
   } catch (e) { /* beim nächsten Neuaufbau wieder */ }
+  try { refreshDashboard_(rows, dex); } catch (e) { /* beim nächsten Neuaufbau wieder */ }
   return out.length;
 }
 
@@ -1904,7 +1918,7 @@ function setupViewSheet_(ss, keepControls) {
     try { keep = sh.getRange('B4:H4').getValues()[0]; } catch (e) { keep = null; }
   }
   ss.setActiveSheet(sh);
-  ss.moveActiveSheet(1);
+  ss.moveActiveSheet(frontPos_(ss, SHEETS.view));
   sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) { p.remove(); });
   sh.clear();
   sh.clearConditionalFormatRules();
@@ -2012,6 +2026,14 @@ function viewFormula_(nExtras) {
     '  CHOOSECOLS(srt, 18), CHOOSECOLS(srt, 19), CHOOSECOLS(srt, 20), CHOOSECOLS(srt, 16)' + (n ? ', ' + extraCols.join(', ') : ''),
     ')), "Keine Einträge gefunden")'
   ].join(' ');
+}
+
+/** Platz eines Blatts vorne (1-basiert): Dashboard, Sammlung, Pokédex, jeweils nur, wenn es die davor gibt. */
+function frontPos_(ss, name) {
+  const order = [SHEETS.dash, SHEETS.view, SHEETS.dex];
+  let pos = 1;
+  for (let i = 0; i < order.length && order[i] !== name; i++) if (ss.getSheetByName(order[i])) pos++;
+  return Math.min(pos, ss.getSheets().length);
 }
 
 function removeDefaultSheet_(ss) {
@@ -3345,7 +3367,8 @@ function collectionValue_(rows) {
 }
 
 function writeHistory_(failed) {
-  const v = collectionValue_(readData_(sheet_(SHEETS.data)));
+  const rows = readData_(sheet_(SHEETS.data));
+  const v = collectionValue_(rows);
   const sh = sheet_(SHEETS.hist);
   const today = dateText_(new Date());
   const last = sh.getLastRow();
@@ -3367,6 +3390,7 @@ function writeHistory_(failed) {
     if (ch) sh.updateChart(ch.modify().clearRanges().addRange(sh.getRange(1, 1, max, 2)).setNumHeaders(1).build());
   }
   sh.getRange(target, 1, 1, 5).setValues([[d, v.total, v.cards, v.noPrice, failed]]);
+  try { refreshDashboard_(rows); } catch (e) { /* beim nächsten Neuaufbau wieder */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -4016,6 +4040,7 @@ function pokedexIndex_(rows) {
 /**
  * Schreibt das versteckte Blatt „Pokédex-Daten“ neu. Ohne das Blatt passiert nichts (es entsteht bei der
  * Einrichtung), außer mit create. Nach jeder Änderung an Daten (aus rebuildGroups_), innerhalb der Sperre.
+ * -> der Index ({entries, owned}) für das Dashboard, false ohne Blatt
  */
 function rebuildPokedex_(rows, create) {
   const ss = ss_();
@@ -4059,7 +4084,7 @@ function rebuildPokedex_(rows, create) {
     .setValues(cards);
   if (oldLast > list.length) sh.getRange(list.length + 1, 1, oldLast - list.length, lw).clearContent();
   if (oldLast > cards.length) sh.getRange(cards.length + 1, DEX_CARD_COL, oldLast - cards.length, cw).clearContent();
-  return true;
+  return idx;
 }
 
 /** Leeres verstecktes Blatt „Pokédex-Daten“ anlegen (gefüllt wird es von rebuildGroups_). */
@@ -4080,7 +4105,7 @@ function setupPokedexSheet_(ss, keepControls) {
     try { keep = sh.getRange('B4:I4').getValues()[0]; } catch (e) { keep = null; }
   }
   ss.setActiveSheet(sh);
-  ss.moveActiveSheet(Math.min(2, ss.getSheets().length));
+  ss.moveActiveSheet(frontPos_(ss, SHEETS.dex));
   if (prev && prev.getName() !== SHEETS.dex) ss.setActiveSheet(prev);
   sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) { p.remove(); });
   sh.clear();
@@ -4312,3 +4337,308 @@ function collCompare_(a, b, sort, desc) {
   }
   return dir * cmp_(x, y) || setOrder_(a, b);
 }
+
+// ---------------------------------------------------------------------------
+// 11. Dashboard: Kennzahlen und Knöpfe
+// ---------------------------------------------------------------------------
+// Ein Blatt ganz vorne mit vier Kacheln (Gesamtwert, Karten, Pokédex, Wertverlauf) und Bild-Knöpfen. Die Knöpfe sind
+// Bilder mit zugewiesener Funktion (Sheet.insertImage + assignScript), die Einrichtung legt sie selbst an. Die Bilder
+// kommen aus assets/dashboard/ im Repo (gezeichnet mit tools/dashboard-knoepfe.js). In der Sheets-App am Handy
+// reagieren Bilder nicht auf Antippen, dort zeigt das Dashboard nur die Zahlen. Die Kacheln rechnet refreshDashboard_
+// nach jeder Änderung an Daten (aus rebuildGroups_) und nach jedem Preislauf (aus writeHistory_) neu.
+
+/** Knöpfe in Lesereihenfolge: 8 Aktionen (zwei Reihen), dann 4 Blätter. fn: öffentliche Funktion, Namen bleiben. */
+const DASH_BUTTONS = [
+  { key: 'erfassen', label: 'Karten erfassen', fn: 'kartenErfassen' },
+  { key: 'preise', label: 'Preise aktualisieren', fn: 'preiseJetztAktualisieren' },
+  { key: 'import', label: 'Importieren', fn: 'importAnzeigen' },
+  { key: 'updates', label: 'Updates', fn: 'updatesAnzeigen' },
+  { key: 'sets', label: 'Sets und Übersetzung', fn: 'uebersetzungUndSetsAktualisieren' },
+  { key: 'ansicht', label: 'Ansicht neu aufbauen', fn: 'ansichtNeuAufbauen' },
+  { key: 'handy', label: 'Handy-Link', fn: 'webAppLinkAnzeigen' },
+  { key: 'einrichtung', label: 'Einrichtung', fn: 'einrichtung' },
+  { key: 'sammlung', label: 'Sammlung', fn: 'zurSammlung' },
+  { key: 'pokedex', label: 'Pokédex', fn: 'zumPokedex' },
+  { key: 'verlauf', label: 'Verlauf', fn: 'zumVerlauf' },
+  { key: 'seltenheiten', label: 'Seltenheiten', fn: 'zuSeltenheiten' }
+];
+/**
+ * Bilder der Knöpfe, fest auf den Commit mit den Dateien: Sie gehen so schon vor dem Mergen und bleiben für diese
+ * Version gleich. Neue Bilder: Commit hier eintragen und DASH_ASSET_VERSION erhöhen, dann ersetzt die nächste
+ * Einrichtung (oder „Ansicht neu aufbauen“) die alten Knöpfe.
+ */
+const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/main/assets/dashboard/';
+const DASH_ASSET_VERSION = '1';
+const DASH_ALT_RE = /^Dashboard-Knopf ([\w-]+) v(\S+)$/;
+const DASH_BTN_W = 276;
+const DASH_BTN_H = 52;
+const DASH_COLORS = {
+  page: '#ffffff', banner: '#c62828', title: '#ffffff', bannerSub: '#ffcdd2', tile: '#f8f9fa', tileBorder: '#e0e0e0',
+  label: '#5f6368', value: '#202124', sub: '#5f6368', up: '#137333', down: '#a50e0e', section: '#202124',
+  line: '#dadce0', accent: '#c62828', track: '#e8eaed', warn: '#a50e0e'
+};
+const DASH_FONT = 'Inter';
+const DASH_HELP = 'Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen.';
+const DASH_LOAD_FAILED = 'Einige Knöpfe ließen sich nicht laden (keine Verbindung zu GitHub). Bitte später Pokémon > Ansicht neu aufbauen.';
+const DASH_DAYS = 90;   // Wertverlauf: so viele Tage zurück
+const DASH_CHANGE = 7;  // Veränderung des Gesamtwerts: seit so vielen Tagen
+// Hilfsspalten (versteckt): R Werte für die Mini-Diagramme, S:T deren Einstellungen
+const DASH_HELPER_COL = 18;
+const DASH_NCOLS = 26;
+const DASH_NROWS = 40;
+
+/** Zelle, an der Knopf i hängt: Aktionen in Zeile 12 und 13, Blätter in Zeile 17, je Kachel-Spalte B, F, J, N. */
+function dashButtonCell_(i) {
+  const row = i < 8 ? 12 + Math.floor(i / 4) : 17;
+  return { row: row, col: 2 + (i % 4) * 4 };
+}
+
+/**
+ * Blatt „Dashboard“ aufbauen (ganz vorne, das aktive Blatt bleibt) und die Knöpfe setzen. Läuft bei Einrichtung,
+ * Update und „Ansicht neu aufbauen“. -> Anzahl Knöpfe, die sich nicht laden ließen
+ */
+function setupDashboardSheet_(ss) {
+  const c = DASH_COLORS;
+  const prev = ss.getActiveSheet();
+  const sh = getOrCreateSheet_(ss, SHEETS.dash);
+  ss.setActiveSheet(sh);
+  ss.moveActiveSheet(1);
+  if (prev && prev.getName() !== SHEETS.dash) ss.setActiveSheet(prev);
+  sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (p) { p.remove(); });
+  ensureCols_(sh, DASH_NCOLS);
+  if (sh.getMaxRows() < DASH_NROWS) sh.insertRowsAfter(sh.getMaxRows(), DASH_NROWS - sh.getMaxRows());
+  const all = sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns());
+  all.breakApart();
+  sh.clear();
+  sh.clearConditionalFormatRules();
+  all.clearDataValidations();
+  sh.showColumns(1, sh.getMaxColumns());
+  sh.setHiddenGridlines(true);
+  sh.setTabColor(c.accent);
+  all.setBackground(c.page).setFontFamily(DASH_FONT).setFontColor(c.value).setVerticalAlignment('middle');
+
+  // Raster: Rand, je Kachel Innenrand + Inhalt + Innenrand, dazwischen Lücken (zusammen 1184 px)
+  [16, 10, 256, 10, 16, 10, 256, 10, 16, 10, 256, 10, 16, 10, 256, 10, 16].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  const heights = { 1: 16, 2: 46, 3: 26, 4: 16, 5: 26, 6: 40, 7: 22, 8: 10, 9: 22, 10: 30, 11: 8, 12: 58, 13: 58, 14: 22,
+    15: 30, 16: 8, 17: 58, 18: 14, 19: 22 };
+  Object.keys(heights).forEach(function (r) { sh.setRowHeight(Number(r), heights[r]); });
+
+  // Kopf
+  sh.getRange('B2:P3').setBackground(c.banner);
+  sh.getRange('C2').setValue('Pokémon-Sammlung').setFontSize(20).setFontWeight('bold').setFontColor(c.title).setVerticalAlignment('bottom');
+  sh.getRange('O2').setFontSize(9).setFontColor(c.bannerSub).setHorizontalAlignment('right').setVerticalAlignment('bottom');
+  sh.getRange('C3').setFontSize(10).setFontColor(c.bannerSub).setVerticalAlignment('top');
+
+  // Kacheln
+  [2, 6, 10, 14].forEach(function (col) {
+    sh.getRange(5, col, 4, 3).setBackground(c.tile)
+      .setBorder(true, true, true, true, false, false, c.tileBorder, SpreadsheetApp.BorderStyle.SOLID);
+    sh.getRange(5, col + 1).setFontSize(8).setFontWeight('bold').setFontColor(c.label).setVerticalAlignment('bottom');
+    sh.getRange(6, col + 1).setFontSize(20).setFontWeight('bold').setFontColor(c.value).setHorizontalAlignment('left');
+    sh.getRange(7, col + 1).setFontSize(10).setFontColor(c.sub).setVerticalAlignment('top');
+  });
+  sh.getRange('C6').setNumberFormat(EUR_FORMAT);
+  sh.getRange('G6').setNumberFormat('0');
+  sh.getRange('K6').setNumberFormat('@');
+  sh.getRange('O6:O7').merge();
+
+  // Mini-Diagramme: Werte und Einstellungen stehen in den Hilfsspalten (schreibt refreshDashboard_)
+  const hc = DASH_HELPER_COL;
+  const hl = colLetter_(hc), ol = colLetter_(hc + 1), vl = colLetter_(hc + 2);
+  const hist = hl + '2:' + hl + (DASH_DAYS + 1);
+  setFormulaLocal_(sh.getRange('O6'), '=IF(COUNT(' + hist + ')<2, "Noch zu wenig Verlauf", SPARKLINE(FILTER(' + hist + ', ' + hist + '<>""), ' +
+    ol + '2:' + vl + '4))');
+  sh.getRange('O6').setFontSize(10).setFontWeight('normal').setFontColor(c.sub);
+  setFormulaLocal_(sh.getRange('K7'), '=SPARKLINE(' + hl + (DASH_DAYS + 3) + ':' + hl + (DASH_DAYS + 4) + ', ' + ol + '7:' + vl + '10)');
+  sh.hideColumns(hc, 3);
+
+  // Abschnitte und Hinweis
+  [[10, 'Aktionen'], [15, 'Blätter']].forEach(function (x) {
+    sh.getRange(x[0], 3).setValue(x[1]).setFontSize(12).setFontWeight('bold').setFontColor(c.section);
+    sh.getRange(x[0], 2, 1, 15).setBorder(false, false, true, false, false, false, c.line, SpreadsheetApp.BorderStyle.SOLID);
+  });
+
+  const missing = dashPlaceButtons_(sh);
+  sh.getRange('C19').setValue(missing ? DASH_LOAD_FAILED : DASH_HELP).setFontSize(9).setFontColor(missing ? c.warn : c.label);
+  sh.protect().setDescription('Dashboard – wird vom Skript aufgebaut').setWarningOnly(true);
+  const dsh = ss.getSheetByName(SHEETS.data);
+  refreshDashboard_(dsh ? readData_(dsh) : []);
+  return missing;
+}
+
+/**
+ * Knöpfe setzen: vorhandene Knöpfe dieser Bild-Version bleiben (nur Lage, Größe und Funktion werden neu gesetzt),
+ * fehlende werden von GitHub geladen, alte Versionen und doppelte entfernt. Fremde Bilder bleiben, wie sie sind.
+ * -> Anzahl Knöpfe, die sich nicht laden ließen
+ */
+function dashPlaceButtons_(sh) {
+  const want = {};
+  DASH_BUTTONS.forEach(function (b) { want[b.key] = true; });
+  const have = {};
+  sh.getImages().forEach(function (img) {
+    let m = null;
+    try { m = DASH_ALT_RE.exec(img.getAltTextDescription() || ''); } catch (e) { m = null; }
+    if (!m) return;
+    if (!want[m[1]] || m[2] !== DASH_ASSET_VERSION || have[m[1]]) { img.remove(); return; }
+    have[m[1]] = img;
+  });
+  const missing = DASH_BUTTONS.filter(function (b) { return !have[b.key]; });
+  if (missing.length) {
+    let res = [];
+    try {
+      res = UrlFetchApp.fetchAll(missing.map(function (b) { return { url: DASH_ASSETS + b.key + '.png', muteHttpExceptions: true }; }));
+    } catch (e) { res = []; }
+    missing.forEach(function (b, i) {
+      const r = res[i];
+      if (!r || r.getResponseCode() !== 200) return;
+      const cell = dashButtonCell_(DASH_BUTTONS.indexOf(b));
+      try {
+        have[b.key] = sh.insertImage(r.getBlob().setContentType('image/png').setName(b.key + '.png'), cell.col, cell.row, 0, 3);
+      } catch (e) { /* zählt unten als fehlend */ }
+    });
+  }
+  let failed = 0;
+  DASH_BUTTONS.forEach(function (b, i) {
+    const img = have[b.key];
+    if (!img) { failed++; return; }
+    const cell = dashButtonCell_(i);
+    img.setAnchorCell(sh.getRange(cell.row, cell.col)).setAnchorCellXOffset(0).setAnchorCellYOffset(3)
+      .setWidth(DASH_BTN_W).setHeight(DASH_BTN_H)
+      .setAltTextTitle(b.label).setAltTextDescription('Dashboard-Knopf ' + b.key + ' v' + DASH_ASSET_VERSION)
+      .assignScript(b.fn);
+  });
+  return failed;
+}
+
+/**
+ * Kacheln, Kopfzeile und Mini-Diagramme neu schreiben. Ohne Blatt passiert nichts. rows: Daten-Zeilen,
+ * dex: Pokédex-Index aus rebuildPokedex_ (fehlt er, wird er hier berechnet).
+ */
+function refreshDashboard_(rows, dex) {
+  const sh = ss_().getSheetByName(SHEETS.dash);
+  if (!sh) return false;
+  rows = rows || [];
+  const c = DASH_COLORS;
+  const now = new Date();
+  const today = dateText_(now);
+  const value = collectionValue_(rows);
+  let distinct = 0;
+  groupRows_(rows).forEach(function (g) {
+    if (g.idx.reduce(function (s, i) { return s + (Number(rows[i][COL.count]) || 0); }, 0) > 0) distinct++;
+  });
+  if (!dex) { try { dex = pokedexIndex_(rows); } catch (e) { dex = null; } }
+  const dexTotal = dex ? dex.entries.length : 0;
+  const dexOwned = dex ? dex.entries.filter(function (e) { return e.copies > 0; }).length : 0;
+  const hist = dashHistory_();
+  const last = hist.length ? hist[hist.length - 1] : null;
+
+  // Veränderung: Eintrag von vor DASH_CHANGE Tagen, fehlt der Tag, der nächstältere
+  const target = dashDayShift_(today, -DASH_CHANGE);
+  let ref = null;
+  hist.forEach(function (h) { if (h.day <= target) ref = h; });
+  let change, color = c.sub;
+  if (ref) {
+    const d = Math.round((value.total - ref.total) * 100) / 100;
+    change = (d > 0 ? '+' : d < 0 ? '−' : '±') + dashEur_(Math.abs(d)) + ' seit ' + dashShortDate_(ref.day, today);
+    color = d > 0 ? c.up : d < 0 ? c.down : c.sub;
+  } else {
+    change = hist.length ? 'Vergleich ab ' + dashShortDate_(dashDayShift_(hist[0].day, DASH_CHANGE), today) : 'Noch kein Verlauf';
+  }
+
+  const upd = dashUpdateText_();
+  const pct = dexTotal ? (Math.round(dexOwned / dexTotal * 1000) / 10).toFixed(1).replace('.', ',') : '0,0';
+  // Zeilen C:O in einem Rutsch; die Zellen dazwischen (Innenränder, Lücken) bleiben leer, K7 und O6:O7 sind Formeln
+  // und werden nicht überschrieben
+  const line = function (cells) {
+    const out = new Array(13).fill('');
+    Object.keys(cells).forEach(function (k) { out['CDEFGHIJKLMNO'.indexOf(k)] = cells[k]; });
+    return out;
+  };
+  sh.getRange('C2:O3').setValues([
+    line({ C: 'Pokémon-Sammlung', O: 'Version ' + TOOL_VERSION + (upd ? ' · ' + upd : '') }),
+    line({ C: 'Stand ' + Utilities.formatDate(now, tz_(), 'dd.MM.yyyy HH:mm') +
+      (last ? ' · Preise vom ' + dmyText_(last.day) : ' · noch kein Preislauf') })
+  ]);
+  sh.getRange('C5:O5').setValues([line({ C: 'GESAMTWERT', G: 'KARTEN', K: 'POKÉDEX · ' + pct + ' %', O: 'WERTVERLAUF · ' + DASH_DAYS + ' TAGE' })]);
+  sh.getRange('C6:K6').setValues([line({ C: value.total, G: value.cards, K: dexTotal ? dexOwned + ' von ' + dexTotal : '–' }).slice(0, 9)]);
+  sh.getRange('C7:G7').setValues([line({ C: change, G: value.cards > 1
+    ? (distinct === value.cards ? 'alle verschieden' : 'davon ' + distinct + ' verschiedene') : '' }).slice(0, 5)]);
+  sh.getRange('C7').setFontColor(color);
+
+  // Hilfsspalten: R = Wertverlauf der letzten DASH_DAYS Tage, darunter der Pokédex-Balken (vorhanden, fehlend);
+  // S:T = Einstellungen der beiden Mini-Diagramme (Linie ab Zeile 2, Balken ab Zeile 7)
+  const since = dashDayShift_(today, -(DASH_DAYS - 1));
+  const vals = hist.filter(function (h) { return h.day >= since; }).map(function (h) { return h.total; }).slice(-DASH_DAYS);
+  const opts = [['charttype', 'line'], ['color', c.accent], ['linewidth', 2], ['', ''], ['', ''],
+    ['charttype', 'bar'], ['color1', c.accent], ['color2', c.track], ['max', Math.max(1, dexTotal)]];
+  const block = [];
+  for (let i = 0; i < DASH_DAYS + 3; i++) {
+    const v = i < DASH_DAYS ? (i < vals.length ? vals[i] : '') : i === DASH_DAYS + 1 ? dexOwned : i === DASH_DAYS + 2 ? Math.max(0, dexTotal - dexOwned) : '';
+    block.push([v].concat(opts[i] || ['', '']));
+  }
+  sh.getRange(2, DASH_HELPER_COL, block.length, 3).setValues(block);
+  return true;
+}
+
+/** Einträge im Blatt Verlauf, nach Datum: [{day: 'yyyy-MM-dd', total}] (ein Eintrag pro Tag, der letzte zählt). */
+function dashHistory_() {
+  const sh = ss_().getSheetByName(SHEETS.hist);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const byDay = {};
+  sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r) {
+    const day = typeof r[0] === 'string' ? r[0].trim() : r[0] && typeof r[0] === 'object' ? dateText_(r[0]) : '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && typeof r[1] === 'number' && isFinite(r[1])) byDay[day] = r[1];
+  });
+  return Object.keys(byDay).sort().map(function (d) { return { day: d, total: byDay[d] }; });
+}
+
+/** 'yyyy-MM-dd' um days Tage verschieben (Kalendertage, ohne Zeitzone). */
+function dashDayShift_(ymd, days) {
+  const p = String(ymd).split('-').map(Number);
+  return new Date(Date.UTC(p[0], p[1] - 1, p[2] + days)).toISOString().slice(0, 10);
+}
+
+/** 'yyyy-MM-dd' -> '15.10.' im selben Jahr wie today, sonst '15.10.2025'. */
+function dashShortDate_(ymd, today) {
+  const p = String(ymd).split('-');
+  return p[2] + '.' + p[1] + '.' + (p[0] === String(today).slice(0, 4) ? '' : p[0]);
+}
+
+/** 1234.5 -> '1.234,50 €' */
+function dashEur_(n) {
+  const parts = (Math.round(Math.abs(n) * 100) / 100).toFixed(2).split('.');
+  return parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + parts[1] + ' €';
+}
+
+/** Hinweis auf eine neue Version aus dem Zwischenspeicher der Update-Prüfung (ohne Abruf), sonst ''. */
+function dashUpdateText_() {
+  if (typeof updNewer_ !== 'function' || typeof UPD_CACHE_KEY === 'undefined') return '';
+  try {
+    const hit = CacheService.getScriptCache().get(UPD_CACHE_KEY);
+    if (!hit) return '';
+    const newer = updNewer_(JSON.parse(hit));
+    return newer.length ? 'Version ' + newer[0].version + ' ist da' : '';
+  } catch (e) { return ''; }
+}
+
+/** Ein Blatt öffnen (Knöpfe und Menü). Ein verstecktes Blatt wird dabei wieder sichtbar. */
+function dashOpenSheet_(name) {
+  const ss = ss_();
+  const sh = ss.getSheetByName(name);
+  if (!sh) { alert_('Das Blatt „' + name + '“ gibt es hier nicht. Bitte einmal Pokémon > Einrichtung ausführen.'); return; }
+  if (sh.isSheetHidden()) sh.showSheet();
+  ss.setActiveSheet(sh);
+}
+
+function zumDashboard() {
+  if (!ss_().getSheetByName(SHEETS.dash)) {
+    if (takenOverBy_()) { uebernommenHinweis(); return; }
+    setupDashboardSheet_(ss_());
+  }
+  dashOpenSheet_(SHEETS.dash);
+}
+
+function zurSammlung() { dashOpenSheet_(SHEETS.view); }
+function zumPokedex() { dashOpenSheet_(SHEETS.dex); }
+function zumVerlauf() { dashOpenSheet_(SHEETS.hist); }
+function zuSeltenheiten() { dashOpenSheet_(SHEETS.rarity); }

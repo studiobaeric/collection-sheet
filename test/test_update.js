@@ -679,6 +679,44 @@ t.section('Übernahme: eigene Blätter mit Namen des Tools');
 }
 
 // ---------------------------------------------------------------------------
+t.section('Übernahme: eigenes Blatt „Dashboard“ aus Versionen vor 1.1.0');
+{
+  const dashOk = env => env.sheet('Dashboard').getRange('C2').getValue() === 'Pokémon-Sammlung' && env.sheet('Dashboard').getImages().length === 12;
+  // vor 1.0 (ohne TOOL_SHEETS)
+  const old = H.createEnv({ srcDir: path.join(__dirname, '..', 'backup'), files: ['Code.gs'] });
+  old.ss.id = OLD_ID;
+  old.ctx.einrichtung();
+  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
+  old.ss.insertSheet('Dashboard').getRange('A1:B2').setValues([['Ziel', 'Budget'], ['Glurak', 300]]);
+  const env = setupEnv(makeWorld());
+  env.sources[OLD_ID] = old.ss;
+  t.ok('vor 1.0: eigenes Dashboard zählt als eigenes Blatt', env.uiCall('takeoverPreview', OLD_ID).own.indexOf('Dashboard') >= 0);
+  env.uiCall('takeoverRun', OLD_ID);
+  t.ok('vor 1.0: als „Dashboard (alt)“ kopiert, Dashboard des Tools mit Knöpfen', env.sheet('Dashboard (alt)').getRange('B2').getValue() === 300 && dashOk(env));
+  // 1.0.x: TOOL_SHEETS ohne Dashboard
+  const o2 = baseEnv();
+  o2.ss.id = OLD_ID;
+  o2.ctx.einrichtung();
+  o2.ss.deleteSheet(o2.sheet('Dashboard'));
+  o2.ctx.settingSet_('TOOL_SHEETS', J(JSON.parse(o2.setting('TOOL_SHEETS')).filter(n => n !== 'Dashboard')));
+  o2.ss.insertSheet('Dashboard').getRange('A1').setValue('Meine Übersicht');
+  const env2 = setupEnv(makeWorld());
+  env2.sources[OLD_ID] = o2.ss;
+  t.ok('1.0.x: eigenes Dashboard zählt als eigenes Blatt', J(env2.uiCall('takeoverPreview', OLD_ID).own) === J(['Dashboard']));
+  env2.uiCall('takeoverRun', OLD_ID);
+  t.ok('1.0.x: als „Dashboard (alt)“ kopiert', env2.sheet('Dashboard (alt)').getRange('A1').getValue() === 'Meine Übersicht' && dashOk(env2));
+  // ab 1.1.0: das Dashboard gehört dem Tool und wird neu aufgebaut, nicht kopiert
+  const o3 = baseEnv();
+  o3.ss.id = OLD_ID;
+  o3.ctx.einrichtung();
+  const env3 = setupEnv(makeWorld());
+  env3.sources[OLD_ID] = o3.ss;
+  t.ok('ab 1.1.0: Dashboard nicht unter den eigenen Blättern', J(env3.uiCall('takeoverPreview', OLD_ID).own) === J([]));
+  env3.uiCall('takeoverRun', OLD_ID);
+  t.ok('ab 1.1.0: kein „Dashboard (alt)“', !env3.sheet('Dashboard (alt)') && dashOk(env3));
+}
+
+// ---------------------------------------------------------------------------
 t.section('Übernahme: abgebrochen, wiederholt, doppelt, ohne Schreibrecht');
 {
   const oldEnv = baseEnv();
