@@ -6,11 +6,11 @@ Nicht verbunden mit Nintendo, Creatures, Game Freak oder The Pokémon Company. K
 
 ## Stand
 
-Version 1.0.0. Das Tool läuft als Apps-Script-Projekt, das an eine Google-Tabelle gebunden ist. Eine öffentliche Vorlage zum Kopieren folgt (siehe `docs/plan.md`, Abschnitt „Release und Updates“).
+Version 1.0.0. Das Tool läuft als Apps-Script-Projekt, das an eine Google-Tabelle gebunden ist. Neue Nutzer starten mit einer Kopie der [Vorlage](https://docs.google.com/spreadsheets/d/18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE/copy).
 
 ## Einrichten
 
-1. Öffne die Vorlage und wähle **Datei > Kopie erstellen**. (Der Link zur Vorlage folgt.)
+1. Öffne die [Vorlage](https://docs.google.com/spreadsheets/d/18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE/copy) und klicke auf **Kopie erstellen**. Die Kopie landet in deiner „Meine Ablage“.
 2. Öffne in deiner Kopie **Pokémon > Karten erfassen**. Google fragt einmal nach den Berechtigungen des Skripts. Erscheint „Google hat diese App nicht überprüft“, klicke auf **Erweitert**, dann auf **Weiter zu … (unsicher)** und auf **Zulassen**. Das Skript gehört zu deiner eigenen Kopie und läuft nur in deinem Konto.
 3. Beim ersten Öffnen richtet sich die Kopie selbst ein: Blätter, nächtlicher Preislauf und die Liste der Sets.
 
