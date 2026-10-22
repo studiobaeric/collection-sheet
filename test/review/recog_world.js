@@ -104,7 +104,7 @@ function newEnv(opts) {
       return t[k];
     }
   });
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   if (opts.prefill !== false) env.uiCall('importSetsVorbelegen');
   return env;
 }

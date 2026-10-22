@@ -190,7 +190,7 @@ function makeEnv(opts) {
   env.fetchAllSizes = [];
   c.UrlFetchApp.fetchAll = rs => { if (env.lock.depth > 0) env.fetchInLock.push(rs.length); env.fetchAllSizes.push(rs.length); return fa(rs); };
   c.UrlFetchApp.fetch = u => { if (env.lock.depth > 0) env.fetchInLock.push(u); return f1(u); };
-  c.einrichtung();
+  c.setupAll_();
   if (!env.ss.getSheetByName('Import-Begriffe')) {
     const sh = c.getOrCreateSheet_(env.ss, 'Import-Begriffe');
     c.writeHeaders_(sh, c.TERMS_HEADERS ? env.run('TERMS_HEADERS') : ['Begriff', 'Bedeutung', 'Wert', 'Wo']);

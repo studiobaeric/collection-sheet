@@ -106,7 +106,7 @@ safe(() => {
 t.section('GAS-4 supportsAllDrives bei der xlsx-Umwandlung');
 ['v3', 'v2'].forEach((ver) => {
   const env = H.createEnv({ drive: ver });
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   env.addSource({ id: 'XLSXSHARED' + ver, name: 'Geteilt.xlsx', mime: 'xlsx', tabs: { Liste: [['Name', 'Nr.'], ['Glurak', '4']] } });
   env.uiCall('importOpenSource', 'XLSXSHARED' + ver);
   const extra = env.driveCopies[0] && env.driveCopies[0].extra;
@@ -136,7 +136,7 @@ safe(() => {
   const c = env.ctx;
   const trig = () => env.triggers.map((x) => x.fn).sort();
   t.eq('GAS-1: Einrichtung legt den Trigger bei Änderung an', trig(), ['beiStrukturAenderung', 'naechtlicherPreislauf']);
-  c.einrichtung();
+  c.setupAll_();
   t.eq('GAS-1: zweite Einrichtung legt ihn nicht doppelt an', trig(), ['beiStrukturAenderung', 'naechtlicherPreislauf']);
   C.handRow(env, C.GLURAK, 2);
   C.handRow(env, C.BASE, 1);
@@ -153,7 +153,7 @@ safe(() => {
 });
 
 /* ---------- GAS-2 / MIGR-2: Zeilen einer alten Web-App-Bereitstellung, kopierte Hand-Zeilen ---------- */
-t.section('GAS-2 / MIGR-2 alte Bereitstellung, kopierte Zeile, Hinweis in der Einrichtung');
+t.section('GAS-2 / MIGR-2 alte Bereitstellung, kopierte Zeile');
 safe(() => {
   const env = C.mkEnv();
   const c = env.ctx;
@@ -187,15 +187,6 @@ safe(() => {
   c.onEdit({ range: sh.getRange(sh.getLastRow(), 1) });
   const imps = env.data().filter((r) => r.fp === 'fpZ');
   t.ok('MIGR-2: kopierte Import-Zeile bleibt eine eigene Zeile (neue ID)', imps.length === 2 && imps[0].eid !== imps[1].eid, imps.map((r) => [r.eid, r.origin]));
-  // Hinweis in der Einrichtung, wenn es eine Web-App gibt
-  env.ui.alerts.length = 0;
-  c.einrichtung();
-  t.ok('GAS-2: ohne Web-App kein Hinweis auf „Neue Version“', !/Neue Version/.test(env.ui.alerts[0] || ''), env.ui.alerts);
-  env.props.WEBAPP_URL = 'https://script.google.com/macros/s/ABC/exec';
-  env.ui.alerts.length = 0;
-  c.einrichtung();
-  const msg = env.ui.alerts[0] || '';
-  t.ok('GAS-2: mit Web-App nennt die Einrichtung „Neue Version“ und die Seitenleiste', /Bereitstellungen verwalten/.test(msg) && /Neue Version/.test(msg) && /Seitenleiste/.test(msg) && !/—/.test(msg), msg);
 });
 
 /* ---------- MIGR-5: Variante von Hand als Anzeigename eingetippt ---------- */

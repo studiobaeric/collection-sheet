@@ -1027,7 +1027,8 @@ function boot(mode, opts) {
     await E.respond('updateCopy');
     const m = $('updMsg');
     ok('angelegt: Meldung, Link, Schritte', m.querySelector('.msg.ok') && m.querySelector('a[href="https://docs.google.com/spreadsheets/d/NEUNEU/edit"]') &&
-      /Karten erfassen/.test(m.textContent) && /Jetzt übernehmen/.test(m.textContent) && /Neue Bereitstellung/.test(m.textContent) && !E.btn($('updInfo'), 'Neue Version holen').disabled);
+      /Karten erfassen/.test(m.textContent) && /Jetzt übernehmen/.test(m.textContent) && /Neue Bereitstellung/.test(m.textContent) &&
+      /gelbe Leiste/.test(m.textContent) && /Zugriff erlauben/.test(m.textContent) && /tcgdex\.net/.test(m.textContent) && !E.btn($('updInfo'), 'Neue Version holen').disabled);
     ok('danach: getUpdateInfo neu', E.calls('getUpdateInfo').length === 1);
     await E.respond('getUpdateInfo');
     ok('Bereich: Kopie schon angelegt, Link, kein Knopf für eine zweite', /schon angelegt/.test($('updInfo').textContent) && /Papierkorb/.test($('updInfo').textContent) &&
@@ -1111,6 +1112,8 @@ function boot(mode, opts) {
     ok('ausstehende Übernahme: Link eingetragen, Vorschau läuft', $('takeUrl').value === OLD && E.calls('takeoverPreview').length === 1 &&
       J(E.calls('takeoverPreview')[0].args) === J([OLD]) && !$('paneUpd').classList.contains('hidden'));
     ok('Leiste: Übernahme', /Übernimm jetzt die Daten/.test($('updBar').textContent));
+    ok('Übernahme erklärt die gelbe Leiste von Google', /gelbe Leiste/.test($('takeBox').textContent) && /Zugriff erlauben/.test($('takeBox').textContent) &&
+      /fehlen die Kartenbilder/.test($('takeBox').textContent));
     await E.respond('takeoverPreview');
     ok('Vorschau da, Knopf Jetzt übernehmen', !!E.btn($('takeMsg'), 'Jetzt übernehmen'));
     E.win.updLoad(false);

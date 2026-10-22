@@ -31,7 +31,7 @@ function known(fp, qty, v) {
 }
 function mkEnv(files) {
   const env = H.createEnv(files ? { files } : {});
-  env.ctx.einrichtung();
+  env.ctx.setupAll_();
   env.ui.alerts.length = 0;
   return env;
 }

@@ -4,7 +4,7 @@
  *
  *   const H = require('./harness2');
  *   const env = H.createEnv();            // frischer Kontext pro Test (Code.gs + Import.gs, falls vorhanden)
- *   env.ctx.einrichtung();                // alle .gs-Funktionen hängen an env.ctx
+ *   env.ctx.setupAll_();                // alle .gs-Funktionen hängen an env.ctx
  *   env.data();                           // Blatt Daten als Objekte
  *
  * createEnv(opts):

@@ -168,7 +168,7 @@ function addV1Sheet(env) {
  * ------------------------------------------------------------------------- */
 
 const IMPORT_PUBLIC = ['importState', 'importOpenSource', 'importSelectTab', 'importPreviewRows', 'importListTemplates',
-  'importSaveTemplate', 'importDeleteTemplate', 'importDiscardDraft', 'importStartRecognition', 'importRecognizeStep',
+  'importSaveTemplate', 'importDiscardDraft', 'importStartRecognition', 'importRecognizeStep',
   'importReviewList', 'importReviewSearch', 'importReviewDecide', 'importReviewAcceptPrefilled', 'importSetsVorbelegen',
   'importBuildPreview', 'importCommit', 'importResume', 'importList', 'importUndoPreview', 'importUndo'];
 
@@ -271,7 +271,7 @@ const D = {}; // gemerkte Werte zwischen den Schritten
 t.section('1. Einrichtung auf einem alten Blatt mit drei Karten von Hand');
 {
   addV1Sheet(env);
-  c.einrichtung();
+  c.setupAll_();
   const hand = handOf(env);
   t.eq('drei Karten von Hand umgestellt', hand.map((d) => [d.name, d.count, d.key]),
     [['Arktos', 1, 'pl3-148|holo||NM|DE'], ['Celebi', 1, 'pl2-12|normal|||DE'], ['Nachtara', 2, 'hgss2-10|holo||LP|DE']]);
@@ -288,7 +288,7 @@ t.section('1. Einrichtung auf einem alten Blatt mit drei Karten von Hand');
   D.value0 = value(env);
   // zweite Einrichtung ändert nichts an Erics Begriffen
   env.sheet('Import-Begriffe').getRange(2, 3).setValue('reverse');
-  c.einrichtung();
+  c.setupAll_();
   t.eq('zweite Einrichtung: Begriffe bleiben', env.objects('Import-Begriffe').length, 38);
   t.eq('zweite Einrichtung: Hand-Karten unverändert', handSnap(env, D.handEids), D.handSnap);
 }
@@ -713,14 +713,14 @@ t.section('14. Regeln über den ganzen Ablauf');
   t.eq('Sperre am Ende frei', env.lock.depth, 0);
   t.eq('keine Schreibzugriffe ohne Sperre', env.guard.violations, []);
   t.eq('alle temporären Kopien im Papierkorb', env.driveCopies.filter((x) => !env.driveFiles[x.to].trashed).map((x) => x.to), []);
-  t.ok('jede öffentliche Import-Funktion aufgerufen', IMPORT_PUBLIC.filter((n) => !env.guard.calls[n] && ['importResume', 'importDeleteTemplate', 'importListTemplates'].indexOf(n) < 0).length === 0,
+  t.ok('jede öffentliche Import-Funktion aufgerufen', IMPORT_PUBLIC.filter((n) => !env.guard.calls[n] && ['importResume', 'importListTemplates'].indexOf(n) < 0).length === 0,
     IMPORT_PUBLIC.filter((n) => !env.guard.calls[n]));
 }
 
 t.section('15. Ohne Drive-Dienst');
 {
   const e = newEnv({ drive: false });
-  e.ctx.einrichtung();
+  e.ctx.setupAll_();
   t.eq('importState: kein Drive', [e.uiCall('importState').driveService, e.uiCall('importState').driveVersion], [false, '']);
   addXlsx(e, ROWS_V1);
   t.throws('xlsx ohne Drive API', () => e.uiCall('importOpenSource', XLSX_URL),
@@ -734,7 +734,7 @@ t.section('15. Ohne Drive-Dienst');
 t.section('16. Drive v2');
 {
   const e = newEnv({ drive: 'v2' });
-  e.ctx.einrichtung();
+  e.ctx.setupAll_();
   addXlsx(e, ROWS_V1);
   const o = e.uiCall('importOpenSource', XLSX_ID);
   const cp = e.driveCopies[0];
@@ -750,7 +750,7 @@ t.section('17. Checkliste (abhaken, später abwählen) und Raster (Ordnerseiten)
 {
   const e = newEnv();
   const ec = e.ctx;
-  ec.einrichtung();
+  ec.setupAll_();
   e.uiCall('importSetsVorbelegen');
   t.eq('beide Begriffs-Vorbelegungen gleich', JSON.stringify(e.run('ER_TERM_SEED')), JSON.stringify(e.run('QU_TERMS_SEED')));
   const HG = 'HeartGold & SoulSilver';
@@ -801,11 +801,10 @@ t.section('17. Checkliste (abhaken, später abwählen) und Raster (Ordnerseiten)
   t.eq('Raster: übernommen', [res3.counts.kopien, sum(e.data(), (d) => d.count) - before], [5, 5]);
   t.eq('Raster: Gengar jetzt zweimal (Alles addieren)', e.data().filter((d) => d.name === 'Gengar').map((d) => [d.origin, d.count]),
     [['Import 1', 1], ['Import 3', 1]]);
-  // Vorlagen auflisten und löschen
+  // Vorlagen auflisten
   e.uiCall('importSaveTemplate', 'Raster A', grid, 'alle');
   e.uiCall('importSaveTemplate', 'Raster B', grid, 'neu');
   t.eq('Vorlagen', e.uiCall('importListTemplates').map((x) => [x.name, x.mode, x.cfg.form]).sort(), [['Raster A', 'alle', 'raster'], ['Raster B', 'neu', 'raster']]);
-  t.eq('Vorlage löschen', [e.uiCall('importDeleteTemplate', 'raster a').deleted, e.uiCall('importListTemplates').map((x) => x.name)], [true, ['Raster B']]);
   t.eq('Regeln', [e.lock.nested, e.guard.violations], [0, []]);
 }
 

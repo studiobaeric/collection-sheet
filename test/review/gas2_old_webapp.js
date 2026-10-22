@@ -31,7 +31,7 @@ console.log('v1 Daten Spalte A:', env.values('Daten').slice(1).filter(r => r[0])
 
 const neu = loadCode(path.join(ROOT, 'src'), ['Code.gs', 'Import.gs']);
 env.ui.alerts.length = 0;
-neu.einrichtung();
+neu.setupAll_();
 console.log('Einrichtung-Meldung:', env.ui.alerts.join(' | '));
 console.log('  enthält Hinweis auf Neu-Bereitstellung?', /Bereitstell|Web-App|Handy/i.test(env.ui.alerts.join(' ')));
 const C = vm.runInContext('COL', neu);
