@@ -1356,6 +1356,11 @@ function onOpen() {
     .addItem('API prüfen', 'apiPruefen')
     .addItem('Web-App-Link anzeigen', 'webAppLinkAnzeigen')
     .addToUi();
+  // Startseite ist das Dashboard (Google öffnet sonst das zuletzt offene Blatt); ein verstecktes bleibt versteckt
+  try {
+    const dash = ss_().getSheetByName(SHEETS.dash);
+    if (dash && !dash.isSheetHidden()) ss_().setActiveSheet(dash);
+  } catch (e) { /* wie bisher */ }
 }
 
 /** Seitenleiste (mit Import-Tab). Ui.html ist eine Vorlage: `mode` steuert, was sie zeigt, `start` den ersten Tab. */

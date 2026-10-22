@@ -20,7 +20,7 @@ Am Handy nutzt du die Web-App: Erweiterungen > Apps Script > **Bereitstellen > N
 
 ## Dashboard
 
-Das Blatt **Dashboard** steht ganz vorne. Es zeigt den Gesamtwert deiner Sammlung mit der Veränderung seit 7 Tagen, die Zahl deiner Karten, wie viele der 1025 Pokémon du schon hast, und den Wertverlauf der letzten 90 Tage. Die Zahlen rechnet das Tool nach jeder Änderung und nach jedem Preislauf neu.
+Das Blatt **Dashboard** steht ganz vorne, und am Computer startet die Tabelle immer dort. Es zeigt den Gesamtwert deiner Sammlung mit der Veränderung seit 7 Tagen, die Zahl deiner Karten, wie viele der 1025 Pokémon du schon hast, und den Wertverlauf der letzten 90 Tage. Die Zahlen rechnet das Tool nach jeder Änderung und nach jedem Preislauf neu.
 
 Mit den Knöpfen öffnest du **Karten erfassen** und den Import, startest den Preislauf, suchst nach Updates, lädst Sets und Übersetzung neu, baust die Ansicht neu auf oder holst den Handy-Link. Die Knöpfe in der Reihe „Blätter“ springen zu Sammlung, Pokédex, Verlauf und Seltenheiten. Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen; Karten erfasst du dort über die Web-App.
 

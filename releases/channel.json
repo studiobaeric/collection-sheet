@@ -10,7 +10,7 @@
       "prerelease": false,
       "schema": "2",
       "notes": [
-        "Neues Blatt „Dashboard“ ganz vorne: Gesamtwert mit Veränderung seit 7 Tagen, Anzahl Karten, Pokédex-Fortschritt und Wertverlauf der letzten 90 Tage",
+        "Neues Blatt „Dashboard“ ganz vorne: Gesamtwert mit Veränderung seit 7 Tagen, Anzahl Karten, Pokédex-Fortschritt und Wertverlauf der letzten 90 Tage. Am Computer startet die Tabelle dort",
         "Knöpfe im Dashboard für Karten erfassen, Preise aktualisieren, Importieren, Updates, Sets und Übersetzung, Ansicht neu aufbauen und den Handy-Link, dazu Knöpfe zu Sammlung, Pokédex, Verlauf und Seltenheiten",
         "Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen, Karten erfasst du dort wie bisher über die Handy-Seite",
         "Neuer Menüpunkt „Pokémon > Dashboard“"

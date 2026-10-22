@@ -335,6 +335,28 @@ t.section('Blätter öffnen, Dashboard, Import');
 }
 
 // ---------------------------------------------------------------------------
+t.section('Startseite');
+{
+  const env = setup();
+  const active = () => env.ss.getActiveSheet().getName();
+  env.ss.setActiveSheet(env.sheet('Pokédex'));
+  env.ctx.onOpen();
+  eq('beim Öffnen: Dashboard', active(), 'Dashboard');
+  dash(env).hideSheet();
+  env.ss.setActiveSheet(env.sheet('Pokédex'));
+  env.ctx.onOpen();
+  eq('verstecktes Dashboard bleibt versteckt', [active(), dash(env).isSheetHidden()], ['Pokédex', true]);
+  dash(env).showSheet();
+  env.ctx.settingSet_('TAKEN_OVER_BY', 'https://docs.google.com/spreadsheets/d/NEU/edit');
+  env.ss.setActiveSheet(env.sheet('Sammlung'));
+  env.ctx.onOpen();
+  eq('stillgelegte Tabelle: kein Sprung', active(), 'Sammlung');
+  const env2 = H.createEnv();
+  env2.ctx.onOpen();
+  ok('Tabelle ohne Dashboard: Menü wie bisher, kein Fehler', env2.ui.menus.length === 1 && env2.ss.getActiveSheet().getName() === 'Tabellenblatt1');
+}
+
+// ---------------------------------------------------------------------------
 t.section('Eigenes Blatt „Dashboard“ aus der Zeit vor 1.1.0');
 {
   // Tabelle auf 1.0.x: TOOL_SHEETS ohne Dashboard, ein selbst angelegtes Blatt „Dashboard“; dann Code 1.1.0 von Hand

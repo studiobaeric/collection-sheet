@@ -19,7 +19,7 @@ Zum Ausprobieren am besten in einer Kopie deiner Tabelle (**Datei > Kopie erstel
 
 ## Kurz prüfen
 
-1. **Dashboard** ist das erste Blatt. Oben steht „Pokémon-Sammlung“ mit Version 1.1.0, darunter wann es zuletzt neu gerechnet hat und von wann die Preise sind.
+1. **Dashboard** ist das erste Blatt, und beim Öffnen der Tabelle springt sie dorthin. Oben steht „Pokémon-Sammlung“ mit Version 1.1.0, darunter wann es zuletzt neu gerechnet hat und von wann die Preise sind.
 2. Die vier Kacheln: **Gesamtwert** (darunter die Veränderung seit 7 Tagen, grün oder rot), **Karten** (Exemplare, darunter wie viele verschiedene), **Pokédex** (wie viele der 1025 Pokémon, mit Balken), **Wertverlauf** (Linie der letzten 90 Tage, erst ab zwei Tagen im Verlauf).
 3. Klicke auf **Karten erfassen**: Die Seitenleiste geht auf. **Importieren** öffnet sie gleich im Tab Import.
 4. Klicke auf **Pokédex**: Das Blatt Pokédex ist offen. **Pokémon > Dashboard** bringt dich zurück.
