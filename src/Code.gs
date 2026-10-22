@@ -4376,6 +4376,8 @@ const DASH_ALT_RE = /^Dashboard-Knopf ([\w-]+) v(\S+)$/;
 const DASH_META = 'pokemonToolDashboard'; // Entwickler-Metadaten am Blatt: das Dashboard des Tools
 const DASH_BTN_W = 276;
 const DASH_BTN_H = 52;
+// Look „Rot-weiß“ (Eric, 22.10.2026), gleich dem aktiven Look in docs/dashboard/looks.json; dort sind auch die
+// anderen Looks als Konzept gespeichert
 const DASH_COLORS = {
   page: '#ffffff', banner: '#c62828', title: '#ffffff', bannerSub: '#ffcdd2', tile: '#f8f9fa', tileBorder: '#e0e0e0',
   label: '#5f6368', value: '#202124', sub: '#5f6368', up: '#137333', down: '#a50e0e', section: '#202124',
@@ -4386,6 +4388,10 @@ const DASH_HELP = 'Die Knöpfe funktionieren am Computer. In der Sheets-App am H
 const DASH_LOAD_FAILED = 'Einige Knöpfe ließen sich nicht laden (keine Verbindung zu GitHub). Bitte später Pokémon > Ansicht neu aufbauen.';
 const DASH_DAYS = 90;   // Wertverlauf: so viele Tage zurück
 const DASH_CHANGE = 7;  // Veränderung des Gesamtwerts: seit so vielen Tagen
+// Raster (Pixel): Rand, je Kachel Innenrand + Inhalt + Innenrand, dazwischen Lücken (zusammen 1184 px); Zeilenhöhen
+const DASH_COL_WIDTHS = [16, 10, 256, 10, 16, 10, 256, 10, 16, 10, 256, 10, 16, 10, 256, 10, 16];
+const DASH_ROW_HEIGHTS = { 1: 16, 2: 46, 3: 26, 4: 16, 5: 26, 6: 40, 7: 22, 8: 10, 9: 22, 10: 30, 11: 8, 12: 58, 13: 58, 14: 22,
+  15: 30, 16: 8, 17: 58, 18: 14, 19: 22 };
 // Hilfsspalten (versteckt): R Werte für die Mini-Diagramme, S:T deren Einstellungen
 const DASH_HELPER_COL = 18;
 const DASH_NCOLS = 26;
@@ -4424,11 +4430,8 @@ function setupDashboardSheet_(ss) {
   sh.setTabColor(c.accent);
   all.setBackground(c.page).setFontFamily(DASH_FONT).setFontColor(c.value).setVerticalAlignment('middle');
 
-  // Raster: Rand, je Kachel Innenrand + Inhalt + Innenrand, dazwischen Lücken (zusammen 1184 px)
-  [16, 10, 256, 10, 16, 10, 256, 10, 16, 10, 256, 10, 16, 10, 256, 10, 16].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
-  const heights = { 1: 16, 2: 46, 3: 26, 4: 16, 5: 26, 6: 40, 7: 22, 8: 10, 9: 22, 10: 30, 11: 8, 12: 58, 13: 58, 14: 22,
-    15: 30, 16: 8, 17: 58, 18: 14, 19: 22 };
-  Object.keys(heights).forEach(function (r) { sh.setRowHeight(Number(r), heights[r]); });
+  DASH_COL_WIDTHS.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  Object.keys(DASH_ROW_HEIGHTS).forEach(function (r) { sh.setRowHeight(Number(r), DASH_ROW_HEIGHTS[r]); });
 
   // Kopf
   sh.getRange('B2:P3').setBackground(c.banner);

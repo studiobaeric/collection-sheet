@@ -70,6 +70,21 @@ t.section('Knöpfe: Liste, Funktionen, Bilder im Repo');
 }
 
 // ---------------------------------------------------------------------------
+t.section('Looks: Konzept in docs/dashboard');
+{
+  const DOCS = path.join(__dirname, '..', 'docs', 'dashboard');
+  const L = JSON.parse(fs.readFileSync(path.join(DOCS, 'looks.json'), 'utf8'));
+  const names = Object.keys(L.looks);
+  const c = H.createEnv().run('DASH_COLORS');
+  eq('drei Looks, aktiv ist Rot-weiß', [names, L.aktiv, (L.looks[L.aktiv] || {}).name], [['rot', 'dunkel', 'neutral'], 'rot', 'Rot-weiß']);
+  eq('Code.gs baut den aktiven Look (DASH_COLORS = seine Blatt-Farben)', c, L.looks[L.aktiv].blatt);
+  ok('jeder Look hat alle Farben fürs Blatt (#rrggbb) und für die Knöpfe', names.every(n => J(Object.keys(L.looks[n].blatt)) === J(Object.keys(c)) &&
+    Object.keys(c).every(k => /^#[0-9a-f]{6}$/.test(L.looks[n].blatt[k])) && J(Object.keys(L.looks[n].knoepfe)) === J(Object.keys(L.looks[L.aktiv].knoepfe))));
+  ok('Vorschau und Beschreibung je Look', names.every(n => fs.existsSync(path.join(DOCS, 'vorschau-' + n + '.png')) &&
+    fs.readFileSync(path.join(DOCS, 'README.md'), 'utf8').indexOf('(vorschau-' + n + '.png)') >= 0), names);
+}
+
+// ---------------------------------------------------------------------------
 t.section('Einrichtung legt das Dashboard an');
 {
   const env = setup();

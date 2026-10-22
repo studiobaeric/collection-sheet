@@ -1,22 +1,24 @@
 'use strict';
 /**
- * Zeichnet die Knöpfe des Blatts „Dashboard“ als PNG nach assets/dashboard/ (doppelte Auflösung).
- * Das Skript in der Tabelle lädt sie von GitHub und legt sie als Bilder mit zugewiesener Funktion aufs Blatt
- * (DASH_ASSETS in src/Code.gs zeigt auf den Commit mit diesen Dateien).
+ * Zeichnet die Knöpfe des Blatts „Dashboard“ als PNG nach assets/dashboard/ (doppelte Auflösung), im aktiven Look aus
+ * docs/dashboard/looks.json. Das Skript in der Tabelle lädt sie von GitHub und legt sie als Bilder mit zugewiesener
+ * Funktion aufs Blatt (DASH_ASSETS in src/Code.gs zeigt auf den Commit mit diesen Dateien).
  *
- * Aufruf: NODE_PATH="$(npm root -g)" node tools/dashboard-knoepfe.js [--theme rot|dunkel|neutral] [--out Ordner]
- * Braucht Playwright mit Chromium (nicht in package.json, weil nur für neue Knöpfe nötig).
+ * Aufruf: NODE_PATH="$(npm root -g)" node tools/dashboard-knoepfe.js [--theme <Look> --out <Ordner>]
+ * Einen anderen als den aktiven Look zeichnet es nur mit --out, assets/dashboard gehört dem aktiven Look.
+ * Braucht Playwright mit Chromium (nicht in package.json, weil nur für neue Knöpfe nötig). Eine Vorschau des ganzen
+ * Blatts je Look zeichnet tools/dashboard-vorschau.js.
  *
  * Nach einer Änderung: Bilder committen und pushen, DASH_ASSETS auf den neuen Commit stellen und
- * DASH_ASSET_VERSION erhöhen, dann ersetzt die Einrichtung die alten Bilder in jeder Tabelle.
+ * DASH_ASSET_VERSION erhöhen, dann ersetzt das nächste Update der Tabelle die alten Bilder.
  * Symbole: Material Icons (Apache-Lizenz 2.0), der Pokéball ist selbst gezeichnet.
  */
 const fs = require('fs');
 const path = require('path');
+const LOOKS = require('../docs/dashboard/looks.json');
 
 const arg = (name, def) => { const i = process.argv.indexOf('--' + name); return i > 0 ? process.argv[i + 1] : def; };
-const OUT = arg('out', path.join(__dirname, '..', 'assets', 'dashboard'));
-const W = 276; // Breite eines Felds im Dashboard (3 Spalten à 92 px)
+const W = 276; // Breite einer Kachel im Dashboard (10 + 256 + 10 px)
 const H = 52;
 
 const ICONS = {
@@ -50,31 +52,8 @@ const BUTTONS = [
   { key: 'seltenheiten', label: 'Seltenheiten', icon: 'star', kind: 'nav' }
 ];
 
-// Farben der Knöpfe je Look (die Farben des Blatts stehen in DASH_COLORS in src/Code.gs)
-const THEMES = {
-  rot: {
-    bg: '#fff', fg: '#202124', border: '#dadce0', icoBg: '#fdecea', icoFg: '#c62828',
-    primBg: '#c62828', primFg: '#fff', primBorder: '#b71c1c', primIcoBg: 'rgba(255,255,255,.18)',
-    navIcoBg: '#f1f3f4', navIcoFg: '#3c4043', chev: '#9aa0a6',
-    shadow: '0 1px 2px rgba(60,64,67,.22), 0 1px 3px 1px rgba(60,64,67,.10)'
-  },
-  dunkel: {
-    bg: '#2a2b30', fg: '#e8eaed', border: '#3f4148', icoBg: 'rgba(239,83,80,.16)', icoFg: '#ff6b66',
-    primBg: '#d32f2f', primFg: '#fff', primBorder: '#e53935', primIcoBg: 'rgba(255,255,255,.2)',
-    navIcoBg: '#3a3b41', navIcoFg: '#e8eaed', chev: '#80868b',
-    shadow: '0 1px 2px rgba(0,0,0,.55), 0 1px 3px 1px rgba(0,0,0,.25)'
-  },
-  neutral: {
-    bg: '#fff', fg: '#202124', border: '#dadce0', icoBg: '#e8f0fe', icoFg: '#1a73e8',
-    primBg: '#1a73e8', primFg: '#fff', primBorder: '#1967d2', primIcoBg: 'rgba(255,255,255,.2)',
-    navIcoBg: '#f1f3f4', navIcoFg: '#3c4043', chev: '#9aa0a6',
-    shadow: '0 1px 2px rgba(60,64,67,.22), 0 1px 3px 1px rgba(60,64,67,.10)'
-  }
-};
-const THEME = arg('theme', 'rot');
-
+/** HTML für Knopf b mit den Knopf-Farben t eines Looks (looks.json, „knoepfe“) */
 function page(b, t) {
-  t = t || THEMES[THEME];
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
   html, body { margin: 0; background: transparent; }
   .wrap { width: ${W}px; height: ${H}px; padding: 2px 3px 4px; box-sizing: border-box; }
@@ -95,22 +74,35 @@ function page(b, t) {
 </div></div></body></html>`;
 }
 
+/** Zeichnet alle Knöpfe eines Looks mit der Playwright-Seite p -> { Schlüssel: PNG-Buffer } */
+async function zeichne(p, look) {
+  const t = LOOKS.looks[look] && LOOKS.looks[look].knoepfe;
+  if (!t) throw new Error('Unbekannter Look: ' + look);
+  const out = {};
+  for (const b of BUTTONS) {
+    await p.setContent(page(b, t));
+    await p.evaluate(() => document.fonts.ready);
+    out[b.key] = await p.locator('.wrap').screenshot({ omitBackground: true });
+  }
+  return out;
+}
+
 async function main() {
-  if (!THEMES[THEME]) throw new Error('Unbekannter Look: ' + THEME);
+  const look = arg('theme', LOOKS.aktiv);
+  const dir = arg('out', look === LOOKS.aktiv ? path.join(__dirname, '..', 'assets', 'dashboard') : '');
+  if (!dir) throw new Error('„' + look + '“ ist nicht der aktive Look (' + LOOKS.aktiv + '): bitte mit --out einen anderen Ordner angeben');
   const { chromium } = require('playwright'); // erst hier: die Tests lesen BUTTONS ohne Playwright
-  fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ deviceScaleFactor: 2, viewport: { width: W, height: H } });
-  const p = await ctx.newPage();
-  for (const b of BUTTONS) {
-    await p.setContent(page(b));
-    await p.evaluate(() => document.fonts.ready);
-    const file = path.join(OUT, b.key + '.png');
-    await p.locator('.wrap').screenshot({ path: file, omitBackground: true });
-    console.log(file, fs.statSync(file).size, 'Bytes');
+  const pngs = await zeichne(await ctx.newPage(), look);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const key of Object.keys(pngs)) {
+    const file = path.join(dir, key + '.png');
+    fs.writeFileSync(file, pngs[key]);
+    console.log(file, pngs[key].length, 'Bytes');
   }
   await browser.close();
 }
 
-module.exports = { BUTTONS, THEMES, ICONS, page, W, H };
+module.exports = { BUTTONS, ICONS, page, zeichne, W, H };
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });

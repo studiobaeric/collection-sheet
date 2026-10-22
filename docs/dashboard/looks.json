@@ -1,0 +1,47 @@
+{
+  "aktiv": "rot",
+  "looks": {
+    "rot": {
+      "name": "Rot-weiß",
+      "blatt": {
+        "page": "#ffffff", "banner": "#c62828", "title": "#ffffff", "bannerSub": "#ffcdd2", "tile": "#f8f9fa", "tileBorder": "#e0e0e0",
+        "label": "#5f6368", "value": "#202124", "sub": "#5f6368", "up": "#137333", "down": "#a50e0e", "section": "#202124",
+        "line": "#dadce0", "accent": "#c62828", "track": "#e8eaed", "warn": "#a50e0e"
+      },
+      "knoepfe": {
+        "bg": "#fff", "fg": "#202124", "border": "#dadce0", "icoBg": "#fdecea", "icoFg": "#c62828",
+        "primBg": "#c62828", "primFg": "#fff", "primBorder": "#b71c1c", "primIcoBg": "rgba(255,255,255,.18)",
+        "navIcoBg": "#f1f3f4", "navIcoFg": "#3c4043", "chev": "#9aa0a6",
+        "shadow": "0 1px 2px rgba(60,64,67,.22), 0 1px 3px 1px rgba(60,64,67,.10)"
+      }
+    },
+    "dunkel": {
+      "name": "Dunkel",
+      "blatt": {
+        "page": "#18191c", "banner": "#c62828", "title": "#ffffff", "bannerSub": "#ffcdd2", "tile": "#232428", "tileBorder": "#34363b",
+        "label": "#9aa0a6", "value": "#f1f3f4", "sub": "#9aa0a6", "up": "#81c995", "down": "#f28b82", "section": "#e8eaed",
+        "line": "#3c4043", "accent": "#ff6b66", "track": "#3c4043", "warn": "#f28b82"
+      },
+      "knoepfe": {
+        "bg": "#2a2b30", "fg": "#e8eaed", "border": "#3f4148", "icoBg": "rgba(239,83,80,.16)", "icoFg": "#ff6b66",
+        "primBg": "#d32f2f", "primFg": "#fff", "primBorder": "#e53935", "primIcoBg": "rgba(255,255,255,.2)",
+        "navIcoBg": "#3a3b41", "navIcoFg": "#e8eaed", "chev": "#80868b",
+        "shadow": "0 1px 2px rgba(0,0,0,.55), 0 1px 3px 1px rgba(0,0,0,.25)"
+      }
+    },
+    "neutral": {
+      "name": "Hell-neutral",
+      "blatt": {
+        "page": "#ffffff", "banner": "#f1f3f4", "title": "#202124", "bannerSub": "#5f6368", "tile": "#ffffff", "tileBorder": "#dadce0",
+        "label": "#5f6368", "value": "#202124", "sub": "#5f6368", "up": "#137333", "down": "#c5221f", "section": "#202124",
+        "line": "#dadce0", "accent": "#1a73e8", "track": "#e8eaed", "warn": "#c5221f"
+      },
+      "knoepfe": {
+        "bg": "#fff", "fg": "#202124", "border": "#dadce0", "icoBg": "#e8f0fe", "icoFg": "#1a73e8",
+        "primBg": "#1a73e8", "primFg": "#fff", "primBorder": "#1967d2", "primIcoBg": "rgba(255,255,255,.2)",
+        "navIcoBg": "#f1f3f4", "navIcoFg": "#3c4043", "chev": "#9aa0a6",
+        "shadow": "0 1px 2px rgba(60,64,67,.22), 0 1px 3px 1px rgba(60,64,67,.10)"
+      }
+    }
+  }
+}

@@ -26,6 +26,8 @@ Mit den Knöpfen öffnest du **Karten erfassen** und den Import, startest den Pr
 
 Die Bilder der Knöpfe lädt das Tool beim Einrichten von GitHub. Fehlen sie (steht unten ein roter Hinweis), wähle später **Pokémon > Ansicht neu aufbauen**. Das Blatt baut das Tool selbst auf, eigene Änderungen daran gehen beim nächsten Neuaufbau verloren. **Pokémon > Dashboard** bringt dich von überall zurück.
 
+Das Dashboard kommt im Look Rot-weiß. Zwei weitere Looks, Dunkel und Hell-neutral, liegen als Konzept mit Vorschau in [`docs/dashboard`](docs/dashboard/README.md).
+
 ## Updates
 
 Gibt es eine neue Version, zeigen Seitenleiste und Web-App oben einen Hinweis. Unten in der Seitenleiste führt **Updates** (oder **Pokémon > Updates > Nach Updates suchen**) zum Bereich mit allen Neuerungen. Die alte Version läuft weiter, bis du selbst wechselst.
@@ -70,11 +72,11 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 | `src/` | Die Dateien, die ins Apps-Script-Projekt gehören: `Code.gs`, `Ui.html`, `Import.gs`, `ImportUi.html`, `Update.gs`, `appsscript.json` |
 | `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen |
 | `assets/` | `dashboard/`: die Bilder der Dashboard-Knöpfe, die Tabellen laden sie von hier |
-| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe |
+| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |
 | `test/` | Tests mit Apps-Script-Attrappen in Node (`npm install`, dann `npm test`) |
 | `backup/` | Version 1 des Codes, gegen die `test/test_integration.js` und `test/test_update.js` die Umstellung prüfen |
-| `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen |
+| `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen, in `dashboard/` die Looks des Dashboards |
 
 ## Lizenz
 
