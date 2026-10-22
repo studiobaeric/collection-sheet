@@ -335,6 +335,37 @@ t.section('Blätter öffnen, Dashboard, Import');
 }
 
 // ---------------------------------------------------------------------------
+t.section('Eigenes Blatt „Dashboard“ aus der Zeit vor 1.1.0');
+{
+  // Tabelle auf 1.0.x: TOOL_SHEETS ohne Dashboard, ein selbst angelegtes Blatt „Dashboard“; dann Code 1.1.0 von Hand
+  const env = setup();
+  env.ss.deleteSheet(dash(env));
+  env.ctx.settingSet_('TOOL_SHEETS', J(JSON.parse(env.setting('TOOL_SHEETS')).filter(n => n !== 'Dashboard')));
+  env.ctx.settingSet_('CODE_VERSION', '1.0.3');
+  env.ss.insertSheet('Dashboard').getRange('A1:B2').setValues([['Mein Ziel', 'Budget'], ['Glurak', 300]]);
+  env.ss.insertSheet('Dashboard (alt)').getRange('A1').setValue('noch älter');
+  env.ctx.kartenErfassen();
+  ok('eigenes Blatt bleibt als „Dashboard (alt 2)“, Inhalt unverändert', env.sheet('Dashboard (alt 2)') && env.sheet('Dashboard (alt 2)').getRange('B2').getValue() === 300 &&
+    env.sheet('Dashboard (alt)').getRange('A1').getValue() === 'noch älter', env.ss.list.map(s => s.name));
+  ok('Hinweis unten rechts', env.ss.toasts.some(m => /Dein Blatt „Dashboard“ heißt jetzt „Dashboard \(alt 2\)“/.test(m)), env.ss.toasts);
+  ok('Dashboard des Tools neu, vorne, mit Knöpfen', env.ss.list[0].name === 'Dashboard' && cell(env, 'C2') === 'Pokémon-Sammlung' && buttons(env).length === 11);
+  ok('jetzt in TOOL_SHEETS', JSON.parse(env.setting('TOOL_SHEETS')).indexOf('Dashboard') >= 0);
+  const n = env.ss.list.length;
+  env.ctx.ansichtNeuAufbauen();
+  ok('beim nächsten Aufbau: nichts umbenannt', env.ss.list.length === n && !env.sheet('Dashboard (alt 3)') && cell(env, 'C2') === 'Pokémon-Sammlung');
+  // Markierung verloren, aber in TOOL_SHEETS: bleibt das Dashboard des Tools
+  dash(env).getDeveloperMetadata().forEach(m => m.remove());
+  env.ctx.ansichtNeuAufbauen();
+  ok('ohne Markierung, aber in TOOL_SHEETS: nicht umbenannt, Markierung wieder da', env.ss.list.length === n &&
+    dash(env).getDeveloperMetadata().some(m => m.getKey() === 'pokemonToolDashboard'));
+  // ganz neue Tabelle (noch keine Einstellungen) mit eigenem Dashboard
+  const env2 = H.createEnv({ sheets: ['Tabellenblatt1', 'Dashboard'] });
+  env2.sheet('Dashboard').getRange('A1').setValue('Meins');
+  env2.ctx.setupAll_();
+  ok('neue Tabelle: eigenes Blatt als „Dashboard (alt)“', env2.sheet('Dashboard (alt)').getRange('A1').getValue() === 'Meins' && buttons(env2).length === 11);
+}
+
+// ---------------------------------------------------------------------------
 t.section('Code ohne Update.gs');
 {
   const env = H.createEnv({ files: ['Code.gs'] });

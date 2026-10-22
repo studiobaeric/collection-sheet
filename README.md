@@ -1,6 +1,6 @@
 # collection-sheet
 
-Ein Google-Sheets-Tool für Pokémon-Kartensammlungen. Karten werden über die [tcgdex-API](https://tcgdex.dev) gesucht und mit Bild, Set und Cardmarket-Trendpreis in einer durchsuchbaren Sammlung gespeichert. Eine Seitenleiste und eine Web-App fürs Handy fügen Karten hinzu, zählen sie hoch und runter und importieren bestehende Listen. Ein Pokédex-Blatt zeigt, welche Pokémon schon in der Sammlung sind.
+Ein Google-Sheets-Tool für Pokémon-Kartensammlungen. Karten werden über die [tcgdex-API](https://tcgdex.dev) gesucht und mit Bild, Set und Cardmarket-Trendpreis in einer durchsuchbaren Sammlung gespeichert. Eine Seitenleiste und eine Web-App fürs Handy fügen Karten hinzu, zählen sie hoch und runter und importieren bestehende Listen. Ein Pokédex-Blatt zeigt, welche Pokémon schon in der Sammlung sind. Ganz vorne fasst ein Dashboard die wichtigsten Zahlen zusammen und hat Knöpfe für die Funktionen des Menüs.
 
 Nicht verbunden mit Nintendo, Creatures, Game Freak oder The Pokémon Company. Kartenbilder und -daten kommen von tcgdex.
 
@@ -17,6 +17,14 @@ Das Tool läuft als Apps-Script-Projekt, das an eine Google-Tabelle gebunden ist
 Einen eigenen Menüpunkt zum Einrichten gibt es nicht. Fehlt später ein Blatt des Tools oder der nächtliche Preislauf, legt **Pokémon > Karten erfassen** sie beim Öffnen wieder an.
 
 Am Handy nutzt du die Web-App: Erweiterungen > Apps Script > **Bereitstellen > Neue Bereitstellung > Web-App**, dann den Link mit **Pokémon > Web-App-Link anzeigen** speichern.
+
+## Dashboard
+
+Das Blatt **Dashboard** steht ganz vorne. Es zeigt den Gesamtwert deiner Sammlung mit der Veränderung seit 7 Tagen, die Zahl deiner Karten, wie viele der 1025 Pokémon du schon hast, und den Wertverlauf der letzten 90 Tage. Die Zahlen rechnet das Tool nach jeder Änderung und nach jedem Preislauf neu.
+
+Mit den Knöpfen öffnest du **Karten erfassen** und den Import, startest den Preislauf, suchst nach Updates, lädst Sets und Übersetzung neu, baust die Ansicht neu auf oder holst den Handy-Link. Die Knöpfe in der Reihe „Blätter“ springen zu Sammlung, Pokédex, Verlauf und Seltenheiten. Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen; Karten erfasst du dort über die Web-App.
+
+Die Bilder der Knöpfe lädt das Tool beim Einrichten von GitHub. Fehlen sie (steht unten ein roter Hinweis), wähle später **Pokémon > Ansicht neu aufbauen**. Das Blatt baut das Tool selbst auf, eigene Änderungen daran gehen beim nächsten Neuaufbau verloren. **Pokémon > Dashboard** bringt dich von überall zurück.
 
 ## Updates
 
@@ -61,7 +69,8 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 | --- | --- |
 | `src/` | Die Dateien, die ins Apps-Script-Projekt gehören: `Code.gs`, `Ui.html`, `Import.gs`, `ImportUi.html`, `Update.gs`, `appsscript.json` |
 | `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen |
-| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`) |
+| `assets/` | `dashboard/`: die Bilder der Dashboard-Knöpfe, die Tabellen laden sie von hier |
+| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |
 | `test/` | Tests mit Apps-Script-Attrappen in Node (`npm install`, dann `npm test`) |
 | `backup/` | Version 1 des Codes, gegen die `test/test_integration.js` und `test/test_update.js` die Umstellung prüfen |

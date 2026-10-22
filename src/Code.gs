@@ -30,7 +30,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.0.3';
+const TOOL_VERSION = '1.1.0';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -4363,9 +4363,10 @@ const DASH_BUTTONS = [
  * Version gleich. Neue Bilder: Commit hier eintragen und DASH_ASSET_VERSION erhöhen, dann ersetzt das Update der
  * Tabelle (upgradeIfNeeded_) oder „Ansicht neu aufbauen“ die alten Knöpfe.
  */
-const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/main/assets/dashboard/';
+const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/9a3c8ea9774f452de13ed9df18f18f90bf3193eb/assets/dashboard/';
 const DASH_ASSET_VERSION = '1';
 const DASH_ALT_RE = /^Dashboard-Knopf ([\w-]+) v(\S+)$/;
+const DASH_META = 'pokemonToolDashboard'; // Entwickler-Metadaten am Blatt: das Dashboard des Tools
 const DASH_BTN_W = 276;
 const DASH_BTN_H = 52;
 const DASH_COLORS = {
@@ -4397,7 +4398,9 @@ function dashButtonCell_(i) {
 function setupDashboardSheet_(ss) {
   const c = DASH_COLORS;
   const prev = ss.getActiveSheet();
+  dashKeepForeign_(ss);
   const sh = getOrCreateSheet_(ss, SHEETS.dash);
+  if (!dashMarked_(sh)) sh.addDeveloperMetadata(DASH_META);
   ss.setActiveSheet(sh);
   ss.moveActiveSheet(1);
   if (prev && prev.getName() !== SHEETS.dash) ss.setActiveSheet(prev);
@@ -4461,6 +4464,26 @@ function setupDashboardSheet_(ss) {
   const dsh = ss.getSheetByName(SHEETS.data);
   refreshDashboard_(dsh ? readData_(dsh) : []);
   return missing;
+}
+
+/**
+ * Ein Blatt „Dashboard“, das nicht vom Tool stammt (vor 1.1.0 selbst angelegt), heißt danach „Dashboard (alt)“, statt
+ * dass der Aufbau es leert. Vom Tool ist es mit der Markierung DASH_META oder wenn es in TOOL_SHEETS der Tabelle steht.
+ */
+function dashKeepForeign_(ss) {
+  const sh = ss.getSheetByName(SHEETS.dash);
+  if (!sh || dashMarked_(sh)) return;
+  let stored = [];
+  try { stored = JSON.parse(settingGet_('TOOL_SHEETS') || '[]'); } catch (e) { stored = []; }
+  if (Array.isArray(stored) && stored.indexOf(SHEETS.dash) >= 0) return;
+  let name = SHEETS.dash + ' (alt)';
+  for (let i = 2; ss.getSheetByName(name); i++) name = SHEETS.dash + ' (alt ' + i + ')';
+  sh.setName(name);
+  notify_('Dein Blatt „' + SHEETS.dash + '“ heißt jetzt „' + name + '“. Das Tool legt sein eigenes Dashboard an.');
+}
+
+function dashMarked_(sh) {
+  try { return sh.getDeveloperMetadata().some(function (m) { return m.getKey() === DASH_META; }); } catch (e) { return false; }
 }
 
 /**

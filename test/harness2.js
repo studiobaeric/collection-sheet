@@ -301,7 +301,7 @@ class Sheet {
     this.d = []; this.f = []; this.formulas = {}; this.links = {}; this.disp = null; this.checkboxes = {};
     this.maxRows = opts.maxRows || 1000; this.maxCols = opts.maxCols || 26;
     this.hidden = false; this.frozen = 0; this.hiddenCols = {}; this.rowHeights = {}; this.charts = []; this.rules = [];
-    this.images = []; this.gridHidden = false;
+    this.images = []; this.gridHidden = false; this.meta = [];
     this.id = ++ss.env.sheetSeq;
   }
   get(R, C) { const row = this.d[R - 1]; const v = row ? row[C - 1] : undefined; return v === undefined || v === null ? '' : v; }
@@ -428,6 +428,10 @@ class Sheet {
     return img;
   }
   getImages() { return this.images.slice(); }
+  addDeveloperMetadata(key, value) { this.meta.push({ key: String(key), value: value == null ? null : String(value) }); return this; }
+  getDeveloperMetadata() {
+    return this.meta.map(m => ({ getKey: () => m.key, getValue: () => m.value, remove: () => { this.meta = this.meta.filter(x => x !== m); } }));
+  }
   copyTo(ss2) {
     let n = 'Kopie von ' + this.name;
     let i = 2;
@@ -449,6 +453,7 @@ function cloneSheet(sh, ss2, name) {
   c.gridHidden = sh.gridHidden;
   c.images = sh.images.map(i => Object.assign(new FakeImage(c, i.src, i.col, i.row, i.ox, i.oy),
     { script: i.script, title: i.title, desc: i.desc, w: i.w, h: i.h }));
+  c.meta = sh.meta.map(m => Object.assign({}, m));
   return c;
 }
 
