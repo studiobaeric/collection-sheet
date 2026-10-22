@@ -422,6 +422,26 @@ t.section('Neue Version holen: Name und Meldung nach der Version in der Vorlage'
   fs.rmSync(dir, { recursive: true, force: true });
 }
 {
+  // Vorabversion geholt, nicht übernommen, Vorabversionen aus, dann eine fertige Version: die Vorab-Kopie zählt nicht
+  const W = makeWorld();
+  W.release('1.0.0'); W.release('1.1.0');
+  const env = setupEnv(W);
+  const main = addTemplate(env, W, '1.1.0');
+  const beta = addTemplate(env, W, '1.2.0-beta.1', BETA_ID);
+  W.release('1.2.0-beta.1', { prerelease: true, templateUrl: 'https://docs.google.com/spreadsheets/d/' + BETA_ID + '/copy' });
+  env.ctx.settingSet_('PRERELEASES', '1');
+  const b = env.uiCall('updateCopy');
+  t.ok('Vorabversion geholt', b.state === 'copied' && b.version === '1.2.0-beta.1' && env.setting('NEW_COPY_VERSION') === '1.2.0-beta.1', b);
+  env.uiCall('setPrereleases', false);
+  t.ok('Vorabversionen aus: die Vorab-Kopie gilt nicht für 1.1.0', env.uiCall('getUpdateInfo', false).newCopy === null);
+  const f = env.uiCall('updateCopy');
+  t.ok('Vorabversionen aus: eine neue Tabelle mit 1.1.0', f.state === 'copied' && !f.existing && f.version === '1.1.0' && env.backups.length === 2, f);
+  env.uiCall('setPrereleases', true);
+  t.eq('wieder an: Ziel ist die Vorabversion, die 1.1.0-Kopie reicht dafür nicht', env.uiCall('getUpdateInfo', false).newCopy, null);
+  fs.rmSync(main.dir, { recursive: true, force: true });
+  fs.rmSync(beta.dir, { recursive: true, force: true });
+}
+{
   // Die Liste kündigt 1.1.0 an, die Vorlage hat noch 1.0.5: keine Kopie
   const W = makeWorld();
   W.release('1.0.0'); W.release('1.1.0');

@@ -204,12 +204,15 @@ function updateCopy() {
 
 /**
  * Die schon angelegte neue Tabelle mit dieser oder einer neueren Version, solange es sie gibt (nicht im Papierkorb).
- * -> {url, version} oder null
+ * Eine neuere Vorabversion zählt nur, solange Vorabversionen an sind. -> {url, version} oder null
  */
 function updExistingCopy_(version) {
   const url = settingGet_('NEW_COPY_URL');
   const have = settingGet_('NEW_COPY_VERSION');
-  if (!url || !updParse_(have) || updCompare_(have, version) < 0) return null;
+  const h = updParse_(have);
+  if (!url || !h) return null;
+  const cmp = updCompare_(have, version);
+  if (cmp < 0 || (cmp > 0 && h.pre.length && settingGet_('PRERELEASES') !== '1')) return null;
   try {
     return DriveApp.getFileById(updSheetId_(url)).isTrashed() ? null : { url: url, version: have };
   } catch (e) {

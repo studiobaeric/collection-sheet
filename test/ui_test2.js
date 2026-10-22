@@ -1097,7 +1097,7 @@ function boot(mode, opts) {
       J(E.calls('takeoverPreview')[0].args) === J([OLD]) && !$('paneUpd').classList.contains('hidden'));
     ok('Leiste: Übernahme', /Übernimm jetzt die Daten/.test($('updBar').textContent));
     ok('Übernahme erklärt die gelbe Leiste von Google', /gelbe Leiste/.test($('takeBox').textContent) && /Zugriff erlauben/.test($('takeBox').textContent) &&
-      /Bilder leer/.test($('takeBox').textContent));
+      /fehlen die Kartenbilder/.test($('takeBox').textContent));
     await E.respond('takeoverPreview');
     ok('Vorschau da, Knopf Jetzt übernehmen', !!E.btn($('takeMsg'), 'Jetzt übernehmen'));
     E.win.updLoad(false);

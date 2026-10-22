@@ -6,13 +6,13 @@ Nicht verbunden mit Nintendo, Creatures, Game Freak oder The Pokémon Company. K
 
 ## Stand
 
-Version 1.0.0. Das Tool läuft als Apps-Script-Projekt, das an eine Google-Tabelle gebunden ist. Neue Nutzer starten mit einer Kopie der [Vorlage](https://docs.google.com/spreadsheets/d/18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE/copy).
+Das Tool läuft als Apps-Script-Projekt, das an eine Google-Tabelle gebunden ist. Neue Nutzer starten mit einer Kopie der [Vorlage](https://docs.google.com/spreadsheets/d/18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE/copy).
 
 ## Einrichten
 
 1. Öffne die [Vorlage](https://docs.google.com/spreadsheets/d/18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE/copy) und klicke auf **Kopie erstellen**. Die Kopie landet in deiner „Meine Ablage“.
 2. Öffne in deiner Kopie **Pokémon > Karten erfassen**. Google fragt einmal nach den Berechtigungen des Skripts. Erscheint „Google hat diese App nicht überprüft“, klicke auf **Erweitert**, dann auf **Weiter zu … (unsicher)** und auf **Zulassen**. Das Skript gehört zu deiner eigenen Kopie und läuft nur in deinem Konto.
-3. Beim ersten Öffnen richtet sich die Kopie selbst ein: Blätter, nächtlicher Preislauf und die Liste der Sets. Zeigt Google oben eine gelbe Leiste „Einige Formeln erfordern das Versenden und Empfangen von Daten externer Nutzer“, klicke auf **Zugriff erlauben**. Gemeint sind die Kartenbilder: Die Tabelle lädt sie mit `IMAGE`-Formeln von tcgdex.net. Dabei geht nur die Bildadresse der Karte an tcgdex, deine Sammlung bleibt in der Tabelle. Ohne Freigabe bleiben nur die Bilder leer.
+3. Beim ersten Öffnen richtet sich die Kopie selbst ein: Blätter, nächtlicher Preislauf und die Liste der Sets. Zeigt Google oben eine gelbe Leiste „Einige Formeln erfordern das Versenden und Empfangen von Daten externer Nutzer“, klicke auf **Zugriff erlauben**. Gemeint sind die Kartenbilder: Die Tabelle lädt sie mit `IMAGE`-Formeln von tcgdex.net. Dabei geht nur die Bildadresse der Karte an tcgdex, deine Sammlung bleibt in der Tabelle. Ohne Freigabe fehlen die Kartenbilder.
 
 Am Handy nutzt du die Web-App: Erweiterungen > Apps Script > **Bereitstellen > Neue Bereitstellung > Web-App**, dann den Link mit **Pokémon > Web-App-Link anzeigen** speichern.
 

@@ -1369,12 +1369,12 @@ function updOutdatedText() {
 }
 function updFoot() { $('updVer').textContent = UPD && UPD.installed ? 'Version ' + UPD.installed + ' · ' : ''; }
 
-/** Was nach „Neue Version holen“ in der neuen Tabelle zu tun ist. */
 /** Gelbe Leiste von Google in jeder neuen Kopie: erklären, was sie meint (die IMAGE-Formeln der Kartenbilder). */
 var UPD_IMAGE_HINT = 'Zeigt Google oben eine gelbe Leiste „Einige Formeln erfordern das Versenden und Empfangen von Daten externer Nutzer“: ' +
   'auf Zugriff erlauben klicken. Gemeint sind die Kartenbilder, die Tabelle lädt sie von tcgdex.net. Dabei geht nur die Bildadresse der Karte an tcgdex, ' +
-  'deine Sammlung bleibt in der Tabelle. Ohne Freigabe bleiben nur die Bilder leer.';
+  'deine Sammlung bleibt in der Tabelle. Ohne Freigabe fehlen die Kartenbilder.';
 
+/** Was nach „Neue Version holen“ in der neuen Tabelle zu tun ist. */
 function updSteps(url) {
   return '<ol class="rel"><li>' + (url ? updLink(url, 'Neue Tabelle öffnen') : 'Die neue Tabelle öffnen') + '.</li>' +
     '<li>Dort auf Pokémon > Karten erfassen klicken und den Zugriff erlauben. Google fragt bei jeder neuen Tabelle einmal.</li>' +
