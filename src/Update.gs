@@ -1,3 +1,8 @@
+/* ==========================================================================
+ *  Pokémon-Sammlung · Version 1.1.0
+ *  https://github.com/studiobaeric/collection-sheet
+ * ========================================================================== */
+
 /**
  * Update.gs – neue Versionen auf GitHub finden, neue Tabelle aus der Vorlage anlegen, Übernahme aus einer alten
  * Tabelle, alte Tabelle stilllegen und wieder benutzen. Braucht Code.gs (TOOL_VERSION, Einstellungen aus
@@ -291,14 +296,14 @@ function updMakeCopy_(ch, rel) {
 
 /** Blätter, deren Werte 1:1 übernommen werden (Reihenfolge = Reihenfolge der Anzeige in der Vorschau). */
 function updTakeoverSheets_() {
-  return [SHEETS.data, SHEETS.hist, SHEETS.imports, SHEETS.proto, 'Import-Begriffe', 'Import-Sets', 'Import-Vorlagen',
+  return [SHEETS.data, SHEETS.hist, SHEETS.cardHist, SHEETS.imports, SHEETS.proto, 'Import-Begriffe', 'Import-Sets', 'Import-Vorlagen',
     'Import-Antworten', SHEETS.rarity, SHEETS.dexIds, SHEETS.sets, SHEETS.tr];
 }
 
 /** Kopfzeilen der übernommenen Blätter (für alte Tabellen ohne TOOL_SHEETS). */
 function updTakeoverHeads_() {
   const m = {};
-  m[SHEETS.hist] = HIST_HEADERS; m[SHEETS.proto] = PROTO_HEADERS; m[SHEETS.rarity] = RARITY_HEADERS;
+  m[SHEETS.hist] = HIST_HEADERS; m[SHEETS.cardHist] = CARD_HIST_HEADERS; m[SHEETS.proto] = PROTO_HEADERS; m[SHEETS.rarity] = RARITY_HEADERS;
   m[SHEETS.dexIds] = DEX_IDS_HEADERS; m[SHEETS.sets] = SET_HEADERS; m[SHEETS.tr] = TR_HEADERS;
   if (typeof IMPORTE_HEADERS !== 'undefined') {
     m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
@@ -320,6 +325,7 @@ function updOldToolSheets_(old, st) {
     names.forEach(function (n) { out[n] = true; });
   } else {
     toolSheetNames_().forEach(function (n) { out[n] = true; });
+    delete out[SHEETS.dash]; // das Dashboard gibt es erst seit 1.1.0, ein Blatt mit dem Namen gehört dem Nutzer
     const heads = updTakeoverHeads_();
     Object.keys(heads).forEach(function (n) {
       const sh = old.getSheetByName(n);
@@ -495,12 +501,16 @@ function updCopyValues_(src, dst) {
   return lr - 1;
 }
 
-/** Zusatzspalten der Sammlung einer Tabelle vor 1.0: Kopfzeile 5 hinter den festen Spalten. */
+/**
+ * Zusatzspalten der Sammlung einer Tabelle vor 1.0: Kopfzeile 5 hinter den festen Spalten. Die enden in jeder Version
+ * mit „Preisstand“ (vor 1.1.0 waren es 13, seitdem 16 feste Spalten).
+ */
 function updOldViewExtras_(old) {
   const sh = old.getSheetByName(SHEETS.view);
-  if (!sh || sh.getLastColumn() <= VIEW_HEADERS.length) return [];
-  return sh.getRange(5, VIEW_HEADERS.length + 1, 1, sh.getLastColumn() - VIEW_HEADERS.length).getValues()[0]
-    .map(function (v) { return String(v == null ? '' : v).trim(); }).filter(Boolean);
+  if (!sh || sh.getLastColumn() < 1) return [];
+  const head = sh.getRange(5, 1, 1, sh.getLastColumn()).getValues()[0].map(function (v) { return String(v == null ? '' : v).trim(); });
+  const end = head.indexOf(VIEW_HEADERS[VIEW_HEADERS.length - 1]);
+  return head.slice(end >= 0 ? end + 1 : VIEW_HEADERS.length).filter(Boolean);
 }
 
 /**

@@ -1,6 +1,6 @@
 # collection-sheet
 
-Ein Google-Sheets-Tool für Pokémon-Kartensammlungen. Karten werden über die [tcgdex-API](https://tcgdex.dev) gesucht und mit Bild, Set und Cardmarket-Trendpreis in einer durchsuchbaren Sammlung gespeichert. Eine Seitenleiste und eine Web-App fürs Handy fügen Karten hinzu, zählen sie hoch und runter und importieren bestehende Listen. Ein Pokédex-Blatt zeigt, welche Pokémon schon in der Sammlung sind.
+Ein Google-Sheets-Tool für Pokémon-Kartensammlungen. Karten werden über die [tcgdex-API](https://tcgdex.dev) gesucht und mit Bild, Set und Cardmarket-Trendpreis in einer durchsuchbaren Sammlung gespeichert. Eine Seitenleiste und eine Web-App fürs Handy fügen Karten hinzu, zählen sie hoch und runter und importieren bestehende Listen. Die Sammlung lässt sich nach Name, Nummer oder Künstler durchsuchen und zeigt, wie sich der Preis jeder Karte entwickelt. Ein Pokédex-Blatt zeigt, welche Pokémon schon in der Sammlung sind. Ganz vorne fasst ein Dashboard die wichtigsten Zahlen zusammen und hat Knöpfe für die Funktionen des Menüs.
 
 Nicht verbunden mit Nintendo, Creatures, Game Freak oder The Pokémon Company. Kartenbilder und -daten kommen von tcgdex.
 
@@ -18,9 +18,27 @@ Einen eigenen Menüpunkt zum Einrichten gibt es nicht. Fehlt später ein Blatt d
 
 Am Handy nutzt du die Web-App: Erweiterungen > Apps Script > **Bereitstellen > Neue Bereitstellung > Web-App**, dann den Link mit **Pokémon > Web-App-Link anzeigen** speichern.
 
+## Dashboard
+
+Das Blatt **Dashboard** steht ganz vorne, und am Computer startet die Tabelle immer dort. Es zeigt den Gesamtwert deiner Sammlung mit der Veränderung seit 7 Tagen, die Zahl deiner Karten, wie viele der 1025 Pokémon du schon hast, und den Wertverlauf der letzten 90 Tage. Die Zahlen rechnet das Tool nach jeder Änderung und nach jedem Preislauf neu.
+
+Mit den Knöpfen öffnest du **Karten erfassen** und den Import, startest den Preislauf, suchst nach Updates, lädst Sets und Übersetzung neu, baust die Ansicht neu auf oder holst den Handy-Link. Die Knöpfe in der Reihe „Blätter“ springen zu Sammlung, Pokédex, Verlauf und Seltenheiten. Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen; Karten erfasst du dort über die Web-App.
+
+Die Bilder der Knöpfe lädt das Tool beim Einrichten von GitHub. Fehlen sie (steht unten ein roter Hinweis), wähle später **Pokémon > Ansicht neu aufbauen**. Das Blatt baut das Tool selbst auf, eigene Änderungen daran gehen beim nächsten Neuaufbau verloren. **Pokémon > Dashboard** bringt dich von überall zurück.
+
+Das Dashboard kommt im Look Rot-weiß. Zwei weitere Looks, Dunkel und Hell-neutral, liegen als Konzept mit Vorschau in [`docs/dashboard`](docs/dashboard/README.md).
+
+## Sammlung: Suche und Preisverlauf
+
+Das Suchfeld der Sammlung (im Blatt wie in Seitenleiste und Web-App) findet Karten über Name, Nummer, Sonderversion oder Künstler: „Arita“ zeigt alle Karten von Mitsuhiro Arita, „Arita 025“ nur die mit Nummer 025. Seitenleiste und Web-App zeigen den Künstler unter jeder Karte.
+
+Der nächtliche Preislauf merkt sich den Cardmarket-Trendpreis jeder Karte (je Variante) im versteckten Blatt „Kartenverlauf“, immer wenn er sich ändert. Daraus zeigt die Sammlung, wie sich der Preis einer Karte verändert hat, in Euro und Prozent, grün bei Plus und rot bei Minus. Das Blatt Sammlung rechnet über 30 Tage, Seitenleiste und Web-App schalten zwischen 7, 30 und 90 Tagen um. Solange es den Verlauf einer Karte noch nicht so lange gibt, zählt er ab ihrem ersten Tag, und das Datum steht dabei („seit 23.10.“). Klappst du eine Karte in Seitenleiste oder Web-App auf, siehst du ihre Preiskurve.
+
+Die Veränderung gilt für den Preis einer Karte, nicht mal Anzahl. Karten mit eigenem Preis bekommen keine Veränderung, weil ihr Wert nicht Cardmarket folgt; der Preislauf ruft sie trotzdem ab, damit ihre Kurve den Trend zeigt.
+
 ## Updates
 
-Gibt es eine neue Version, zeigen Seitenleiste und Web-App oben einen Hinweis. Unten in der Seitenleiste führt **Updates** (oder **Pokémon > Updates > Nach Updates suchen**) zum Bereich mit allen Neuerungen. Die alte Version läuft weiter, bis du selbst wechselst.
+Gibt es eine neue Version, zeigen Seitenleiste und Web-App oben einen Hinweis. Unten in der Seitenleiste führt **Updates** (oder **Pokémon > Updates > Nach Updates suchen**) zum Bereich mit allen Neuerungen. Die alte Version läuft weiter, bis du selbst wechselst. Was jede Version geändert hat, steht auch in [CHANGELOG.md](CHANGELOG.md).
 
 Google erlaubt einem Skript in einer Tabelle nicht, seinen eigenen Code zu ersetzen. Eine neue Version kommt deshalb als neue Tabelle:
 
@@ -35,7 +53,7 @@ Wer Tabelle und Handy-Link behalten will, kann den Code auch von Hand einfügen 
 
 ## Aus alter Tabelle übernehmen
 
-In einer neuen, leeren Tabelle (über „Neue Version holen“ oder eine Kopie der Vorlage): **Pokémon > Updates > Aus alter Tabelle übernehmen**, den Link der alten Tabelle einfügen, **Prüfen**, dann **Jetzt übernehmen**. Übernommen werden alle Karten, Importe samt Protokoll, der Verlauf, Seltenheiten, Übersetzungen, Einstellungen der Sammlung, die Freigaben und deine eigenen Blätter. Heißt ein eigenes Blatt so wie ein Blatt des Tools, kommt es als „… (alt)“ mit. Eigene Änderungen am Skript kommen nicht mit. Die Web-App bekommt in der neuen Tabelle einen neuen Link.
+In einer neuen, leeren Tabelle (über „Neue Version holen“ oder eine Kopie der Vorlage): **Pokémon > Updates > Aus alter Tabelle übernehmen**, den Link der alten Tabelle einfügen, **Prüfen**, dann **Jetzt übernehmen**. Übernommen werden alle Karten, Importe samt Protokoll, der Verlauf, der Preisverlauf jeder Karte, Seltenheiten, Übersetzungen, Einstellungen der Sammlung, die Freigaben und deine eigenen Blätter. Heißt ein eigenes Blatt so wie ein Blatt des Tools, kommt es als „… (alt)“ mit. Eigene Änderungen am Skript kommen nicht mit. Die Web-App bekommt in der neuen Tabelle einen neuen Link.
 
 Bricht die Übernahme ab (zum Beispiel weil Google eine Ausführung nach sechs Minuten beendet), bleibt die alte Tabelle, wie sie war. Öffne die neue Tabelle dann noch einmal über **Pokémon > Karten erfassen** und klicke wieder auf **Jetzt übernehmen**. Was schon übernommen war, wird dabei ersetzt; trag bis dahin also nichts in der neuen Tabelle ein. Sagt die Seitenleiste, dass die Übernahme gerade läuft, warte zwei Minuten und öffne sie dann noch einmal.
 
@@ -49,7 +67,7 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 2. Öffne deine Tabelle und klicke auf **Erweiterungen > Apps Script**.
 3. Klicke links auf das Zahnrad (**Projekteinstellungen**) und hake **Manifestdatei „appsscript.json“ im Editor anzeigen** an.
 4. Ersetze den Inhalt dieser Dateien jeweils komplett durch den aus `src`: `Code.gs`, `Import.gs`, `Update.gs`, `Ui.html`, `ImportUi.html` und `appsscript.json`. Fehlt eine Datei, lege sie über **+** an (Skript oder HTML) und gib ihr den Namen ohne Endung, zum Beispiel `Update` oder `ImportUi`.
-5. Speichere mit dem Disketten-Symbol.
+5. Speichere mit dem Disketten-Symbol. Ab 1.1.0 steht ganz oben in jeder Script- und HTML-Datei „Pokémon-Sammlung · Version …“, so siehst du, ob alle Dateien auf demselben Stand sind (`appsscript.json` hat keinen Kommentar, JSON kennt keine).
 6. Lade die Tabelle neu und öffne **Pokémon > Karten erfassen**. Google fragt nach neuen Berechtigungen, falls die Version welche braucht (bei „Google hat diese App nicht überprüft“: **Erweitert**, **Weiter zu … (unsicher)**, **Zulassen**). Die Blätter bringt das Tool dabei selbst auf den neuen Stand.
 7. Nutzt du die Web-App: **Bereitstellen > Bereitstellungen verwalten**, auf den Stift klicken, prüfen, ob „Ausführen als“ und „Zugriff“ noch stimmen, bei Version **Neue Version** wählen und **Bereitstellen**. Der Link bleibt gleich.
 
@@ -60,12 +78,14 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 | Ordner | Inhalt |
 | --- | --- |
 | `src/` | Die Dateien, die ins Apps-Script-Projekt gehören: `Code.gs`, `Ui.html`, `Import.gs`, `ImportUi.html`, `Update.gs`, `appsscript.json` |
-| `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen |
-| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`) |
+| `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen (die Neuerungen kommen aus `CHANGELOG.md`) |
+| `.github/` | `workflows/release.yml` legt beim Tag `v…` den GitHub-Release mit den Neuerungen aus `CHANGELOG.md` an |
+| `assets/` | `dashboard/`: die Bilder der Dashboard-Knöpfe, die Tabellen laden sie von hier |
+| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |
 | `test/` | Tests mit Apps-Script-Attrappen in Node (`npm install`, dann `npm test`) |
 | `backup/` | Version 1 des Codes, gegen die `test/test_integration.js` und `test/test_update.js` die Umstellung prüfen |
-| `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen |
+| `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen, in `dashboard/` die Looks des Dashboards |
 
 ## Lizenz
 

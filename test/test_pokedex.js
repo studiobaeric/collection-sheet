@@ -86,7 +86,7 @@ t.section('Einrichtung');
   const env = setup();
   const names = env.ss.list.map(s => s.name);
   ok('Blätter angelegt', ['Pokédex', 'Pokédex-Daten', 'Seltenheiten'].every(n => names.indexOf(n) >= 0), names);
-  eq('Sammlung vorne, Pokédex an zweiter Stelle', names.slice(0, 2), ['Sammlung', 'Pokédex']);
+  eq('Dashboard vorne, dann Sammlung und Pokédex', names.slice(0, 3), ['Dashboard', 'Sammlung', 'Pokédex']);
   ok('Pokédex-Daten versteckt, Pokédex und Seltenheiten sichtbar',
     env.sheet('Pokédex-Daten').hidden && !env.sheet('Pokédex').hidden && !env.sheet('Seltenheiten').hidden);
   ok('Sammlung bleibt aktiv', env.ss.getActiveSheet().getName() === 'Sammlung', env.ss.getActiveSheet().getName());
@@ -114,7 +114,7 @@ t.section('Einrichtung');
   env.ctx.setupAll_();
   eq('Filter bleiben bei erneuter Einrichtung', [sh.getRange('B4:D4').getValues()[0], sh.getRange('I4').getValue()], [['Fehlend', 2, 'Pi'], '#25 Pikachu']);
   eq('eigene Stufe bleibt', ssh.getRange(r, 2).getValue(), 7);
-  eq('Pokédex weiter an zweiter Stelle', env.ss.list.map(x => x.name).slice(0, 2), ['Sammlung', 'Pokédex']);
+  eq('Reihenfolge bleibt bei erneuter Einrichtung', env.ss.list.map(x => x.name).slice(0, 3), ['Dashboard', 'Sammlung', 'Pokédex']);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ t.section('Ohne gemerkte Nummer: Name; Preislauf holt sie nach');
   eq('nach dem Preislauf gemerkt (sv1-1 ohne dexId bei tcgdex: leer)', env.objects('Pokédex-Nummern').map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]).sort(),
     [['sv1-1', ''], ['swsh3-136', '6']]);
   eq('Mewtu weiter über den Namen', dexRow(env, 150).Karten, 1);
-  eq('zweiter Preislauf: Karte mit eigenem Preis nicht mehr abgerufen', env.ctx.priceTargets_().map(x => x.id), ['sv1-1']);
+  eq('zweiter Preislauf: Karte mit eigenem Preis weiter abgerufen (für ihre Preiskurve)', env.ctx.priceTargets_().map(x => x.id), ['sv1-1', 'swsh3-136']);
   eq('eigener Preis zählt im Wert', dexRow(env, 6)['Wert (EUR)'], 99);
 }
 

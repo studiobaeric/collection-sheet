@@ -364,6 +364,22 @@ function boot(mode, opts) {
     ok('showTab(import) ohne impInit wirft nicht', !threw && E.errors.length === 0, E.errors);
   }
 
+  // ---- Knopf „Importieren“ im Dashboard: Seitenleiste startet im Bereich Import (der steht erst nach dem Hauptskript) ----
+  {
+    const E = boot('sidebar', { start: 'import' });
+    const { $ } = E;
+    await E.startup();
+    ok('start=import: Bereich Import offen, impInit einmal', !$('paneImport').classList.contains('hidden') && $('tabImport').classList.contains('active') &&
+      $('paneAdd').classList.contains('hidden') && E.win.impInitCalls === 1, [$('paneImport').className, E.win.impInitCalls]);
+    ok('keine Skriptfehler (Start Import)', E.errors.length === 0, E.errors);
+    const E2 = boot('sidebar', { start: 'import', include: '' });
+    await E2.startup();
+    ok('start=import ohne ImportUi: Hinzufügen', !E2.$('paneAdd').classList.contains('hidden') && E2.$('tabAdd').classList.contains('active') && E2.errors.length === 0, E2.errors);
+    const E3 = boot('web', { start: 'import' });
+    await E3.startup();
+    ok('start=import in der Web-App: Hinzufügen', !E3.$('paneAdd').classList.contains('hidden') && E3.$('paneImport').classList.contains('hidden') && E3.errors.length === 0, E3.errors);
+  }
+
   // ---- getUiConfig schlägt fehl: eingebaute Liste bleibt ----
   {
     const E = boot('web');
