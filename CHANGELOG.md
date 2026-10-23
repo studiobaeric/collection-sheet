@@ -7,7 +7,7 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein Punkt in einer Zeile, aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende.
 
-## [1.1.0] – 2026-10-22
+## [1.1.0] – 2026-10-23
 
 - Neues Blatt „Dashboard“ ganz vorne: Gesamtwert mit Veränderung seit 7 Tagen, Anzahl Karten, Pokédex-Fortschritt und Wertverlauf der letzten 90 Tage. Am Computer startet die Tabelle dort
 - Knöpfe im Dashboard für Karten erfassen, Preise aktualisieren, Importieren, Updates, Sets und Übersetzung, Ansicht neu aufbauen und den Handy-Link, dazu Knöpfe zu Sammlung, Pokédex, Verlauf und Seltenheiten
