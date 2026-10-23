@@ -352,7 +352,7 @@ function extractRow_(rec, cfg, terms) {
   const fromCols = {};
   const direct = {
     variant: erVariantCode_, cond: erCondCode_, lang: erLangCode_,
-    version: function (x) { return ''; }
+    version: function () { return ''; }
   };
   ['variant', 'cond', 'lang', 'version'].forEach(function (f) {
     const t = get(f);

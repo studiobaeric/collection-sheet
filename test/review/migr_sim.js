@@ -484,7 +484,7 @@ let dataAfterSidebar = null;
     n.onOpen();
     const msgB = n.setupAll_();
     console.log('   Meldung:', msgB);
-    t.ok('B: Meldung nennt die Umstellung', /6 Einträge auf das neue Datenformat umgestellt/.test(msgB || ''), msgB);
+    t.ok('B: umgestellt (seit 1.0.3 ohne Zahl in der Meldung)', /Einrichtung fertig/.test(msgB || '') && e2.setting('SCHEMA_VERSION') === '2', msgB);
     t.ok('B: Trigger nicht doppelt', J(e2.triggers.map(x => x.fn).sort()) === J(['beiStrukturAenderung', 'naechtlicherPreislauf']));
     t.ok('B: Formel auf Gruppen', /Gruppen!A2:W/.test(e2.sheet('Sammlung').getRange('A6').getFormula()));
     t.ok('B: 5 Gruppen', e2.objects('Gruppen').length === 5);
