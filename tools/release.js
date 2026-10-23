@@ -32,6 +32,10 @@ const SHEET_URL = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]{20,}/;
 const HEADER_FILES = ['src/Code.gs', 'src/Import.gs', 'parts/00_shared.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
 const HEADER_RE = /Pokémon-Sammlung · Version (\S+)/;
 const HEADER_LINES = 8; // der Kopf muss in den ersten Zeilen stehen
+/** Release-Notizen sind kurze Stichpunkte (Eric, 23.10.2026); längere Punkte meldet das Werkzeug als Hinweis */
+const NOTE_MAX = 70;
+const longNotes = notes => cleanNotes(notes).filter(n => n.length > NOTE_MAX)
+  .map(n => 'Punkt länger als ' + NOTE_MAX + ' Zeichen, bitte als Stichpunkt kürzen: „' + n + '“');
 /** Überschrift eines Abschnitts in CHANGELOG.md: „## [1.2.0]“ oder „## [1.2.0] – 2026-11-01“ */
 const SECTION_RE = /^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\](?:\s+[–-]\s+(\d{4}-\d{2}-\d{2}))?\s*$/;
 
@@ -232,6 +236,7 @@ function check(code, ch, read) {
   if (rel.templateUrl && !SHEET_URL.test(rel.templateUrl)) diffs.push('templateUrl ist kein Tabellen-Link');
   if (rel.files || rel.scopes) diffs.push('alte Felder files/scopes (die Tabellen laden keinen Code mehr)');
   changelogDiffs(ch, changelog).forEach(d => diffs.push(d));
+  longNotes(rel.notes).forEach(w => warnings.push(w));
   const tpl = rel.templateUrl || (rel.prerelease ? '' : ch.templateUrl);
   if (!tpl) warnings.push(rel.prerelease ? 'Diese Vorabversion hat keine eigene Vorlage (--template): Freiwillige bekommen sie nur von Hand.'
     : 'Der Kanal hat noch keine Vorlage (--main-template): „Neue Version holen“ erscheint in den Tabellen nicht.');
@@ -345,6 +350,7 @@ function main() {
     ', ' + entry.notes.length + ' Punkte aus CHANGELOG.md.');
   if (date !== sec.date) console.log('Datum ' + date + ' in CHANGELOG.md eingetragen.');
   if (synced.length) console.log('Notizen aus CHANGELOG.md übernommen für ' + synced.join(', ') + '.');
+  longNotes(entry.notes).forEach(w => console.log('Hinweis: ' + w));
   if (stamped.length) console.log('Version oben eingetragen in ' + stamped.join(', ') + '.');
   if (entry.prerelease && !entry.templateUrl) console.log('Achtung: Ohne --template können Freiwillige diese Vorabversion nur von Hand einfügen.');
   console.log('Weiter: ' + (entry.prerelease

@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.0
+ *  Pokémon-Sammlung · Version 1.1.1
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -136,7 +136,8 @@ function truthyCell_(v) {
 /**
  * Alle Zeilen der Prüfung als Objekte:
  * {row (1-basiert), fp, srcRows: [], values: {} (extrahierte Felder inkl. raw), qty, status, reason,
- *  candidates: [], decision: {type, id?, lang?, variant?} | null, card: {} | null, prefilled, confirmed}
+ *  candidates: [], decision: {type, id?, lang?, variant?, auto?} | null, card: {} | null, prefilled, confirmed}
+ * decision.auto: vom Tool vorausgewählt (freie Karte), nicht von dir
  */
 function reviewRead_() {
   const sh = ss_().getSheetByName(IMP_SHEETS.review);
@@ -232,6 +233,7 @@ function answersLoad_(sourceId) {
 
 /**
  * Antworten einfügen oder ersetzen. list = [{fp, decision ({type:''} oder null löscht), card}].
+ * Vorauswahlen (decision.auto) werden nicht gespeichert und lassen eine gespeicherte Antwort stehen.
  * Innerhalb des Locks aufrufen.
  */
 function answersUpsert_(sourceId, list) {
@@ -245,6 +247,7 @@ function answersUpsert_(sourceId, list) {
   rows.forEach(function (r, i) { if (String(r[0]) === String(sourceId)) index[String(r[1])] = i; });
   const today = todayText_();
   list.forEach(function (a) {
+    if (a.decision && a.decision.auto) return; // Vorauswahl ist keine Antwort von dir
     const del = !a.decision || !a.decision.type;
     const i = index[a.fp];
     if (del) {

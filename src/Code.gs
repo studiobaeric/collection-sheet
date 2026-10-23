@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.0
+ *  Pokémon-Sammlung · Version 1.1.1
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -35,7 +35,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.1.0';
+const TOOL_VERSION = '1.1.1';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -261,7 +261,54 @@ function withLock_(fn) {
 
 function notify_(msg, title) {
   Logger.log(msg);
+  if (busyNotes_) busyNotes_.push(String(msg)); // die nächste Laufmeldung ersetzt sie gleich, notifyDone_ zeigt sie wieder
   try { ss_().toast(msg, title || 'Pokémon', 10); } catch (e) { /* kein UI */ }
+}
+
+/** Hinweise (notify_), die während einer Laufmeldung kamen; notifyDone_ hängt sie an die Fertig-Meldung. */
+let busyNotes_ = null;
+
+/**
+ * Meldung unten rechts, die stehen bleibt, bis die nächste sie ersetzt: So sieht man, dass das Skript noch läuft (#29).
+ * Am Ende immer mit notifyDone_ abschließen, auch bei einem Fehler.
+ */
+function notifyBusy_(msg) {
+  Logger.log(msg);
+  if (!busyNotes_) busyNotes_ = [];
+  try { ss_().toast(msg, 'Pokémon · läuft …', -1); } catch (e) { /* kein UI */ }
+}
+
+/** Ersetzt die Laufmeldung durch eine normale Meldung, mit den Hinweisen, die unterwegs kamen. */
+function notifyDone_(msg) {
+  const notes = busyNotes_ || [];
+  busyNotes_ = null;
+  notify_([msg].concat(notes).join(' '));
+}
+
+/** Zählt Schritte für notifyBusy_: busySteps_('Einrichtung', 5)('Sammlung aufbauen') -> „Einrichtung läuft (1 von 5): Sammlung aufbauen …“ */
+function busySteps_(what, total) {
+  let n = 0;
+  return function (step) {
+    n = Math.min(n + 1, total);
+    notifyBusy_(what + ' läuft (' + n + ' von ' + total + '): ' + step + ' …');
+  };
+}
+
+/** Das Dashboard zeigen (Start, nach Einrichtung und Übernahme); ein verstecktes bleibt versteckt. */
+function showDashboard_() {
+  try {
+    const dash = ss_().getSheetByName(SHEETS.dash);
+    if (dash && !dash.isSheetHidden()) ss_().setActiveSheet(dash);
+  } catch (e) { /* wie bisher */ }
+}
+
+/** Wieder das Blatt zeigen, das vor einem Umbau offen war (#28). Gibt es das nicht mehr, das Dashboard. */
+function restoreActiveSheet_(ss, prevName) {
+  try {
+    const sh = prevName ? ss.getSheetByName(prevName) : null;
+    if (sh && !sh.isSheetHidden()) ss.setActiveSheet(sh);
+    else showDashboard_();
+  } catch (e) { /* nur Komfort */ }
 }
 
 function alert_(msg) {
@@ -1302,10 +1349,19 @@ function upgradeIfNeeded_(onlyUpgrade) {
   const code = settingGet_('CODE_VERSION');
   if (code === TOOL_VERSION) return false;
   if (onlyUpgrade && codeIsNewer_(code)) return false;
-  ensureSchema_();
-  migrateSettingsFromProps_();
-  setupSheets_(ss_(), true);
+  const what = 'Update auf Version ' + TOOL_VERSION;
+  const step = onlyUpgrade ? null : busySteps_(what, 5); // die Web-App zeigt keine Meldungen
+  try {
+    if (step) step('Daten prüfen');
+    ensureSchema_();
+    migrateSettingsFromProps_();
+    setupSheets_(ss_(), true, step);
+  } catch (e) {
+    if (step) notifyDone_(what + ' abgebrochen: ' + e.message);
+    throw e;
+  }
   settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()) });
+  if (step) notifyDone_(what + ' fertig.');
   return true;
 }
 
@@ -1367,10 +1423,7 @@ function onOpen() {
     .addItem('Web-App-Link anzeigen', 'webAppLinkAnzeigen')
     .addToUi();
   // Startseite ist das Dashboard (Google öffnet sonst das zuletzt offene Blatt); ein verstecktes bleibt versteckt
-  try {
-    const dash = ss_().getSheetByName(SHEETS.dash);
-    if (dash && !dash.isSheetHidden()) ss_().setActiveSheet(dash);
-  } catch (e) { /* wie bisher */ }
+  showDashboard_();
 }
 
 /** Seitenleiste (mit Import-Tab). Ui.html ist eine Vorlage: `mode` steuert, was sie zeigt, `start` den ersten Tab. */
@@ -1379,12 +1432,10 @@ function kartenErfassen(start) {
   if (takenOverBy_()) { ui.showSidebar(takenOverPage_()); return; }
   if (isFreshCopy_()) {
     // frische Kopie der Vorlage: einmal alles einrichten, auch die Auslöser
-    notify_('Neue Tabelle: Einrichtung läuft …');
     if (!setupAll_()) return;
   } else {
     upgradeIfNeeded_();
     if (needsSetup_()) {
-      notify_('Neue Tabelle: Einrichtung läuft …');
       if (!setupAll_()) return;
     } else {
       repairSetup_();
@@ -1551,36 +1602,52 @@ function setupAll_() {
       'Bitte füge den Code der neueren Version wieder ein (Erweiterungen > Apps Script).');
     return '';
   }
-  const props = PropertiesService.getScriptProperties();
-  const prevId = props.getProperty('SPREADSHEET_ID') || ''; // nennt sie eine andere Tabelle, ist das hier eine Kopie
-  props.setProperty('SPREADSHEET_ID', ss.getId());
-  if (settingsAll_().copy) adoptCopy_();
+  const step = busySteps_('Einrichtung', 6);
+  let dashMissing;
   try {
-    migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
+    step('Tabelle vorbereiten');
+    const props = PropertiesService.getScriptProperties();
+    const prevId = props.getProperty('SPREADSHEET_ID') || ''; // nennt sie eine andere Tabelle, ist das hier eine Kopie
+    props.setProperty('SPREADSHEET_ID', ss.getId());
+    if (settingsAll_().copy) adoptCopy_();
+    try {
+      migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
+    } catch (e) {
+      notifyDone_('Einrichtung abgebrochen.');
+      alert_('Das Datenblatt konnte nicht auf das neue Format umgestellt werden (' + e.message + '). Es wurde nichts geändert.');
+      return '';
+    }
+    migrateSettingsFromProps_(prevId);
+    dashMissing = setupSheets_(ss, false, step);
+    showDashboard_(); // eine neue Tabelle startet im Dashboard (#28)
+    setupTriggers_();
   } catch (e) {
-    alert_('Das Datenblatt konnte nicht auf das neue Format umgestellt werden (' + e.message + '). Es wurde nichts geändert.');
-    return '';
+    notifyDone_('Einrichtung abgebrochen: ' + e.message);
+    throw e;
   }
-  migrateSettingsFromProps_(prevId);
-  const dashMissing = setupSheets_(ss, false);
-  setupTriggers_();
   settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm') });
   let msg = 'Einrichtung fertig.';
   if (dashMissing) msg += ' ' + DASH_LOAD_FAILED;
   try {
+    step('Sets und Übersetzung von tcgdex laden');
     msg += ' ' + buildTranslationAndSets_();
   } catch (e) {
     msg += ' Sets und Übersetzung konnten nicht geladen werden (' + e.message + '). Bitte später „Pokémon > Übersetzung und Sets aktualisieren" starten.';
   }
-  notify_(msg);
+  notifyDone_(msg);
   return msg;
 }
 
 /**
  * Alle Blätter des Tools anlegen bzw. auf den Stand dieses Codes bringen (ohne Auslöser, ohne tcgdex-Abruf).
  * keepControls: Suchfelder in Sammlung und Pokédex stehen lassen (Update); sonst wie bisher bei der Einrichtung.
+ * step (optional, busySteps_): meldet die 4 Schritte unten rechts. Das Blatt, das vorher offen war, bleibt offen (#28).
  */
-function setupSheets_(ss, keepControls) {
+function setupSheets_(ss, keepControls, step) {
+  step = step || function () {};
+  let prevName = '';
+  try { prevName = ss.getActiveSheet().getName(); } catch (e) { prevName = ''; }
+  step('Blätter anlegen');
   setupDataSheet_(ss);
   setupSimpleSheet_(ss, SHEETS.sets, SET_HEADERS, [0, 1, 2, 3, 4, 7], true);
   setupSimpleSheet_(ss, SHEETS.tr, TR_HEADERS, [0, 1, 3], true);
@@ -1589,11 +1656,15 @@ function setupSheets_(ss, keepControls) {
   setupRaritySheet_(ss);
   setupPokedexDataSheet_(ss);
   if (typeof setupImportSheets_ === 'function') setupImportSheets_(ss);
+  step('Sammlung aufbauen');
   withLock_(function () { rebuildGroups_(); });
   setupViewSheet_(ss, !!keepControls);
+  step('Pokédex aufbauen');
   setupPokedexSheet_(ss, true);
+  step('Dashboard aufbauen');
   const missing = setupDashboardSheet_(ss);
   removeDefaultSheet_(ss);
+  restoreActiveSheet_(ss, prevName);
   return missing;
 }
 
@@ -1608,16 +1679,17 @@ function repairSetup_() {
     if (props.getProperty('SPREADSHEET_ID') !== ss.getId()) props.setProperty('SPREADSHEET_ID', ss.getId());
     const missing = missingToolSheets_();
     if (missing.length) {
-      notify_('Lege fehlende Blätter wieder an: ' + missing.join(', ') + ' …');
+      notifyBusy_('Lege fehlende Blätter wieder an: ' + missing.join(', ') + ' …');
       ensureSchema_();
-      setupSheets_(ss, true);
+      setupSheets_(ss, true, busySteps_('Reparatur', 4));
+      notifyDone_('Fehlende Blätter wieder angelegt: ' + missing.join(', ') + '.');
     }
     if (triggersMissing_()) {
       setupTriggers_();
       notify_('Die Auslöser für den nächtlichen Preislauf und für Änderungen im Blatt Daten sind wieder eingerichtet.');
     }
   } catch (e) {
-    notify_('Reparatur ging nicht: ' + e.message); // die Seitenleiste öffnet trotzdem
+    notifyDone_('Reparatur ging nicht: ' + e.message); // die Seitenleiste öffnet trotzdem
   }
 }
 
@@ -1971,8 +2043,10 @@ function setupViewSheet_(ss, keepControls) {
   if (keepControls) {
     try { keep = sh.getRange('B4:H4').getValues()[0]; } catch (e) { keep = null; }
   }
+  const prev = ss.getActiveSheet();
   ss.setActiveSheet(sh);
   ss.moveActiveSheet(frontPos_(ss, SHEETS.view));
+  if (prev && prev.getName() !== SHEETS.view) ss.setActiveSheet(prev); // das aktive Blatt bleibt (#28)
   sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) { p.remove(); });
   sh.clear();
   sh.clearConditionalFormatRules();

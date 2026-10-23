@@ -517,9 +517,15 @@ t.section('8. Dieselbe Quelle noch einmal (Nur Neues)');
   const rl = env.uiCall('importReviewList');
   const ev = itemByName(rl.items, 'Evoli');
   t.eq('Evoli vorbelegt (überspringen)', [ev.prefilled, ev.confirmed, ev.decision && ev.decision.type], [true, false, 'skip']);
-  t.eq('Glurak offen, ohne Vorbelegung', [itemByName(rl.items, 'Glurak').prefilled, itemByName(rl.items, 'Glurak').decision], [false, null]);
+  // #22: ohne gespeicherte Antwort als freie Karte vorausgewählt (nicht „Deine Wahl vom letzten Mal“)
+  t.eq('Glurak als freie Karte vorausgewählt', [itemByName(rl.items, 'Glurak').prefilled, itemByName(rl.items, 'Glurak').confirmed,
+    itemByName(rl.items, 'Glurak').decision, itemByName(rl.items, 'Glurak').card], [true, false, { type: 'frei', auto: true },
+    { free: true, name: 'Glurak', setName: '', localId: '' }]);
   t.eq('offen zählt vorbelegte mit', rl.open, 2);
-  t.eq('Alle übernehmen', env.uiCall('importReviewAcceptPrefilled'), { open: 1 });
+  t.eq('Alle übernehmen: nicht die Vorauswahl', env.uiCall('importReviewAcceptPrefilled'), { open: 1 });
+  t.eq('Vorschau: Glurak kommt als freie Karte', [env.uiCall('importBuildPreview').autoFree, env.uiCall('importBuildPreview').counts.neu], [1, 1]);
+  t.eq('Vorauswahl ist keine gespeicherte Antwort', env.sheet('Import-Antworten').getDataRange().getValues().some((r) => r[1] === D.fp.Glurak), false);
+  env.uiCall('importReviewDecide', D.fp.Glurak, { type: '' }); // Glurak wie bisher offen lassen
   const pv = env.uiCall('importBuildPreview');
   t.eq('nichts Neues', [pv.counts.kopien, pv.counts.neu, pv.counts.mehr, pv.added], [0, 0, 0, []]);
   t.eq('Von dir entfernt: Hundemon', pv.removedByYou.map((x) => [x.title, x.qty, x.ticked]), [['Hundemon', 1, false]]);
@@ -540,7 +546,9 @@ t.section('9. Quelle geändert (ein Ditto mehr, Starmie weg), Mit Quelle abgleic
   t.eq('Abgleich erkennt alles neu', r.counts, { eindeutig: 17, unklar: 3, nichtGefunden: 1, uebersprungen: 0, bekannt: 0 });
   const rl = env.uiCall('importReviewList');
   t.eq('alle früheren Antworten vorbelegt', rl.items.map((i) => [i.values.nameClean, i.prefilled, i.decision && i.decision.type]).sort(),
-    [['Evoli', true, 'skip'], ['Fantasiemon', true, 'frei'], ['Glurak', false, null], ['Lucario Promo', true, 'karte']]);
+    [['Evoli', true, 'skip'], ['Fantasiemon', true, 'frei'], ['Glurak', true, 'frei'], ['Lucario Promo', true, 'karte']]);
+  t.eq('nur Glurak vorausgewählt', rl.items.filter((i) => i.decision && i.decision.auto).map((i) => i.values.nameClean), ['Glurak']);
+  env.uiCall('importReviewDecide', D.fp.Glurak, { type: '' }); // Glurak wie bisher offen lassen
   t.eq('vorbelegte Karte vollständig', itemByName(rl.items, 'Lucario Promo').card.id, 'dpp-DP16');
   const pv = env.uiCall('importBuildPreview');
   t.eq('Abgleich: Zählung', [pv.mode, pv.counts.neu, pv.counts.mehr, pv.counts.weniger, pv.counts.kopien, pv.counts.pruefOffen, pv.counts.uebersprungen],
@@ -615,7 +623,8 @@ t.section('11. Wieder importieren (Nur Neues, Import 3)');
   const r = recognize(env);
   t.eq('vergessen bis auf Import 2', [r.counts.bekannt, r.counts.unklar, r.counts.nichtGefunden], [0, 3, 1]);
   const rl = env.uiCall('importReviewList');
-  t.eq('wieder vorbelegt', rl.items.filter((i) => i.prefilled).map((i) => i.values.nameClean).sort(), ['Evoli', 'Fantasiemon', 'Lucario Promo']);
+  t.eq('wieder vorbelegt', rl.items.filter((i) => i.prefilled && !i.decision.auto).map((i) => i.values.nameClean).sort(), ['Evoli', 'Fantasiemon', 'Lucario Promo']);
+  env.uiCall('importReviewDecide', D.fp.Glurak, { type: '' }); // Glurak wie bisher offen lassen
   const pv = env.uiCall('importBuildPreview');
   t.eq('von Hand erfasst: Despotar, Feurigel, Arktos', pv.handMatch.map((h) => [h.title, h.qty, h.handCount]).sort(),
     [['Arktos', 1, 1], ['Despotar', 1, 1], ['Feurigel', 2, 1]]);
@@ -805,6 +814,46 @@ t.section('17. Checkliste (abhaken, später abwählen) und Raster (Ordnerseiten)
   e.uiCall('importSaveTemplate', 'Raster A', grid, 'alle');
   e.uiCall('importSaveTemplate', 'Raster B', grid, 'neu');
   t.eq('Vorlagen', e.uiCall('importListTemplates').map((x) => [x.name, x.mode, x.cfg.form]).sort(), [['Raster A', 'alle', 'raster'], ['Raster B', 'neu', 'raster']]);
+  t.eq('Regeln', [e.lock.nested, e.guard.violations], [0, []]);
+}
+
+t.section('17b. Prüfliste nicht durchgehen: offene Zeilen kommen als freie Karte (#22)');
+{
+  const e = newEnv();
+  e.ctx.setupAll_();
+  e.uiCall('importSetsVorbelegen');
+  const src = [['Name', 'Nummer', 'Set', 'Preis', 'Datum'],
+    ['Feurigel', '61', 'HeartGold & SoulSilver', '0,30 €', '01.10.2026'],
+    ['Fantasiemon', '999', 'Fantasie-Set', '5,00 €', '02.10.2026'],
+    ['Glurak', '', '', '', ''],
+    ['', '7', 'Fantasie-Set', '1,00 €', '']];
+  e.addSource({ id: 'FREI0000001', name: 'Liste frei', mime: 'sheet', tabs: { Karten: src } });
+  e.uiCall('importOpenSource', 'FREI0000001');
+  const s = e.uiCall('importSelectTab', 'Karten');
+  e.uiCall('importStartRecognition', s.cfg, '', 'neu');
+  const r = recognize(e);
+  t.eq('Erkennung', [r.counts.eindeutig, r.counts.unklar + r.counts.nichtGefunden], [1, 3]);
+  const rl = e.uiCall('importReviewList');
+  const auto = rl.items.filter((i) => i.decision && i.decision.auto);
+  t.eq('mit Namen vorausgewählt, ohne Namen offen', [auto.map((i) => i.values.nameClean || i.values.name).sort(), rl.items.filter((i) => !i.decision).length],
+    [['Fantasiemon', 'Glurak'], 1]);
+  t.ok('vorausgewählt = vorbelegt, nicht bestätigt, freie Karte mit Set und Nummer', auto.every((i) => i.prefilled && !i.confirmed && i.card.free) &&
+    itemByName(rl.items, 'Fantasiemon').card.setName === 'Fantasie-Set' && itemByName(rl.items, 'Fantasiemon').card.localId === '999', auto);
+  t.eq('Stand: nichts selbst erledigt', [rl.open, rl.total], [3, 3]);
+  const pv = e.uiCall('importBuildPreview');
+  t.eq('Vorschau: 2 freie Karten, die Zeile ohne Namen bleibt offen', [pv.autoFree, pv.counts.neu, pv.counts.pruefOffen], [2, 3, 1]);
+  e.uiCall('importCommit', {});
+  const fan = e.data().find((d) => d.name === 'Fantasiemon');
+  t.eq('Fantasiemon: freie Karte mit Preis aus der Quelle', fan && [fan.source, fan.id, fan.setName, fan.localId, fan.ownPrice, fan.ownPriceDate],
+    ['frei', '', 'Fantasie-Set', '999', 5, '2026-10-02']);
+  t.eq('Glurak: freie Karte ohne Preis', e.data().filter((d) => d.name === 'Glurak').map((d) => [d.source, d.ownPrice]), [['frei', '']]);
+  t.eq('Vorauswahl nicht als Antwort gespeichert', e.objects('Import-Antworten').length, 0);
+  // Später aus derselben Quelle: wieder alles bekannt, nichts doppelt
+  e.uiCall('importOpenSource', 'FREI0000001');
+  const s2 = e.uiCall('importSelectTab', 'Karten');
+  e.uiCall('importStartRecognition', s2.cfg, '', 'neu');
+  const r2 = recognize(e);
+  t.eq('zweiter Import: freie Karten schon importiert', r2.counts.bekannt, 3);
   t.eq('Regeln', [e.lock.nested, e.guard.violations], [0, []]);
 }
 

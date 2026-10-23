@@ -1289,6 +1289,32 @@ function erApplyAnswer_(it, ans) {
   return true;
 }
 
+/** Freie Karte aus den Werten der Quellzeile (Name, Set, Nummer; den Preis nimmt der Import aus der Quelle). */
+function erFreeCard_(v) {
+  v = v || {};
+  return { free: true, name: erText_(v.nameClean) || erText_(v.name), setName: erText_(v.set), localId: erText_(v.number) };
+}
+
+/**
+ * Offene Zeile als freie Karte vorauswählen (vorbelegt, nicht bestätigt, decision.auto). So kommt sie beim
+ * Weitergehen in die Sammlung, ohne dass jemand die ganze Prüfliste durchgehen muss. Ohne Namen bleibt sie offen.
+ */
+function erPreselectFree_(it) {
+  if (!erIsReview_(it)) return false;
+  const card = erFreeCard_(it.values);
+  if (!card.name) return false;
+  it.decision = { type: 'frei', auto: true };
+  it.card = card;
+  it.prefilled = true;
+  it.confirmed = false;
+  return true;
+}
+
+/** Gespeicherte Antwort geht vor, sonst freie Karte vorauswählen. */
+function erPrefill_(it, ans) {
+  return erApplyAnswer_(it, ans) || erPreselectFree_(it);
+}
+
 /* ---------- Öffentlich: Erkennung ---------- */
 
 /**
@@ -1411,7 +1437,7 @@ function importRecognizeStep() {
           try { fillMissingImages_(r.candidates); } catch (e) { /* Bilder sind nur eine Hilfe */ }
           it.candidates = r.candidates.map(function (c) { return erCandOut_(c, idx.sets); });
         }
-        erApplyAnswer_(it, answers[it.fp]);
+        erPrefill_(it, answers[it.fp]);
       }
       changed.push(it);
       pos++;
@@ -1429,7 +1455,7 @@ function importRecognizeStep() {
         } else {
           p.it.status = REVIEW_STATUS.notFound;
           p.it.reason = 'Karte ' + p.id + ' ist bei tcgdex nicht mehr zu finden.';
-          erApplyAnswer_(p.it, answers[p.it.fp]);
+          erPrefill_(p.it, answers[p.it.fp]);
         }
       });
     }
@@ -1536,7 +1562,7 @@ function importReviewDecide(fp, decision) {
     if (want) dec.variant = want;
   } else if (type === 'frei') {
     dec = { type: 'frei' };
-    card = { free: true, name: erText_(v.nameClean) || erText_(v.name), setName: erText_(v.set), localId: erText_(v.number) };
+    card = erFreeCard_(v);
     if (!card.name) throw new Error('Ohne Namen kann keine freie Karte angelegt werden.');
   } else if (type === 'skip') {
     dec = { type: 'skip' };
@@ -1557,13 +1583,13 @@ function importReviewDecide(fp, decision) {
   return { item: erReviewOut_(res), open: erOpenCount_(reviewRead_().filter(erIsReview_)) };
 }
 
-/** Alle vorbelegten Antworten („Deine Wahl vom letzten Mal“) bestätigen. -> {open} */
+/** Alle vorbelegten Antworten („Deine Wahl vom letzten Mal“) bestätigen, nicht die Vorauswahl „Als freie Karte“. -> {open} */
 function importReviewAcceptPrefilled() {
   ensureSchema_();
   erNeedDraft_();
   return withLock_(function () {
     const items = reviewRead_().filter(erIsReview_);
-    const ch = items.filter(function (it) { return it.prefilled && it.decision && !it.confirmed; });
+    const ch = items.filter(function (it) { return it.prefilled && it.decision && !it.decision.auto && !it.confirmed; });
     ch.forEach(function (it) { it.confirmed = true; });
     erWriteReviewRows_(ch);
     return { open: erOpenCount_(items) };

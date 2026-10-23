@@ -11,7 +11,7 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
 
    Die Version steht außerdem oben in jeder Script- und HTML-Datei (Kopfkommentar „Pokémon-Sammlung · Version …“). Den schreibt Schritt 3 selbst; nur die Köpfe nachziehen: `node tools/release.js --stamp`.
 2. `SCHEMA_VERSION` nur erhöhen, wenn sich das Format des Blatts „Daten“ ändert (mit Umstellung in `migrateSchema_`). Die Übernahme stellt alte Daten dann selbst um. Eine ältere Version kann eine Tabelle mit neuerem Datenformat nicht übernehmen.
-3. In [`CHANGELOG.md`](../CHANGELOG.md) oben einen Abschnitt `## [1.1.0]` anlegen (ohne Datum) und darunter je Neuerung einen Punkt `- …`: eine Zeile, aus Sicht der Nutzer, einfacher Text ohne Markdown, ohne Punkt am Ende. Das sind die Release-Notizen. Dann den Kanal schreiben:
+3. In [`CHANGELOG.md`](../CHANGELOG.md) oben einen Abschnitt `## [1.1.0]` anlegen (ohne Datum) und darunter je Neuerung einen Punkt `- …`: ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, einfacher Text ohne Markdown, ohne Punkt am Ende. Längere Punkte meldet das Werkzeug als Hinweis. Das sind die Release-Notizen. Dann den Kanal schreiben:
 
    ```sh
    node tools/release.js

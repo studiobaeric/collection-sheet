@@ -1,5 +1,5 @@
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.0
+     Pokémon-Sammlung · Version 1.1.1
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <style>
@@ -29,6 +29,9 @@
   .imp-bar div { height: 100%; background: var(--accent); }
   .tile.imp-chosen { border: 2px solid var(--accent); background: #fdecea; }
   .btn.imp-on { border-color: var(--accent); background: #fdecea; font-weight: 600; }
+  .imp-rvbar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 8px; background: #fff; border-bottom: 1px solid var(--line); padding: 6px 0; margin: 0 0 8px; }
+  .imp-rvbar .notes { flex: 1; margin: 0; }
+  .imp-rvbar .btn { flex: none; }
   .imp-badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--soft); color: var(--muted); margin-left: 6px; }
   .imp-badge.last { background: #e8f0fe; color: #1a5fb4; }
   .imp-badge.done { background: var(--okbg); color: var(--ok); }
@@ -1273,19 +1276,35 @@ function impOpenReview(okText) {
 
 function impRenderReview() {
   var rv = impS.rv;
-  var html = '<h2>Prüfliste</h2><div class="notes" id="impRvProg">' + esc(impRvProgText()) + '</div><div id="impRvAll">' + impRvAllHtml() + '</div>';
+  // Leiste bleibt beim Scrollen unter den Tabs stehen: Stand und Weiter, ohne bis nach unten zu scrollen (#22)
+  var html = '<h2>Prüfliste</h2><div class="imp-rvbar" id="impRvBar"><div class="notes" id="impRvProg">' + esc(impRvProgText()) + '</div>' +
+    '<button class="btn primary" onclick="impOpenPreview()">Weiter zur Vorschau</button></div><div id="impRvAll">' + impRvAllHtml() + '</div>';
   if (!rv.items.length) html += '<div class="notes">Nichts zu prüfen, alle Zeilen wurden erkannt.</div>';
-  else html += '<div class="hint">Tippe bei jeder Zeile die passende Karte an. Offene Zeilen werden nicht importiert, du kannst sie beim nächsten Import nachholen.</div>';
+  else html += '<div class="hint">Jede Zeile ist schon als freie Karte vorausgewählt. Passt ein Vorschlag, tippe ihn an. ' +
+    'Mit „Weiter zur Vorschau“ kommen alle übrigen Zeilen als freie Karten in die Sammlung, du kannst sie dort später mit einer tcgdex-Karte verknüpfen.</div>';
   rv.items.forEach(function (it, k) { html += '<div class="' + impRvBoxClass(k) + '" id="impRv' + k + '">' + impRvItemHtml(k) + '</div>'; });
   html += '<div class="actions"><button class="btn" onclick="impRvLater()">Später weitermachen</button>' +
     '<button class="btn primary" onclick="impOpenPreview()">Weiter zur Vorschau</button></div><div id="impAct"></div>';
   $('impMain').innerHTML = html;
+  impRvBarTop();
 }
 
-function impRvProgText() { var rv = impS.rv; return Math.max(0, rv.total - rv.open) + ' von ' + rv.total + ' erledigt'; }
+/** Die Leiste klebt direkt unter den Tabs (die bleiben in Ui.html auch oben stehen) */
+function impRvBarTop() {
+  var bar = $('impRvBar'), tabs = document.querySelector('.tabs');
+  if (bar) bar.style.top = (tabs ? tabs.offsetHeight : 0) + 'px';
+}
+
+/** Vom Tool als freie Karte vorausgewählt, noch nicht von dir bestätigt */
+function impRvIsAuto(it) { return !!(it && it.decision && it.decision.auto && !it.confirmed); }
+
+function impRvProgText() {
+  var rv = impS.rv, auto = rv.items.filter(impRvIsAuto).length;
+  return Math.max(0, rv.total - rv.open) + ' von ' + rv.total + ' erledigt' + (auto ? ' · ' + auto + ' als freie Karte vorausgewählt' : '');
+}
 
 function impRvAllHtml() {
-  var n = impS.rv.items.filter(function (it) { return it.prefilled && it.decision && !it.confirmed; }).length;
+  var n = impS.rv.items.filter(function (it) { return it.prefilled && it.decision && !it.decision.auto && !it.confirmed; }).length;
   if (!n) return '';
   return '<div class="choose"><div class="t">' + (n === 1 ? '1 Zeile hast du' : n + ' Zeilen hast du') + ' beim letzten Mal schon entschieden.</div>' +
     '<div class="hint">Sie sind mit „Deine Wahl vom letzten Mal“ markiert. Du kannst sie einzeln ändern oder alle auf einmal übernehmen.</div>' +
@@ -1317,7 +1336,7 @@ function impRvOrig(v) {
 function impRvDecText(it) {
   var d = it.decision, c = it.card || {};
   if (d.type === 'skip') return 'Deine Wahl: <b>Überspringen</b>';
-  if (d.type === 'frei') return 'Deine Wahl: <b>Als freie Karte</b>' + (c.name ? ' „' + esc(c.name) + '“' : '');
+  if (d.type === 'frei') return (impRvIsAuto(it) ? 'Vorausgewählt' : 'Deine Wahl') + ': <b>Als freie Karte</b>' + (c.name ? ' „' + esc(c.name) + '“' : '');
   return 'Deine Wahl: <b>' + esc(c.name || d.id || '') + '</b>' + (c.setName ? ' · ' + esc(c.setName) : '') +
     (c.localId ? ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') : '') +
     (c.variant && VARIANT_LABELS[c.variant] ? ' · ' + esc(VARIANT_LABELS[c.variant]) : '');
@@ -1340,12 +1359,13 @@ function impTileHtml(c, onclick, chosen) {
 
 function impRvItemHtml(k) {
   var rv = impS.rv, it = rv.items[k], ui = rv.ui[k] || {};
-  var v = it.values || {}, d = it.decision, done = !!(d && it.confirmed), last = !!(d && it.prefilled);
+  var v = it.values || {}, d = it.decision, done = !!(d && it.confirmed), auto = impRvIsAuto(it), last = !!(d && it.prefilled && !auto);
   var title = v.nameClean || v.name || (v.raw && v.raw.name) || 'Zeile ohne Namen';
   var where = it.srcRows && it.srcRows.length ? (it.srcRows.length === 1 ? 'Zeile ' : 'Zeilen ') + impSrcRows(it.srcRows) : '';
   var html = '<div><b>' + esc(title) + '</b>' +
     (done ? '<span class="imp-badge done">erledigt</span>' : '<span class="imp-badge">' + esc(it.status || 'offen') + '</span>') +
-    (last ? '<span class="imp-badge last">Deine Wahl vom letzten Mal</span>' : '') + '</div>' +
+    (last ? '<span class="imp-badge last">Deine Wahl vom letzten Mal</span>' : '') +
+    (auto ? '<span class="imp-badge last">vorausgewählt</span>' : '') + '</div>' +
     '<div class="imp-sub">' + esc([where, impPl(it.qty, 'Stück', 'Stück')].filter(Boolean).join(' · ')) + '</div>';
   var orig = impRvOrig(v);
   if (orig) html += '<div class="imp-sub">' + orig + '</div>';
@@ -1413,7 +1433,7 @@ function impRvAcceptAll() {
   if (!rv || impBusy) return;
   impAsk('importReviewAcceptPrefilled', [], 'Übernehme deine Wahl vom letzten Mal …', function (res) {
     if (impS.rv !== rv) return;
-    rv.items.forEach(function (it) { if (it.prefilled && it.decision) it.confirmed = true; });
+    rv.items.forEach(function (it) { if (it.prefilled && it.decision && !it.decision.auto) it.confirmed = true; });
     if (res && res.open != null) rv.open = impN(res.open);
     impRenderReview();
     setMsg('impMsg', 'Deine Wahl vom letzten Mal ist übernommen.', 'ok');
@@ -1615,6 +1635,11 @@ function impRenderPreview() {
   (r.warnings || []).forEach(function (w) { html += '<div class="warn">' + esc(w) + '</div>'; });
   (r.notes || []).forEach(function (n) { html += '<div class="notes">' + esc(n) + '</div>'; });
   if (r.newColumns && r.newColumns.length) html += '<div class="notes">Neue Zusatzspalten: ' + r.newColumns.map(esc).join(', ') + '</div>';
+  if (impN(r.autoFree)) {
+    html += '<div class="notes">' + (impN(r.autoFree) === 1 ? '1 Zeile aus der Prüfliste kommt' : impN(r.autoFree) + ' Zeilen aus der Prüfliste kommen') +
+      ' wie vorausgewählt als freie Karte in die Sammlung.' +
+      '<div class="actions"><button class="btn" onclick="impOpenReview()">Zur Prüfliste</button></div></div>';
+  }
   if (impN(c.pruefOffen)) {
     html += '<div class="warn">' + (impN(c.pruefOffen) === 1 ? '1 Zeile aus der Prüfliste ist noch offen und wird' :
       impN(c.pruefOffen) + ' Zeilen aus der Prüfliste sind noch offen und werden') + ' nicht importiert.' +

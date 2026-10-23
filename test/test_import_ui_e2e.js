@@ -694,7 +694,16 @@ function missingPaths(res, paths) {
   const boxes = () => [...E.main().querySelectorAll('.imp-rv')];
   const boxOf = (name) => boxes().find((b) => b.querySelector('b') && b.querySelector('b').textContent === name);
   t.eq('Prüfliste: vier Zeilen', boxes().map((b) => b.querySelector('b').textContent), ['Glurak', 'Fantasiemon', 'Feurigl', 'Tauschkarte von Tom']);
-  t.ok('Prüfliste: 0 von 4 erledigt', E.$('impRvProg').textContent === '0 von 4 erledigt', E.$('impRvProg').textContent);
+  t.ok('Prüfliste: 0 von 4 erledigt, 4 vorausgewählt', E.$('impRvProg').textContent === '0 von 4 erledigt · 4 als freie Karte vorausgewählt', E.$('impRvProg').textContent);
+  // #22: Leiste mit „Weiter zur Vorschau“ oben vor der ersten Zeile, der Knopf unten bleibt
+  const rvBar = E.$('impRvBar');
+  t.ok('Leiste oben: Stand und Weiter zur Vorschau, vor der ersten Zeile', rvBar && rvBar.contains(E.$('impRvProg')) && !!E.btn(rvBar, 'Weiter zur Vorschau') &&
+    !!(rvBar.compareDocumentPosition(boxes()[0]) & E.win.Node.DOCUMENT_POSITION_FOLLOWING) && /sticky/.test(E.win.getComputedStyle(rvBar).position));
+  t.eq('Weiter zur Vorschau: oben und unten', [...E.main().querySelectorAll('button')].filter((b) => b.textContent === 'Weiter zur Vorschau').length, 2);
+  t.ok('jede Zeile: als freie Karte vorausgewählt', boxes().every((b) => /Vorausgewählt: Als freie Karte/.test(b.textContent) &&
+    /vorausgewählt/.test(b.querySelector('.imp-badge.last') ? b.querySelector('.imp-badge.last').textContent : '') && !b.classList.contains('imp-done') &&
+    E.btn(b, 'Als freie Karte').classList.contains('imp-on')), boxes().map((b) => b.textContent.slice(0, 120)));
+  t.ok('Vorauswahl: kein „Alle übernehmen“', !/Alle übernehmen/.test(E.text()));
   const gl = boxOf('Glurak');
   t.ok('Glurak: unklar mit drei Kandidaten samt Bild, Set und Nummer', /unklar/.test(gl.textContent) && gl.querySelectorAll('.tile').length === 3 &&
     [...gl.querySelectorAll('.tile')].every((x) => x.querySelector('img') && /\d/.test(x.textContent)) && /Grundset · 4\/102/.test(gl.textContent), gl.textContent);
@@ -706,7 +715,7 @@ function missingPaths(res, paths) {
   await E.clickSettle([...boxOf('Glurak').querySelectorAll('.tile')].find((x) => /Grundset/.test(x.textContent)), 'Kachel Grundset');
   t.ok('Glurak: Grundset gewählt und erledigt', /Deine Wahl: Glurak · Grundset · 4\/102 · Holo/.test(boxOf('Glurak').textContent) &&
     !!boxOf('Glurak').querySelector('.tile.imp-chosen') && boxOf('Glurak').classList.contains('imp-done'), boxOf('Glurak').textContent);
-  t.ok('Prüfliste: 1 von 4 erledigt', E.$('impRvProg').textContent === '1 von 4 erledigt');
+  t.ok('Prüfliste: 1 von 4 erledigt', E.$('impRvProg').textContent === '1 von 4 erledigt · 3 als freie Karte vorausgewählt', E.$('impRvProg').textContent);
   const ans1 = env.objects('Import-Antworten');
   t.ok('Server: Antwort sofort in Import-Antworten', ans1.length === 1 && JSON.parse(ans1[0].Entscheidung).id === 'base1-4', ans1);
   // Freie Karte und Überspringen
@@ -716,7 +725,7 @@ function missingPaths(res, paths) {
   t.ok('Tauschkarte: Überspringen', /Deine Wahl: Überspringen/.test(boxOf('Tauschkarte von Tom').textContent));
   // Wahl aufheben und wieder setzen
   await E.clickSettle(E.btn(boxOf('Tauschkarte von Tom'), 'Wahl aufheben'), 'Wahl aufheben');
-  t.ok('Wahl aufheben: wieder offen', !/Deine Wahl/.test(boxOf('Tauschkarte von Tom').textContent) && E.$('impRvProg').textContent === '2 von 4 erledigt' &&
+  t.ok('Wahl aufheben: wieder offen', !/Deine Wahl/.test(boxOf('Tauschkarte von Tom').textContent) && E.$('impRvProg').textContent === '2 von 4 erledigt · 1 als freie Karte vorausgewählt' &&
     env.objects('Import-Antworten').length === 2, E.$('impRvProg').textContent);
   await E.clickSettle(E.btn(boxOf('Tauschkarte von Tom'), 'Überspringen'), 'Überspringen');
   // Neu suchen: Feurigl mit Nummer -> Set-Auswahl -> Karte; dann mit richtigem Namen

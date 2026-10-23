@@ -89,7 +89,7 @@ t.section('Einrichtung');
   eq('Dashboard vorne, dann Sammlung und Pokédex', names.slice(0, 3), ['Dashboard', 'Sammlung', 'Pokédex']);
   ok('Pokédex-Daten versteckt, Pokédex und Seltenheiten sichtbar',
     env.sheet('Pokédex-Daten').hidden && !env.sheet('Pokédex').hidden && !env.sheet('Seltenheiten').hidden);
-  ok('Sammlung bleibt aktiv', env.ss.getActiveSheet().getName() === 'Sammlung', env.ss.getActiveSheet().getName());
+  ok('nach der Einrichtung: Dashboard offen (#28)', env.ss.getActiveSheet().getName() === 'Dashboard', env.ss.getActiveSheet().getName());
   const list = env.objects('Pokédex-Daten');
   eq('1025 Pokémon, alle fehlend', [list.length, list.filter(o => o['Exemplare'] > 0).length], [1025, 0]);
   eq('Zeile 25', J(Object.fromEntries(Object.entries(dexRow(env, 25)).slice(0, 8))), J({ 'Nr.': 25, Name: 'Pikachu', 'Name englisch': 'Pikachu', Generation: 1, Karten: 0, Exemplare: 0, 'Wert (EUR)': 0, Auswahl: '#25 Pikachu' }));

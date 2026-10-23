@@ -964,7 +964,7 @@ t.section('Prüfliste und Antworten');
   setSource(env, rows, 'SRC6');
   env.uiCall('importStartRecognition', listCfg(), '', 'neu');
   recognizeAll(env);
-  t.eq('andere Quelle: keine Vorbelegung', env.uiCall('importReviewList').items.filter(x => x.prefilled).length, 0);
+  t.eq('andere Quelle: keine Vorbelegung', env.uiCall('importReviewList').items.filter(x => x.prefilled && !x.decision.auto).length, 0);
 
   // Antworten überleben das Verwerfen des Entwurfs
   c.importResetDraft_();

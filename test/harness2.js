@@ -492,7 +492,7 @@ class FakeSpreadsheet {
     this.list = this.list.filter(s => s !== sh);
     this.list.splice(pos - 1, 0, sh);
   }
-  toast(msg) { this.toasts.push(String(msg)); }
+  toast(msg, title, timeout) { this.toasts.push(String(msg)); this.toastLog = (this.toastLog || []).concat([{ msg: String(msg), title: title, timeout: timeout }]); }
 }
 
 // ---------------------------------------------------------------------------
