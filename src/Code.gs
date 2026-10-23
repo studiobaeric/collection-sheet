@@ -45,6 +45,7 @@ const SHEETS = {
   sets: 'Sets',
   tr: 'Übersetzung',
   hist: 'Verlauf',
+  cardHist: 'Kartenverlauf',
   check: 'API-Check',
   imports: 'Importe',
   proto: 'Import-Protokoll',
@@ -86,7 +87,8 @@ const GROUP_HEADERS = [
   'Gruppenschlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer',
   'Nummer normalisiert', 'Setgröße', 'Name', 'Name englisch', 'Quelle', 'Variante', 'Exemplare',
   'Anzahl', 'Preis (EUR)', 'Preisstand', 'Bild-URL', 'Seltenheit', 'Kartentyp', 'Illustrator',
-  'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar'
+  'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar',
+  'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit'
 ];
 
 const PROTO_HEADERS = ['Log-ID', 'Import-Nr', 'Typ', 'Eintrag-ID', 'Quellzeile', 'Menge', 'Daten', 'Status', 'Zeitpunkt', 'Quelle-ID'];
@@ -96,7 +98,15 @@ const SET_HEADERS = ['Sprache', 'Set-ID', 'Name', 'Logo', 'Symbol', 'Karten offi
 const TR_HEADERS = ['Deutsch', 'Englisch', 'Belege', 'Eigene Übersetzung'];
 const HIST_HEADERS = ['Datum', 'Gesamtwert (EUR)', 'Kartenanzahl', 'Einträge ohne Preis', 'Fehlgeschlagene Abrufe'];
 const VIEW_HEADERS = ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl',
-  'Preis (EUR)', 'Wert (EUR)', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand'];
+  'Preis (EUR)', 'Wert (EUR)', '± 30 Tage (EUR)', '± 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand'];
+// Preisverlauf pro Karte (Blatt Kartenverlauf): eine Zeile pro Karten-ID + Variante, Vergleichspreise je Zeitraum
+const CARD_HIST_HEADERS = ['Karten-ID', 'Variante', 'Stand', 'Vergleich 7 Tage', 'Seit (7 Tage)', 'Vergleich 30 Tage', 'Seit (30 Tage)',
+  'Vergleich 90 Tage', 'Seit (90 Tage)', 'Verlauf'];
+const CHANGE_DAYS = [7, 30, 90];  // Zeiträume der Veränderung (Seitenleiste und Web-App schalten um)
+const VIEW_CHANGE_DAYS = 30;      // Zeitraum im Blatt Sammlung
+const CARD_HIST_MAX_CHARS = 45000; // eine Zelle fasst 50.000 Zeichen; darüber fallen die ältesten Einträge weg
+const SIGNED_EUR_FORMAT = '+#,##0.00 "€";-#,##0.00 "€";#,##0.00 "€"';
+const SIGNED_PCT_FORMAT = '+0 %;-0 %;0 %';
 
 const MAX_CANDIDATES = 24;
 const MAX_GROUPS = 60;
@@ -1581,6 +1591,7 @@ function setupSheets_(ss, keepControls) {
   setupSimpleSheet_(ss, SHEETS.sets, SET_HEADERS, [0, 1, 2, 3, 4, 7], true);
   setupSimpleSheet_(ss, SHEETS.tr, TR_HEADERS, [0, 1, 3], true);
   setupHistorySheet_(ss);
+  setupCardHistSheet_(ss);
   setupRaritySheet_(ss);
   setupPokedexDataSheet_(ss);
   if (typeof setupImportSheets_ === 'function') setupImportSheets_(ss);
@@ -1612,9 +1623,9 @@ function repairSetup_() {
   }
 }
 
-/** Blätter, die die Einrichtung immer anlegt und die hier fehlen (API-Check, Pokédex-Nummern und Diagnose entstehen bei Bedarf). */
+/** Blätter, die die Einrichtung immer anlegt und die hier fehlen (API-Check, Pokédex-Nummern, Kartenverlauf und Diagnose entstehen bei Bedarf). */
 function missingToolSheets_() {
-  const later = [SHEETS.check, SHEETS.dexIds, SHEETS.settings, 'Diagnose'];
+  const later = [SHEETS.check, SHEETS.dexIds, SHEETS.settings, SHEETS.cardHist, 'Diagnose'];
   const noImport = typeof setupImportSheets_ !== 'function';
   const have = {};
   ss_().getSheets().forEach(function (sh) { have[sh.getName()] = true; });
@@ -1686,7 +1697,7 @@ const FORMULA_PROBES = [
   ['=ROWS(MAP(SEQUENCE(2),LAMBDA(ul,IMAGE("https://assets.tcgdex.net/de/swsh/swsh3/136/low.png"))))', '2'],
   ['=REGEXREPLACE("TG05","^([A-Z]*)0+([0-9])","$1$2")', 'TG5'],
   ['=SUM(SORT(SEQUENCE(3),1,FALSE))', '6'],
-  ['=ROWS(FILTER(Gruppen!A1:W,Gruppen!A1:A<>""))', '>=1'],
+  ['=ROWS(FILTER(Gruppen!A1:Z,Gruppen!A1:A<>""))', '>=1'],
   ['=IF(G4=TRUE,1,0)', '0']
 ];
 
@@ -1841,11 +1852,16 @@ function groupFormatRow_(width) {
   f[20] = DATE_TIME_FORMAT;
   f[21] = DATE_TIME_FORMAT;
   f[22] = '0';           // Nummer sortierbar
+  f[23] = SIGNED_EUR_FORMAT; // Veränderung 30 Tage
+  f[24] = SIGNED_PCT_FORMAT;
   return f;
 }
 
-/** Eine Zeile fürs Blatt Gruppen aus den Daten-Zeilen einer Gruppe. */
-function groupSheetRow_(gkey, rows, dHeaders, extras) {
+/**
+ * Eine Zeile fürs Blatt Gruppen aus den Daten-Zeilen einer Gruppe.
+ * refs: Vergleichspreise aus dem Kartenverlauf (loadCardHistRefs_); Gruppen mit eigenem Preis bekommen keine Veränderung.
+ */
+function groupSheetRow_(gkey, rows, dHeaders, extras, refs) {
   const ordered = orderGroupRows_(rows);
   const p = ordered[0];
   const first = function (c) {
@@ -1871,6 +1887,8 @@ function groupSheetRow_(gkey, rows, dHeaders, extras) {
     String(first(COL.img) || ''), String(p[COL.rarity] || ''), String(p[COL.category] || ''), String(p[COL.illustrator] || ''),
     maxDate(COL.added), maxDate(COL.changed), p[COL.numSort] === '' || p[COL.numSort] == null ? '' : Number(p[COL.numSort]) || ''
   ];
+  const ch = gp.manual ? null : (groupChanges_(rows, refs) || {})[VIEW_CHANGE_DAYS];
+  out.push(ch ? ch.eur : '', ch && ch.pct != null ? ch.pct / 100 : '', ch && ch.since ? dmyText_(ch.since) : '');
   extras.forEach(function (name) {
     const c = dHeaders.indexOf(name, NCOL);
     const vals = [];
@@ -1904,8 +1922,9 @@ function rebuildGroups_() {
   const dHeaders = dsh ? dataHeaders_() : DATA_HEADERS.slice();
   const rows = dsh ? readData_(dsh) : [];
   if (dsh && rows.length) repairRows_(dsh, rows);
+  const refs = loadCardHistRefs_();
   const out = groupRows_(rows).map(function (g) {
-    return groupSheetRow_(g.gkey, g.idx.map(function (i) { return rows[i]; }), dHeaders, extras);
+    return groupSheetRow_(g.gkey, g.idx.map(function (i) { return rows[i]; }), dHeaders, extras, refs);
   });
   const all = [headers].concat(out);
   const oldLastRow = sh.getLastRow();
@@ -1963,7 +1982,7 @@ function setupViewSheet_(ss, keepControls) {
     .setFontColor('#5f6368').setFontSize(9);
 
   // Steuerzeile
-  sh.getRange('B3:H3').setValues([['Suche (Name oder Nummer, z. B. Glurak 025/165)', 'Set', '', 'Sortierung', '', '0er zeigen', 'Bilder zeigen']])
+  sh.getRange('B3:H3').setValues([['Suche (Name, Nummer oder Künstler, z. B. Glurak 025/165 oder Arita)', 'Set', '', 'Sortierung', '', '0er zeigen', 'Bilder zeigen']])
     .setFontColor('#5f6368').setFontSize(9);
   sh.getRange('B4').setNumberFormat('@').setBackground('#fff8e1');
   sh.getRange('C4').setValue('Alle').setBackground('#fff8e1');
@@ -1991,10 +2010,15 @@ function setupViewSheet_(ss, keepControls) {
     .setFontWeight('bold').setBackground('#c62828').setFontColor('#ffffff');
   setFormulaLocal_(sh.getRange('A6'), viewFormula_(extras.length));
   sh.getRange('H6:I').setNumberFormat(EUR_FORMAT);
+  sh.getRange('J6:J').setNumberFormat(SIGNED_EUR_FORMAT);
+  sh.getRange('K6:K').setNumberFormat(SIGNED_PCT_FORMAT);
+  sh.getRange('J5').setNote('Veränderung des Trendpreises einer Karte in den letzten ' + VIEW_CHANGE_DAYS + ' Tagen (der Preis einer Karte, nicht mal Anzahl). ' +
+    'Karten mit eigenem Preis haben keine. Seitenleiste und Web-App zeigen auch 7 und 90 Tage.');
+  sh.getRange('L5').setNote('Leer: Die Veränderung gilt für die ganzen ' + VIEW_CHANGE_DAYS + ' Tage. Sonst steht hier, seit wann sich das Tool den Preis der Karte merkt.');
   sh.getRange('A6:' + lastL).setVerticalAlignment('middle');
   sh.setFrozenRows(5);
 
-  const widths = [70, 190, 170, 80, 110, 150, 70, 110, 100, 130, 90, 130, 110];
+  const widths = [70, 190, 170, 80, 110, 150, 70, 110, 100, 105, 90, 95, 130, 90, 130, 110];
   widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
   extras.forEach(function (n, i) { sh.setColumnWidth(VIEW_HEADERS.length + i + 1, 130); });
 
@@ -2002,7 +2026,12 @@ function setupViewSheet_(ss, keepControls) {
     .whenFormulaSatisfied('=($G6<>"")*($G6=0)')
     .setFontColor('#9aa0a6').setBackground('#f5f5f5')
     .setRanges([sh.getRange('A6:' + lastL)]).build();
-  sh.setConditionalFormatRules([grey]);
+  // Veränderung: Plus grün, Minus rot (ohne Kommas in der Formel, sonst stolpert die deutsche Tabelle)
+  const up = SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=N($J6)>0')
+    .setFontColor('#137333').setRanges([sh.getRange('J6:K')]).build();
+  const down = SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=N($J6)<0')
+    .setFontColor('#c5221f').setRanges([sh.getRange('J6:K')]).build();
+  sh.setConditionalFormatRules([grey, up, down]);
 
   sh.getRange('A5:' + lastL).protect().setDescription('Ansicht – Änderungen nur über die Oberfläche').setWarningOnly(true);
   applyRowHeights_(sh);
@@ -2010,7 +2039,7 @@ function setupViewSheet_(ss, keepControls) {
 
 /**
  * Die eine Formel der Sammlungsansicht: liest das Blatt Gruppen, filtert, sortiert und gibt die Tabelle aus.
- * nExtras = Anzahl der gezeigten Zusatzspalten (Gruppen-Spalten 24 …).
+ * nExtras = Anzahl der gezeigten Zusatzspalten (Gruppen-Spalten 27 …).
  */
 function viewFormula_(nExtras) {
   const n = Math.max(0, Math.floor(Number(nExtras) || 0));
@@ -2032,7 +2061,7 @@ function viewFormula_(nExtras) {
     '      IF(REGEXMATCH(wd, "/"),',
     '        AND(TO_TEXT(INDEX(rw, 1, 7))=nrm(REGEXEXTRACT(wd, "^[^/]*")), IF(REGEXMATCH(szw, "^0*[1-9]"), TO_TEXT(INDEX(rw, 1, 8))=REGEXEXTRACT(REGEXREPLACE(szw, "^0+", ""), "^[0-9]+"), TRUE)),',
     '        TO_TEXT(INDEX(rw, 1, 7))=nrm(wd)),',
-    '      OR(ISNUMBER(SEARCH(wd, INDEX(rw, 1, 9))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 10))))))))))',
+    '      OR(ISNUMBER(SEARCH(wd, INDEX(rw, 1, 9))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 10))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 20))))))))))',
     '))),',
     'flt, FILTER(dat, okay),',
     'cnt, CHOOSECOLS(flt, 14),',
@@ -2051,6 +2080,7 @@ function viewFormula_(nExtras) {
     '  CHOOSECOLS(srt, 14),',
     '  MAP(CHOOSECOLS(srt, 15), LAMBDA(pr, IF(ISNUMBER(pr), pr, "kein Preis"))),',
     '  CHOOSECOLS(srt, ' + vc + '),',
+    '  CHOOSECOLS(srt, 24), CHOOSECOLS(srt, 25), CHOOSECOLS(srt, 26),',
     '  CHOOSECOLS(srt, 18), CHOOSECOLS(srt, 19), CHOOSECOLS(srt, 20), CHOOSECOLS(srt, 16)' + (n ? ', ' + extraCols.join(', ') : ''),
     ')), "Keine Einträge gefunden")'
   ].join(' ');
@@ -2672,6 +2702,7 @@ function getUiConfig() {
   };
 }
 
+/** Passt ein Suchwort zur Karte? Zahlen: Nummer (025/165), sonst Teil von Name, Name englisch, Sonderversion oder Künstler. */
 function matchWord_(r, w) {
   if (/\d/.test(w)) {
     const p = parseNumberInput_(w);
@@ -2681,7 +2712,7 @@ function matchWord_(r, w) {
   }
   const lw = w.toLowerCase();
   return String(r[COL.name]).toLowerCase().indexOf(lw) >= 0 || String(r[COL.nameEn]).toLowerCase().indexOf(lw) >= 0 ||
-    String(r[COL.version]).toLowerCase().indexOf(lw) >= 0;
+    String(r[COL.version]).toLowerCase().indexOf(lw) >= 0 || String(r[COL.illustrator]).toLowerCase().indexOf(lw) >= 0;
 }
 
 /** Eine Exemplar-Zeile fürs UI. */
@@ -2696,8 +2727,11 @@ function rowForUi_(r, headers, info) {
   };
 }
 
-/** Eine Gruppe fürs UI (Form wie searchCollection().groups[i]). */
-function groupForUi_(gkey, rows, headers, info) {
+/**
+ * Eine Gruppe fürs UI (Form wie searchCollection().groups[i]). refs (optional): Vergleichspreise aus dem Kartenverlauf.
+ * chg: Veränderung des Trendpreises {7|30|90: {eur, pct, since} oder null}, auch bei eigenem Preis (das UI zeigt sie dann nicht).
+ */
+function groupForUi_(gkey, rows, headers, info, refs) {
   const ordered = orderGroupRows_(rows);
   const p = ordered[0];
   const gp = groupPrice_(rows);
@@ -2719,6 +2753,7 @@ function groupForUi_(gkey, rows, headers, info) {
     count: rows.reduce(function (s, r) { return s + (Number(r[COL.count]) || 0); }, 0),
     image: image, price: gp.price, priceManual: gp.manual, ownPrice: gp.ownPrice,
     priceDate: gp.manual ? gp.ownDate : gp.date, exemplare: exemplareText_(rows), rarity: String(p[COL.rarity] || ''),
+    illustrator: String(p[COL.illustrator] || ''), chg: groupChanges_(rows, refs),
     rows: uiRows
   };
 }
@@ -2768,13 +2803,14 @@ function searchCollection(query, setText, opts) {
   groups.forEach(function (g) { g.sortVal = collSortValue_(g, sort, ranks); });
   groups.sort(function (a, b) { return collCompare_(a, b, sort, desc); });
   const info = importInfo_();
+  const refs = loadCardHistRefs_();
   return {
     total: groups.length,
     sort: sort,
     desc: desc,
     dex: dexNr || null,
     groups: groups.slice(0, MAX_GROUPS).map(function (g) {
-      const o = groupForUi_(g.gkey, g.rows, st.headers, info);
+      const o = groupForUi_(g.gkey, g.rows, st.headers, info, refs);
       if (needDex) o.dex = g.dex;
       return o;
     })
@@ -3231,25 +3267,15 @@ function langOfRow_(r) {
 }
 
 /**
- * Karten für den Preislauf (lang|id). Freie Karten (ohne ID) nie; Karten, deren Zeilen ALLE einen
- * eigenen Preis haben, auch nicht, außer ihre Pokédex-Nummer fehlt noch.
+ * Karten für den Preislauf (lang|id). Freie Karten (ohne ID) nie. Karten mit eigenem Preis schon (seit 1.1.0): Ihr
+ * Trendpreis kommt in den Kartenverlauf, damit die Kurve ihn zeigt; in der Sammlung zählt weiter der eigene Preis.
  */
 function priceTargets_() {
   const rows = readData_(sheet_(SHEETS.data));
-  const dex = loadDexIds_();
-  const byId = {};
+  const seen = {};
   rows.forEach(function (r) {
     const id = String(r[COL.id] || '');
-    if (!id || !isDataRow_(r)) return;
-    const e = byId[id] || (byId[id] = { langs: {}, allOwn: true, needDex: false });
-    e.langs[langOfRow_(r)] = true;
-    if (typeof r[COL.ownPrice] !== 'number') e.allOwn = false;
-    if (!(id in dex) && isPokemonCategory_(r[COL.category])) e.needDex = true;
-  });
-  const seen = {};
-  Object.keys(byId).forEach(function (id) {
-    if (byId[id].allOwn && !byId[id].needDex) return; // nur noch für die Pokédex-Nummer abrufen
-    Object.keys(byId[id].langs).forEach(function (lang) { seen[lang + '|' + id] = true; });
+    if (id && isDataRow_(r)) seen[langOfRow_(r) + '|' + id] = true;
   });
   return Object.keys(seen).sort().map(function (k) {
     const i = k.indexOf('|');
@@ -3334,8 +3360,8 @@ function backfillSetDates_() {
 
 /**
  * Trendpreise schreiben (auch bei Karten mit eigenem Preis, der eigene Preis hat in der Ansicht Vorrang).
- * rebuild: danach die Gruppen neu berechnen (nach dem letzten Paket; bei einer Pause macht das continuePriceRun).
- * dexById (optional): Pokédex-Nummern der abgerufenen Karten {Karten-ID: [Nummern]} zum Merken.
+ * rebuild: nach dem letzten Paket; schreibt den Kartenverlauf und berechnet die Gruppen neu (bei einer Pause baut
+ * continuePriceRun nur die Gruppen neu). dexById (optional): Pokédex-Nummern der abgerufenen Karten {Karten-ID: [Nummern]}.
  */
 function writePrices_(cmByKey, rebuild, dexById) {
   withLock_(function () {
@@ -3353,7 +3379,11 @@ function writePrices_(cmByKey, rebuild, dexById) {
       return [p == null ? '' : p, cm ? dateText_(cm.updated) : ''];
     });
     if (changed) sh.getRange(2, COL.price + 1, out.length, 2).setValues(out);
-    if (rebuild) rebuildGroups_();
+    if (rebuild) {
+      out.forEach(function (o, i) { rows[i][COL.price] = o[0]; });
+      try { writeCardHistory_(rows); } catch (e) { /* nächster Preislauf; die Preise sind geschrieben */ }
+      rebuildGroups_();
+    }
   });
 }
 
@@ -3397,6 +3427,215 @@ function writeHistory_(failed) {
   }
   sh.getRange(target, 1, 1, 5).setValues([[d, v.total, v.cards, v.noPrice, failed]]);
   try { refreshDashboard_(rows); } catch (e) { /* beim nächsten Neuaufbau wieder */ }
+}
+
+// ---------- Preisverlauf pro Karte (Blatt Kartenverlauf, versteckt) ----------
+// Eine Zeile pro Karten-ID + Variante. „Verlauf“ hält die Trendpreise als Text „2026-10-23=1.5;2026-10-30=1.75“, mit
+// einem Eintrag nur, wenn sich der Preis geändert hat (an einem Tag zählt der letzte Preislauf). Die Spalten davor
+// rechnet jeder Preislauf für alle Zeilen neu: der Vergleichspreis vor 7, 30 und 90 Tagen und „Seit“ (leer beim ganzen
+// Zeitraum, sonst der erste Tag des Verlaufs). Sammlung und Seitenleiste lesen nur diese Spalten, die Kurve „Verlauf“.
+
+function histKey_(id, variant) {
+  return String(id == null ? '' : id).trim() + '|' + String(variant == null ? '' : variant).trim();
+}
+
+/** Auf Cent runden, ohne -0. */
+function round2_(n) {
+  return Math.round(n * 100) / 100 || 0;
+}
+
+/** 'yyyy-MM-dd=Preis;…' -> [{d, p}] nach Tag sortiert, ein Eintrag pro Tag (der letzte im Text gilt). */
+function parseHistSeries_(text) {
+  const byDay = {};
+  String(text == null ? '' : text).split(';').forEach(function (part) {
+    const m = /^\s*(\d{4}-\d{2}-\d{2})=(-?\d+(?:\.\d+)?)\s*$/.exec(part);
+    if (m) byDay[m[1]] = Number(m[2]);
+  });
+  return Object.keys(byDay).sort().map(function (d) { return { d: d, p: byDay[d] }; });
+}
+
+/** [{d, p}] -> Text für die Zelle; ist er zu lang, fallen die ältesten Einträge weg. */
+function histSeriesText_(series) {
+  const parts = series.map(function (e) { return e.d + '=' + e.p; });
+  let len = parts.join(';').length;
+  let from = 0;
+  while (len > CARD_HIST_MAX_CHARS && from < parts.length - 1) { len -= parts[from].length + 1; from++; }
+  return parts.slice(from).join(';');
+}
+
+/** Preis von heute anhängen, nur wenn er sich geändert hat; ein zweiter Lauf am selben Tag ersetzt den von heute. */
+function addHistPrice_(series, today, price) {
+  let last = series[series.length - 1];
+  if (last && last.d >= today) { series.pop(); last = series[series.length - 1]; }
+  if (!last || last.p !== price) series.push({ d: today, p: price });
+  return series;
+}
+
+/**
+ * Vergleichspreis days Tage vor today: der letzte Eintrag bis dahin ({p, since: ''}), sonst der erste Eintrag, wenn er
+ * vor today liegt ({p, since: sein Tag}, der Verlauf ist kürzer als der Zeitraum). null: kein Verlauf oder erst seit today.
+ */
+function histRef_(series, today, days) {
+  if (!series.length) return null;
+  const refDay = dashDayShift_(today, -days);
+  let ref = null;
+  for (let i = 0; i < series.length && series[i].d <= refDay; i++) ref = series[i];
+  if (ref) return { p: ref.p, since: '' };
+  return series[0].d < today ? { p: series[0].p, since: series[0].d } : null;
+}
+
+/**
+ * Ein vorhandenes Blatt name, das nicht vom Tool ist (nicht in TOOL_SHEETS dieser Tabelle, andere Kopfzeile, nicht
+ * leer), heißt danach „name (alt)“: Das Tool legt dann sein eigenes an, ohne fremde Daten zu überschreiben.
+ */
+function keepForeignSheet_(ss, name, headers) {
+  const sh = ss.getSheetByName(name);
+  if (!sh || sh.getLastRow() < 1) return;
+  let stored = [];
+  try { stored = JSON.parse(settingGet_('TOOL_SHEETS') || '[]'); } catch (e) { stored = []; }
+  if (Array.isArray(stored) && stored.indexOf(name) >= 0) return;
+  const got = sh.getRange(1, 1, 1, 2).getValues()[0].map(function (v) { return String(v == null ? '' : v).trim(); });
+  if (got[0] === headers[0] && got[1] === headers[1]) return;
+  let alt = name + ' (alt)';
+  for (let i = 2; ss.getSheetByName(alt); i++) alt = name + ' (alt ' + i + ')';
+  sh.setName(alt);
+  notify_('Dein Blatt „' + name + '“ heißt jetzt „' + alt + '“. Das Tool braucht den Namen für sein eigenes Blatt.');
+}
+
+function setupCardHistSheet_(ss) {
+  keepForeignSheet_(ss, SHEETS.cardHist, CARD_HIST_HEADERS);
+  return setupSimpleSheet_(ss, SHEETS.cardHist, CARD_HIST_HEADERS, [0, 1, 2, 4, 6, 8, 9], true);
+}
+
+/**
+ * Nach dem letzten Paket des Preislaufs (in der Sperre): Trendpreise der Daten-Zeilen rows in den Kartenverlauf,
+ * Vergleichspreise aller Zeilen neu. Karten, die nicht mehr in der Sammlung sind, behalten ihren Verlauf.
+ * today: 'yyyy-MM-dd' (Standard heute). -> Anzahl Zeilen im Kartenverlauf
+ */
+function writeCardHistory_(rows, today) {
+  today = today || todayText_();
+  const now = {};
+  rows.forEach(function (r) {
+    const id = String(r[COL.id] || '').trim();
+    const p = r[COL.price];
+    if (!id || !isDataRow_(r) || typeof p !== 'number' || !isFinite(p)) return;
+    const k = histKey_(id, r[COL.variant]);
+    if (!(k in now)) now[k] = round2_(p);
+  });
+  const ss = ss_();
+  const sh = ss.getSheetByName(SHEETS.cardHist) || setupCardHistSheet_(ss);
+  const w = CARD_HIST_HEADERS.length;
+  const last = sh.getLastRow();
+  const byKey = {};
+  if (last >= 2) {
+    sh.getRange(2, 1, last - 1, w).getValues().forEach(function (r) {
+      const id = String(r[0] == null ? '' : r[0]).trim();
+      if (!id) return;
+      const k = histKey_(id, r[1]);
+      if (byKey[k]) byKey[k].text += ';' + r[w - 1]; // doppelte Zeile (von Hand kopiert): zusammenlegen
+      else byKey[k] = { id: id, variant: String(r[1] == null ? '' : r[1]).trim(), text: String(r[w - 1] == null ? '' : r[w - 1]) };
+    });
+  }
+  Object.keys(now).forEach(function (k) {
+    if (byKey[k]) return;
+    const i = k.indexOf('|');
+    byKey[k] = { id: k.slice(0, i), variant: k.slice(i + 1), text: '' };
+  });
+  const out = Object.keys(byKey).sort().map(function (k) {
+    const e = byKey[k];
+    const series = parseHistSeries_(e.text);
+    if (k in now) addHistPrice_(series, today, now[k]);
+    const cells = [e.id, e.variant, today];
+    CHANGE_DAYS.forEach(function (days) {
+      const ref = histRef_(series, today, days);
+      cells.push(ref ? ref.p : '', ref ? ref.since : '');
+    });
+    cells.push(histSeriesText_(series));
+    return cells;
+  });
+  const all = [CARD_HIST_HEADERS].concat(out);
+  growRows_(sh, all.length);
+  ensureCols_(sh, w);
+  const fmt = ['@', '@', '@', EUR_FORMAT, '@', EUR_FORMAT, '@', EUR_FORMAT, '@', '@'];
+  const range = sh.getRange(1, 1, all.length, w);
+  range.setNumberFormats(all.map(function (r, i) { return i === 0 ? CARD_HIST_HEADERS.map(function () { return '@'; }) : fmt; }));
+  range.setValues(all);
+  if (last > all.length) sh.getRange(all.length + 1, 1, last - all.length, w).clearContent();
+  return out.length;
+}
+
+/** Vergleichspreise: {'id|variant': {7: {p, since}|null, 30: …, 90: …}}. Liest die Spalte Verlauf nicht. */
+function loadCardHistRefs_() {
+  const sh = ss_().getSheetByName(SHEETS.cardHist);
+  if (!sh || sh.getLastRow() < 2) return {};
+  const out = {};
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3 + 2 * CHANGE_DAYS.length).getValues().forEach(function (r) {
+    const id = String(r[0] == null ? '' : r[0]).trim();
+    if (!id) return;
+    const e = {};
+    CHANGE_DAYS.forEach(function (days, j) {
+      const p = r[3 + 2 * j], since = r[4 + 2 * j];
+      e[days] = typeof p === 'number' && isFinite(p) ? { p: p, since: since instanceof Date ? dateText_(since) : String(since == null ? '' : since).trim() } : null;
+    });
+    out[histKey_(id, r[1])] = e;
+  });
+  return out;
+}
+
+/** Trendpreis einer Gruppe (der eigene Preis zählt hier nicht): die erste Zahl, „von Hand“ zuerst. */
+function groupTrend_(rows) {
+  const ordered = orderGroupRows_(rows);
+  for (let i = 0; i < ordered.length; i++) {
+    const pr = ordered[i][COL.price];
+    if (typeof pr === 'number' && isFinite(pr)) return pr;
+  }
+  return null;
+}
+
+/**
+ * Veränderung des Trendpreises einer Gruppe: {7: {eur, pct, since}|null, 30: …, 90: …}; null ohne Karten-ID, Trendpreis
+ * oder Vergleichspreis. eur auf Cent, pct in ganzen Prozent (null bei Vergleichspreis 0), since 'yyyy-MM-dd' oder ''
+ * (ganzer Zeitraum). refs aus loadCardHistRefs_.
+ */
+function groupChanges_(rows, refs) {
+  if (!refs || !rows || !rows.length) return null;
+  const p = orderGroupRows_(rows)[0];
+  const id = String(p[COL.id] || '').trim();
+  const e = id ? refs[histKey_(id, p[COL.variant])] : null;
+  const cur = e ? groupTrend_(rows) : null;
+  if (cur == null) return null;
+  const out = {};
+  let any = false;
+  CHANGE_DAYS.forEach(function (days) {
+    const ref = e[days];
+    if (!ref) { out[days] = null; return; }
+    any = true;
+    const diff = cur - ref.p;
+    out[days] = { eur: round2_(diff), pct: ref.p > 0 ? Math.round(diff / ref.p * 100) || 0 : null, since: ref.since };
+  });
+  return any ? out : null;
+}
+
+/**
+ * Preisverlauf einer Gruppe (gkey wie in searchCollection) für die Kurve in Seitenleiste und Web-App.
+ * -> {series: [['yyyy-MM-dd', Preis], …] alt nach neu, until: Tag des letzten Preislaufs}; leer bei freien Karten.
+ */
+function getPriceHistory(gkey) {
+  const parts = String(gkey == null ? '' : gkey).split('|');
+  const id = String(parts[0] || '').trim();
+  const empty = { series: [], until: '' };
+  if (!id || /^frei:/.test(id)) return empty;
+  const sh = ss_().getSheetByName(SHEETS.cardHist);
+  if (!sh || sh.getLastRow() < 2) return empty;
+  const k = histKey_(id, parts[1]);
+  const w = CARD_HIST_HEADERS.length;
+  let text = '', until = '';
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r, i) {
+    if (histKey_(r[0], r[1]) !== k) return;
+    text += ';' + sh.getRange(i + 2, w).getValue();
+    until = r[2] instanceof Date ? dateText_(r[2]) : String(r[2] == null ? '' : r[2]).trim();
+  });
+  return { series: parseHistSeries_(text).map(function (e) { return [e.d, e.p]; }), until: until };
 }
 
 // ---------------------------------------------------------------------------

@@ -96,6 +96,20 @@
   .foot { text-align: center; font-size: 12px; color: var(--muted); padding: 18px 12px 24px; }
   input.copyurl { margin-top: 6px; font-size: 13px; }
   .lnk { border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: inherit; padding: 8px 4px; min-height: 36px; }
+  .chg { white-space: nowrap; font-weight: 600; }
+  .chg.up { color: #137333; }
+  .chg.down { color: #c5221f; }
+  .chg.flat { color: var(--muted); font-weight: 400; }
+  .curve { position: relative; margin-top: 8px; }
+  .curve .plot { touch-action: pan-y; outline: none; border-radius: 4px; }
+  .curve .plot:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .curve svg { display: block; width: 100%; height: 150px; }
+  .curve .tip { position: absolute; top: 0; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 8px; font-size: 12px; color: var(--muted); box-shadow: 0 1px 3px rgba(0,0,0,.12); white-space: nowrap; }
+  .curve .tip b { display: block; font-size: 14px; color: var(--fg); }
+  .curve details { margin-top: 6px; font-size: 13px; }
+  .curve summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+  .curve ul { margin: 4px 0 0 18px; padding: 0; }
 </style>
 </head>
 <body>
@@ -134,8 +148,8 @@
 <div id="paneColl" class="panel hidden">
   <div class="row">
     <div>
-      <label for="colQuery">Name oder Nummer</label>
-      <input type="text" id="colQuery" autocomplete="off" placeholder="z. B. Glurak 025/165" oninput="debouncedCollection()">
+      <label for="colQuery">Name, Nr. oder Künstler</label>
+      <input type="text" id="colQuery" autocomplete="off" placeholder="z. B. Glurak oder Arita" oninput="debouncedCollection()">
     </div>
     <div>
       <label for="colSet">Set (optional)</label>
@@ -150,6 +164,12 @@
     <button class="btn small" id="colDir" type="button" onclick="toggleDir()">↑</button>
   </div>
   <div class="hint" id="colDirHint"></div>
+  <label id="colChgLbl">Preisveränderung über</label>
+  <div class="seg" id="colChg" role="group" aria-labelledby="colChgLbl">
+    <button type="button" id="chg7" onclick="setChgDays(7)">7 Tage</button>
+    <button type="button" id="chg30" onclick="setChgDays(30)">30 Tage</button>
+    <button type="button" id="chg90" onclick="setChgDays(90)">90 Tage</button>
+  </div>
   <div id="colDex"></div>
   <div id="collMsg"></div>
   <div id="collResults"></div>
@@ -610,13 +630,13 @@ function renderCollection(res) {
     g.rows = g.rows || [];
     g.open = !!state.open[g.gkey];
     html += '<div class="grp" id="g' + i + '"><div id="gh' + i + '"></div><div id="gc' + i + '"></div>' +
-      '<div class="gx hidden" id="gx' + i + '"><div id="gr' + i + '"></div><div id="ge' + i + '"></div><div id="gp' + i + '"></div><div id="gl' + i + '"></div></div></div>';
+      '<div class="gx hidden" id="gx' + i + '"><div id="gv' + i + '"></div><div id="gr' + i + '"></div><div id="ge' + i + '"></div><div id="gp' + i + '"></div><div id="gl' + i + '"></div></div></div>';
   });
   $('collResults').innerHTML = html;
   groups.forEach(function (g, i) { draw(i, g, 'all'); });
 }
 
-/** Teile einer Gruppe neu zeichnen: h Kopf, c Auswahl, r Exemplare, e Bearbeiten, p Preis, l Verknüpfen. */
+/** Teile einer Gruppe neu zeichnen: h Kopf, c Auswahl, v Preiskurve, r Exemplare, e Bearbeiten, p Preis, l Verknüpfen. */
 function draw(i, g, parts) {
   if (!state.groups || state.groups[i] !== g) return; // Gruppe gehört zu einer älteren Liste
   var all = parts === 'all';
@@ -626,6 +646,8 @@ function draw(i, g, parts) {
   var x = $('gx' + i);
   if (x) x.classList.toggle('hidden', !g.open);
   if (!g.open) return;
+  loadHist(i, g);
+  put('v', curveHtml);
   put('r', rowsHtml);
   put('e', editHtml);
   put('p', priceHtml);
@@ -673,6 +695,8 @@ function headHtml(g, i) {
   sub.push(esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant));
   var p = g.price == null || g.price === '' ? NaN : Number(g.price);
   if (!isNaN(p)) sub.push(esc(eur(p)) + (g.priceManual ? ' manuell' : ''));
+  var ch = g.priceManual || !g.chg ? null : g.chg[chgDays];
+  if (ch) sub.push(chgHtml(ch));
   if (g.exemplare) sub.push(esc(g.exemplare));
   if (collSort.sort === 'rarity' && g.rarity) sub.push(esc(g.rarity));
   if (collSort.sort === 'dex' && g.dex && g.dex.length) sub.push('#' + g.dex.map(esc).join(', #'));
@@ -681,6 +705,7 @@ function headHtml(g, i) {
     ' onkeydown="groupKey(event,this,' + i + ')">' +
     '<div class="t">' + titleHtml(g) + '</div><div class="s">' + sub.join(' · ') +
     ' <span class="chev">' + (g.open ? '▲' : '▼') + '</span></div>' +
+    (g.illustrator ? '<div class="s">Illus. ' + esc(g.illustrator) + '</div>' : '') +
     (g.undo && !g.busy ? '<button class="undo" onclick="event.stopPropagation();undoGroup(' + i + ')">Rückgängig</button>' : '') + '</div>' +
     '<div class="ctl"><button class="btn small" onclick="groupMinus(' + i + ')"' + (!g.count || g.busy ? ' disabled' : '') + '>−1</button>' +
     '<span class="cnt">' + esc(g.count) + '</span>' +
@@ -952,9 +977,9 @@ function sendPrice(i, g, price) {
     g.priceBusy = false;
     var fn = function (x) { applyPrice(x, res); };
     fn(g);
-    draw(i, g, 'hp');
-    syncOthers(g, fn, 'hp');
-    noteOp(function () { syncOthers(g, fn, 'hp'); });
+    draw(i, g, 'hpv');
+    syncOthers(g, fn, 'hpv');
+    noteOp(function () { syncOthers(g, fn, 'hpv'); });
     setMsg('collMsg', price == null ? 'Eigener Preis entfernt.' : 'Eigener Preis gespeichert.', 'ok');
   }).catch(function (e) { g.priceBusy = false; draw(i, g, 'p'); setMsg('collMsg', esc(errText(e)), 'err'); });
 }
@@ -1150,6 +1175,201 @@ function drawCollDex() {
     '<button type="button" onclick="clearCollDex()" aria-label="Pokédex-Filter entfernen">×</button></div>' : '';
 }
 function clearCollDex() { collSort.dex = null; loadCollection(); }
+
+// ---------- Preisveränderung und Preiskurve (Kartenverlauf) ----------
+
+var CHG_DAYS = [7, 30, 90];
+var chgDays = 30;   // Zeitraum der Veränderung, pro Gerät gemerkt
+var histCache = {}; // gkey -> {series, until}, solange die Seite offen ist
+// Kurve: Höhe und Ränder in px, eine Linie in Blau (Rot und Grün stehen für Minus und Plus)
+var CV = { h: 150, r: 12, t: 16, b: 22, line: '#2a78d6', grid: '#e1e0d9', ink: '#5f6368', cross: '#9aa0a6' };
+
+function initChg() {
+  var d = Number(memGet('pkmChgDays'));
+  if (CHG_DAYS.indexOf(d) >= 0) chgDays = d;
+  drawChg();
+}
+function drawChg() {
+  CHG_DAYS.forEach(function (d) {
+    var b = $('chg' + d);
+    b.classList.toggle('on', d === chgDays);
+    b.setAttribute('aria-pressed', d === chgDays ? 'true' : 'false');
+  });
+}
+function setChgDays(d) {
+  if (CHG_DAYS.indexOf(d) < 0 || d === chgDays) return;
+  chgDays = d;
+  memSet('pkmChgDays', String(d));
+  drawChg();
+  (state.groups || []).forEach(function (g, i) { draw(i, g, 'h'); });
+}
+
+/** 'yyyy-MM-dd' -> '23.10.' im laufenden Jahr, sonst '23.10.2025'; longDate immer mit Jahr */
+function shortDate(ymd) {
+  var p = String(ymd || '').split('-');
+  if (p.length !== 3) return String(ymd || '');
+  return p[2] + '.' + p[1] + '.' + (Number(p[0]) === new Date().getFullYear() ? '' : p[0]);
+}
+function longDate(ymd) {
+  var p = String(ymd || '').split('-');
+  return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : String(ymd || '');
+}
+
+/** Veränderung {eur, pct, since} -> „+1,20 € (+12 %)“ grün, Minus rot; bei kürzerem Verlauf „seit 23.10.“ dahinter */
+function chgHtml(c) {
+  var e = Number(c.eur) || 0;
+  var sign = e > 0 ? '+' : e < 0 ? '−' : '±';
+  var txt = sign + eur(Math.abs(e)) + (c.pct == null ? '' : ' (' + sign + Math.abs(c.pct) + ' %)');
+  return '<span class="chg ' + (e > 0 ? 'up' : e < 0 ? 'down' : 'flat') + '">' + esc(txt) + '</span>' +
+    (c.since ? ' seit ' + esc(shortDate(c.since)) : '');
+}
+
+/** Verlauf einer aufgeklappten Gruppe einmal laden (freie Karten haben keinen) */
+function loadHist(i, g) {
+  if (g.isFree || g.hist || g.histBusy) return;
+  if (histCache[g.gkey]) { g.hist = histCache[g.gkey]; return; }
+  g.histBusy = true;
+  call('getPriceHistory', g.gkey).then(function (res) {
+    g.histBusy = false;
+    g.hist = histCache[g.gkey] = { series: (res && res.series) || [], until: (res && res.until) || '' };
+    draw(i, g, 'v');
+  }).catch(function (e) {
+    g.histBusy = false;
+    g.hist = { series: [], until: '', error: errText(e) }; // nicht merken: beim nächsten Laden der Liste neu
+    draw(i, g, 'v');
+  });
+}
+
+function dayNum(ymd) { var p = String(ymd).split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5; }
+function niceStep(x) {
+  var e = Math.pow(10, Math.floor(Math.log(x) / Math.LN10)), f = x / e;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
+}
+/** Achsenwerte: runde Schritte, die lo..hi einschließen (nie unter 0) */
+function niceTicks(lo, hi) {
+  if (hi - lo < 0.01) { var pad = Math.max(0.05, hi * 0.1); lo -= pad; hi += pad; }
+  var step = niceStep((hi - lo) / 3);
+  var a = Math.max(0, Math.floor(lo / step) * step), out = [];
+  for (var v = a; v < hi + step * 0.999 && out.length < 7; v += step) out.push(Math.round(v * 100) / 100);
+  if (out.length < 2) out.push(Math.round((a + step) * 100) / 100);
+  return { ticks: out, step: step };
+}
+function tickText(v, step) {
+  return step >= 1 ? Math.round(v).toLocaleString('de-DE') + ' €' : eur(v);
+}
+
+/** Lage aller Punkte: Preisänderungen als Stufen bis zum letzten Preislauf (until) */
+function curveModel(series, until, w) {
+  var pts = series.map(function (e) { return { d: String(e[0]), p: Number(e[1]), n: dayNum(e[0]) }; });
+  var last = pts[pts.length - 1];
+  var endD = until && until > last.d ? until : last.d;
+  var lo = Infinity, hi = -Infinity;
+  pts.forEach(function (q) { lo = Math.min(lo, q.p); hi = Math.max(hi, q.p); });
+  var nt = niceTicks(lo, hi), ticks = nt.ticks;
+  var left = 8 + 6.5 * Math.max.apply(null, ticks.map(function (v) { return tickText(v, nt.step).length; }));
+  var x0 = pts[0].n, x1 = Math.max(dayNum(endD), x0 + 1);
+  var y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  var px = function (n) { return Math.round((left + (n - x0) / (x1 - x0) * (w - left - CV.r)) * 10) / 10; };
+  var py = function (v) { return Math.round((CV.t + (1 - (v - y0) / (y1 - y0)) * (CV.h - CV.t - CV.b)) * 10) / 10; };
+  var marks = pts.map(function (q) { return { d: q.d, p: q.p, x: px(q.n), y: py(q.p) }; });
+  if (endD > last.d) marks.push({ d: endD, p: last.p, x: px(dayNum(endD)), y: py(last.p), end: true });
+  else marks[marks.length - 1].end = true;
+  return { w: w, left: left, ticks: ticks, step: nt.step, py: py, marks: marks, pts: pts, lo: lo, hi: hi, first: pts[0].d, endD: endD };
+}
+
+/** Endwert über oder unter den Endpunkt, auf die Seite, von der die Linie nicht kommt */
+function endLabelY(m) {
+  var end = m[m.length - 1], prev = end;
+  for (var k = m.length - 2; k >= 0 && Math.abs(prev.y - end.y) < 1; k--) prev = m[k];
+  var below = prev.y < end.y - 1 || end.y < CV.t + 14;
+  if (end.y > CV.h - CV.b - 16) below = false;
+  return below ? end.y + 18 : end.y - 9;
+}
+
+function curveHtml(g, i) {
+  if (g.isFree) return '';
+  var head = '<div class="box"><h3>Preisverlauf (Cardmarket-Trend)</h3>';
+  var h = g.hist;
+  if (!h || g.histBusy) return head + '<div class="spin">Preisverlauf wird geladen …</div></div>';
+  if (h.error) return head + '<div class="msg err">' + esc(h.error) + '</div></div>';
+  if (!h.series.length) {
+    return head + '<div class="hint">Noch kein Verlauf. Der nächtliche Preislauf merkt sich den Trendpreis dieser Karte ab jetzt, immer wenn er sich ändert.</div></div>';
+  }
+  var el = $('gv' + i);
+  var c = g.curve = curveModel(h.series, h.until, Math.max(240, Math.round(((el && el.clientWidth) || 300) - 22)));
+  var m = c.marks, end = m[m.length - 1], H = CV.h;
+  // Fokus und Zeiger am umgebenden div (Fokus-Ereignisse an SVG-Elementen kennen nicht alle Browser)
+  var svg = '<div class="plot" id="cvp' + i + '" role="img" tabindex="0"' +
+    ' aria-label="' + esc('Preiskurve vom ' + longDate(c.first) + ' bis ' + longDate(c.endD) + ': jetzt ' + eur(end.p) + ', tiefster ' + eur(c.lo) +
+      ', höchster ' + eur(c.hi) + '. Mit den Pfeiltasten durch die Preise gehen.') + '"' +
+    ' onpointermove="curveMove(event,' + i + ')" onpointerleave="curveHide(' + i + ')" onfocus="curveFocus(' + i + ')" onblur="curveHide(' + i + ')"' +
+    ' onkeydown="curveKey(event,' + i + ')"><svg viewBox="0 0 ' + c.w + ' ' + H + '" width="' + c.w + '" height="' + H + '" aria-hidden="true">';
+  c.ticks.forEach(function (v) {
+    var y = c.py(v);
+    svg += '<line x1="' + c.left + '" x2="' + (c.w - CV.r) + '" y1="' + y + '" y2="' + y + '" stroke="' + CV.grid + '" stroke-width="1"/>' +
+      '<text x="' + (c.left - 6) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="' + CV.ink + '">' + esc(tickText(v, c.step)) + '</text>';
+  });
+  svg += '<text x="' + c.left + '" y="' + (H - 6) + '" font-size="11" fill="' + CV.ink + '">' + esc(longDate(c.first)) + '</text>';
+  if (c.endD !== c.first) svg += '<text x="' + (c.w - CV.r) + '" y="' + (H - 6) + '" text-anchor="end" font-size="11" fill="' + CV.ink + '">' + esc(longDate(c.endD)) + '</text>';
+  var d = 'M' + m[0].x + ',' + m[0].y;
+  for (var k = 1; k < m.length; k++) d += 'H' + m[k].x + 'V' + m[k].y;
+  svg += '<path d="' + d + '" fill="none" stroke="' + CV.line + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+    '<circle cx="' + end.x + '" cy="' + end.y + '" r="4" fill="' + CV.line + '" stroke="#fff" stroke-width="2"/>' +
+    '<text x="' + (end.x - 8) + '" y="' + endLabelY(m) + '" text-anchor="end" font-size="12" font-weight="600" fill="#202124"' +
+    ' stroke="#fff" stroke-width="3" paint-order="stroke">' + esc(eur(end.p)) + '</text>' +
+    '<line id="cvx' + i + '" y1="' + CV.t + '" y2="' + (H - CV.b) + '" stroke="' + CV.cross + '" stroke-width="1" visibility="hidden"/>' +
+    '<circle id="cvd' + i + '" r="4" fill="' + CV.line + '" stroke="#fff" stroke-width="2" visibility="hidden"/></svg></div>';
+  var cap = c.lo === c.hi ? 'Seit ' + longDate(c.first) + ' unverändert bei ' + eur(c.lo) + '.'
+    : 'Seit ' + longDate(c.first) + ' · tiefster ' + eur(c.lo) + ' · höchster ' + eur(c.hi);
+  var list = c.pts.slice().reverse();
+  var items = list.slice(0, 100).map(function (q) { return '<li>' + esc(longDate(q.d)) + ': ' + esc(eur(q.p)) + '</li>'; }).join('') +
+    (list.length > 100 ? '<li>… und ' + (list.length - 100) + ' ältere</li>' : '');
+  return head + (g.priceManual ? '<div class="hint">In der Sammlung zählt dein eigener Preis (' + esc(eur(g.ownPrice)) + '). Die Kurve zeigt den Cardmarket-Trend.</div>' : '') +
+    '<div class="curve">' + svg + '<div class="tip hidden" id="cvt' + i + '"></div>' +
+    '<div class="hint">' + esc(cap) + '</div>' +
+    '<details><summary>Alle Preisänderungen (' + list.length + ')</summary><ul>' + items + '</ul></details></div></div>';
+}
+
+/** Fadenkreuz und Preis am nächsten Punkt (Maus, Finger oder Pfeiltasten) */
+function curveShow(i, k) {
+  var g = state.groups[i], c = g && g.curve;
+  var line = $('cvx' + i), dot = $('cvd' + i), tip = $('cvt' + i);
+  if (!c || !line || !dot || !tip) return;
+  k = Math.max(0, Math.min(c.marks.length - 1, k));
+  c.sel = k;
+  var m = c.marks[k];
+  line.setAttribute('x1', m.x); line.setAttribute('x2', m.x); line.setAttribute('visibility', 'visible');
+  dot.setAttribute('cx', m.x); dot.setAttribute('cy', m.y); dot.setAttribute('visibility', 'visible');
+  tip.innerHTML = '<b>' + esc(eur(m.p)) + '</b>' + esc(m.end && k === c.marks.length - 1 && m.d !== c.pts[c.pts.length - 1].d ? 'Stand ' + longDate(m.d) : 'ab ' + longDate(m.d));
+  tip.classList.remove('hidden');
+  var r = line.ownerSVGElement.getBoundingClientRect();
+  var x = m.x * (r.width / c.w), tw = tip.offsetWidth;
+  tip.style.left = Math.max(0, Math.min(r.width - tw, x - tw / 2)) + 'px';
+}
+function curveMove(ev, i) {
+  var g = state.groups[i], c = g && g.curve;
+  if (!c) return;
+  var r = ev.currentTarget.getBoundingClientRect();
+  var x = (ev.clientX - r.left) * (c.w / (r.width || c.w));
+  var best = 0, bd = Infinity;
+  c.marks.forEach(function (m, k) { var dd = Math.abs(m.x - x); if (dd < bd) { bd = dd; best = k; } });
+  curveShow(i, best);
+}
+function curveKey(ev, i) {
+  var g = state.groups[i], c = g && g.curve;
+  if (!c) return;
+  var k = c.sel == null ? c.marks.length - 1 : c.sel;
+  if (ev.key === 'ArrowLeft') k--; else if (ev.key === 'ArrowRight') k++;
+  else if (ev.key === 'Home') k = 0; else if (ev.key === 'End') k = c.marks.length - 1; else return;
+  ev.preventDefault();
+  curveShow(i, k);
+}
+function curveFocus(i) { var g = state.groups[i], c = g && g.curve; if (c) curveShow(i, c.sel == null ? c.marks.length - 1 : c.sel); }
+function curveHide(i) {
+  ['cvx', 'cvd'].forEach(function (p) { var el = $(p + i); if (el) el.setAttribute('visibility', 'hidden'); });
+  var tip = $('cvt' + i);
+  if (tip) tip.classList.add('hidden');
+}
 
 // ---------- Pokédex ----------
 
@@ -1564,6 +1784,7 @@ if (MODE === 'sidebar') {
   $('takeBox').classList.remove('hidden');
 }
 initSort();
+initChg();
 initDex();
 call('getSetSuggestions').then(function (names) {
   $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');

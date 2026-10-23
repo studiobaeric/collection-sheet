@@ -332,7 +332,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getPokedex', 'getPriceHistory', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
@@ -357,8 +357,8 @@ function seedImport(env) {
   t.ok('Schema v2', env.setting('SCHEMA_VERSION') === '2');
   t.ok('Daten und Gruppen versteckt, Dashboard und Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden &&
     env.ss.list[0].name === 'Dashboard' && env.ss.list[1].name === 'Sammlung', env.ss.list.map(x => x.name));
-  t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 13), env.run('VIEW_HEADERS'));
-  t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:W,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
+  t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 16), env.run('VIEW_HEADERS'));
+  t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:Z,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
     'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
@@ -778,12 +778,12 @@ function seedImport(env) {
   const ve = env.uiCall('setViewExtras', ['Ordner', 'Gibtsnicht']);
   t.eq('setViewExtras behält nur vorhandene', ve, { viewExtras: ['Ordner'] });
   const gh = env.values('Gruppen')[0];
-  t.ok('Gruppen: Spalte 24 = Ordner', gh.length === 24 && gh[23] === 'Ordner', gh);
+  t.ok('Gruppen: Spalte 27 = Ordner', gh.length === 27 && gh[26] === 'Ordner', gh);
   t.ok('Gruppen: Wert der Gruppe', env.groups().find(x => x['Gruppenschlüssel'] === GK)['Ordner'] === 'Seite 4');
   const view = env.sheet('Sammlung');
-  t.ok('Sammlung: Kopf mit Ordner', view.getRange(5, 14).getValue() === 'Ordner' && view.getRange(5, 13).getValue() === 'Preisstand');
+  t.ok('Sammlung: Kopf mit Ordner', view.getRange(5, 17).getValue() === 'Ordner' && view.getRange(5, 16).getValue() === 'Preisstand');
   const f = view.getRange('A6').getFormula();
-  t.ok('Formel liest Gruppen!A2:X und zeigt Spalte 24', /Gruppen!A2:X,/.test(f) && /CHOOSECOLS\(srt, 24\)/.test(f) && !/Daten!/.test(f));
+  t.ok('Formel liest Gruppen!A2:AA und zeigt Spalte 27', /Gruppen!A2:AA,/.test(f) && /CHOOSECOLS\(srt, 27\)\s*\)\)/.test(f) && !/Daten!/.test(f));
   t.ok('Setliste aus Gruppen', /Gruppen!D2:D/.test(view.getRange('Z2').getFormula()));
   const before = env.groups().find(x => x['Gruppenschlüssel'] === 'swsh3-025|normal|Snowflake');
   env.DB['de/cards/swsh3-025'] = H.card('swsh3-025', 'de', { pricing: { cardmarket: { trend: 2, 'trend-holo': 4, updated: '2026-10-15T00:00:00Z' } } });
@@ -836,7 +836,7 @@ function seedImport(env) {
   checkUiMatchesServer(E, 'nach onEdit');
   env.ctx.ansichtNeuAufbauen();
   t.ok('Ansicht neu aufbauen: Meldung', /Ansicht neu aufgebaut/.test(env.ui.alerts[env.ui.alerts.length - 1]), env.ui.alerts);
-  t.ok('Ansicht neu aufbauen: Zusatzspalte bleibt', view.getRange(5, 14).getValue() === 'Ordner');
+  t.ok('Ansicht neu aufbauen: Zusatzspalte bleibt', view.getRange(5, 17).getValue() === 'Ordner');
   env.ctx.apiPruefen();
   const chk = env.values('API-Check');
   t.ok('API prüfen läuft (Schritte 1 bis 14)', chk.length > 10 && chk.some(r => /^14\./.test(r[0])), chk.map(r => r[0]));
@@ -903,7 +903,7 @@ function seedImport(env) {
     t.ok('alte Einträge: Schlüssel v2, Herkunft Hand', nd.length === 3 && nd.every(r => r.origin === 'Hand' && r.lang === 'DE' && /^E[0-9a-f]{10}$/.test(r.eid)) &&
       nd.map(r => r.key).join(',') === 'swsh3-025|normal||NM|DE,swsh3-025|reverse|||DE,base1-4|holo||LP|DE', nd.map(r => r.key));
     const vf = nu.sheet('Sammlung').getRange('A6').getFormula();
-    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /Gruppen!A2:W,/.test(vf) && !/Daten!/.test(vf));
+    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /Gruppen!A2:Z,/.test(vf) && !/Daten!/.test(vf));
     t.ok('Sammlung: Suchfeld und Bilder-Schalter bleiben', nu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && nu.sheet('Sammlung').getRange('H4').getValue() === true);
     t.ok('Sammlung: Spalte Exemplare statt Zustand', nu.sheet('Sammlung').getRange(5, 6).getValue() === 'Exemplare');
     t.ok('Gruppen: 3 Gruppen', nu.groups().length === 3);

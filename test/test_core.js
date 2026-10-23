@@ -409,15 +409,15 @@ t.section('setGroupOwnPrice / Gruppen');
   const ve = env.uiCall('setViewExtras', ['Fach', 'Gibtsnicht', 'Fach']);
   eq('setViewExtras keeps existing names only', ve, { viewExtras: ['Fach'] });
   g = groupBy(env, a.gkey);
-  ok('Gruppen extra column values joined', env.values('Gruppen')[0][23] === 'Fach' && (g['Fach'] === 'A1 / B2' || g['Fach'] === 'B2 / A1'), g['Fach']);
+  ok('Gruppen extra column values joined', env.values('Gruppen')[0][26] === 'Fach' && (g['Fach'] === 'A1 / B2' || g['Fach'] === 'B2 / A1'), g['Fach']);
   const view = env.values('Sammlung');
-  ok('view header has extra', view[4][13] === 'Fach', view[4]);
+  ok('view header has extra', view[4][16] === 'Fach', view[4]);
   const f = env.sheet('Sammlung').formulas['6,1'];
-  ok('view formula reads Gruppen with extra', /Gruppen!A2:X,/.test(f) && /CHOOSECOLS\(srt, 24\)\s*\)\), "Keine/.test(f) && !/Daten!/.test(f), f.slice(0, 120));
+  ok('view formula reads Gruppen with extra', /Gruppen!A2:AA,/.test(f) && /CHOOSECOLS\(srt, 27\)\s*\)\), "Keine/.test(f) && !/Daten!/.test(f), f.slice(0, 120));
   env.sheet('Sammlung').getRange('B4').setValue('glurak');
   env.uiCall('setViewExtras', []);
   ok('view controls kept on layout change', env.sheet('Sammlung').getRange('B4').getValue() === 'glurak');
-  ok('extra removed from view', env.values('Gruppen')[0].length === 23 && env.values('Sammlung')[4][12] === 'Preisstand' && env.values('Sammlung')[4][13] === '', env.values('Sammlung')[4]);
+  ok('extra removed from view', env.values('Gruppen')[0].length === 26 && env.values('Sammlung')[4][15] === 'Preisstand' && env.values('Sammlung')[4][16] === '', env.values('Sammlung')[4]);
   ok('no nested locks', env.lock.nested === 0, env.lock);
 }
 
@@ -427,20 +427,21 @@ t.section('viewFormula_ / Ansicht');
   const env = setup();
   const c = env.ctx;
   const f0 = c.viewFormula_(0), f2 = c.viewFormula_(2);
-  ok('formula 0 extras', /FILTER\(Gruppen!A2:W, Gruppen!A2:A<>""\)/.test(f0) && /HSTACK\(flt, zsort, msort, vals\), 24, TRUE, 25, TRUE, 5, TRUE/.test(f0) && /CHOOSECOLS\(srt, 26\)/.test(f0), f0);
-  ok('formula 2 extras', /Gruppen!A2:Y,/.test(f2) && /, 26, TRUE, 27, TRUE,/.test(f2) && /CHOOSECOLS\(srt, 28\)/.test(f2) && /CHOOSECOLS\(srt, 24\), CHOOSECOLS\(srt, 25\)/.test(f2), f2);
+  ok('formula 0 extras', /FILTER\(Gruppen!A2:Z, Gruppen!A2:A<>""\)/.test(f0) && /HSTACK\(flt, zsort, msort, vals\), 27, TRUE, 28, TRUE, 5, TRUE/.test(f0) && /CHOOSECOLS\(srt, 29\)/.test(f0), f0);
+  ok('formula 2 extras', /Gruppen!A2:AB,/.test(f2) && /, 29, TRUE, 30, TRUE,/.test(f2) && /CHOOSECOLS\(srt, 31\)/.test(f2) && /CHOOSECOLS\(srt, 27\), CHOOSECOLS\(srt, 28\)/.test(f2), f2);
   ok('Zuletzt hinzugefügt uses column 21', /CHOOSECOLS\(flt, 21\)/.test(f0));
   ok('Exemplare column 13, price 15', /CHOOSECOLS\(srt, 13\),\s+CHOOSECOLS\(srt, 14\),\s+MAP\(CHOOSECOLS\(srt, 15\)/.test(f0));
   ok('no <? in formula', f0.indexOf('<?') < 0);
-  eq('VIEW_HEADERS', env.run('VIEW_HEADERS'), ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand']);
-  ok('Daten probe now Gruppen', env.run('FORMULA_PROBES').some(p => /Gruppen!A1:W/.test(p[0])) && !env.run('FORMULA_PROBES').some(p => /Daten!/.test(p[0])));
+  eq('VIEW_HEADERS', env.run('VIEW_HEADERS'), ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)', '± 30 Tage (EUR)', '± 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand']);
+  ok('change columns after Wert, artist in the search', /CHOOSECOLS\(srt, 29\),\s+CHOOSECOLS\(srt, 24\), CHOOSECOLS\(srt, 25\), CHOOSECOLS\(srt, 26\),/.test(f0) && /SEARCH\(wd, INDEX\(rw, 1, 20\)\)/.test(f0));
+  ok('Daten probe now Gruppen', env.run('FORMULA_PROBES').some(p => /Gruppen!A1:Z/.test(p[0])) && !env.run('FORMULA_PROBES').some(p => /Daten!/.test(p[0])));
   const z = env.sheet('Sammlung').formulas['2,26'];
   ok('set list from Gruppen!D2:D', /Gruppen!D2:D/.test(z), z);
   // Semikolon-Rückfall der Selbstprüfung
   env.setFormulaDisplay((sheet, a1, formula) => (/,/.test(formula.replace(/"[^"]*"/g, '')) ? '#ERROR!' : ''));
   c.ansichtNeuAufbauen();
   const a6 = env.sheet('Sammlung').formulas['6,1'];
-  ok('setFormulaLocal_ falls back to semicolons', /Gruppen!A2:W; Gruppen!A2:A<>""/.test(a6), a6.slice(0, 80));
+  ok('setFormulaLocal_ falls back to semicolons', /Gruppen!A2:Z; Gruppen!A2:A<>""/.test(a6), a6.slice(0, 80));
   ok('ansichtNeuAufbauen message', /Ansicht neu aufgebaut/.test(env.ui.alerts[env.ui.alerts.length - 1]));
 }
 
@@ -482,12 +483,12 @@ t.section('Preislauf und Verlauf');
   env.uiCall('addFreeCard', { name: 'Frei', qty: 2, ownPrice: 1.5 });
   env.uiCall('addFreeCard', { name: 'Ohne Preis', qty: 1 });
   const targets = env.ctx.priceTargets_().map(x => x.key);
-  eq('price targets skip own-price ids and free cards', targets, ['de|swsh3-025']);
+  eq('price targets: own-price ids too (for the curve), never free cards', targets, ['de|base1-4', 'de|swsh3-025']);
   // Preisänderung bei tcgdex
   env.DB['de/cards/swsh3-025'].pricing.cardmarket.trend = 2;
   env.fetchLog.length = 0;
   env.ctx.preiseJetztAktualisieren();
-  ok('base1-4 card not fetched', !env.fetchLog.some(u => /cards\/base1-4/.test(u)), env.fetchLog);
+  ok('base1-4 (own price) fetched', env.fetchLog.some(u => /cards\/base1-4/.test(u)), env.fetchLog);
   ok('trend written + Gruppen rebuilt', env.data().find(x => x.eid === a.eid).price === 2 && groupBy(env, a.gkey)['Preis (EUR)'] === 2);
   const hist = env.values('Verlauf');
   const last = hist[hist.length - 1];

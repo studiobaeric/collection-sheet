@@ -14,6 +14,10 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen, Karten erfasst du dort wie bisher über die Handy-Seite
 - Neuer Menüpunkt „Pokémon > Dashboard“
 - Oben in jeder Script- und HTML-Datei steht jetzt die Version, so siehst du beim Aktualisieren von Hand, welchen Stand jede Datei hat
+- Die Suche in der Sammlung findet auch den Künstler einer Karte, z. B. „Arita“. Seitenleiste und Handy-Seite zeigen den Künstler bei jeder Karte
+- Preisverlauf pro Karte: Der nächtliche Preislauf merkt sich den Trendpreis jeder Karte, wenn er sich ändert. Die Sammlung zeigt die Veränderung in Euro und Prozent, im Blatt über 30 Tage, in Seitenleiste und Handy-Seite wählbar über 7, 30 oder 90 Tage
+- In Seitenleiste und Handy-Seite klappt bei jeder Karte ihre Preiskurve auf
+- Karten mit eigenem Preis ruft der Preislauf jetzt auch ab, damit ihre Kurve den Cardmarket-Trend zeigt. In der Sammlung zählt weiter dein eigener Preis
 
 ## [1.0.3] – 2026-10-22
 

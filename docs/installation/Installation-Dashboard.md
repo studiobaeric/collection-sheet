@@ -1,6 +1,6 @@
 # Dashboard installieren (Version 1.1.0, Stand 22.10.2026)
 
-Version 1.1.0 bringt das Blatt **Dashboard**. Sie enthält auch alles aus 1.0.3. Deine Karten, Importe, der Verlauf und der nächtliche Preislauf bleiben, wie sie sind.
+Version 1.1.0 bringt das Blatt **Dashboard**, die Suche nach dem Künstler und den Preisverlauf pro Karte. Sie enthält auch alles aus 1.0.3. Deine Karten, Importe, der Verlauf und der nächtliche Preislauf bleiben, wie sie sind.
 
 ## Weg 1: Neue Version holen (nach dem Release)
 
@@ -25,6 +25,9 @@ Zum Ausprobieren am besten in einer Kopie deiner Tabelle (**Datei > Kopie erstel
 4. Klicke auf **Karten erfassen**: Die Seitenleiste geht auf. **Importieren** öffnet sie gleich im Tab Import.
 5. Klicke auf **Pokédex**: Das Blatt Pokédex ist offen. **Pokémon > Dashboard** bringt dich zurück.
 6. Füge eine Karte hinzu und schau aufs Dashboard: Karten und Gesamtwert sind schon mitgezählt.
+7. Tippe in der Seitenleiste im Tab Sammlung den Nachnamen eines Künstlers ins Suchfeld, z. B. „Arita“: Es kommen seine Karten, unter jeder steht „Illus. …“. Im Blatt Sammlung geht das genauso im gelben Suchfeld.
+8. Im Blatt Sammlung stehen nach „Wert (EUR)“ die Spalten **± 30 Tage (EUR)**, **± 30 Tage (%)** und **Verlauf seit**. Am ersten Tag nach dem Update sind sie leer: Der Preisverlauf jeder Karte beginnt mit dem ersten Preislauf danach (in der Nacht oder mit **Preise jetzt aktualisieren**). Ab dem zweiten Tag mit Preislauf steht dort die Veränderung (auch ±0, wenn der Preis gleich blieb), mit „Verlauf seit“, bis es den Verlauf 30 Tage gibt.
+9. In der Seitenleiste wählst du unter „Preisveränderung über“ 7, 30 oder 90 Tage. Klappst du eine Karte auf, steht oben ihre Preiskurve, nach dem ersten Preislauf mit einem Punkt, danach als Linie.
 
 ## Gut zu wissen
 
@@ -32,4 +35,5 @@ Zum Ausprobieren am besten in einer Kopie deiner Tabelle (**Datei > Kopie erstel
 - Steht unten rot „Einige Knöpfe ließen sich nicht laden“, war GitHub gerade nicht erreichbar. Wähle später **Pokémon > Ansicht neu aufbauen**, dann holt das Tool die fehlenden Knöpfe.
 - Das Dashboard baut das Tool selbst auf. Verschobene Knöpfe springen beim nächsten Neuaufbau zurück, eigene Einträge auf dem Blatt gehen verloren. Eigene Bilder darfst du draufsetzen, die bleiben.
 - Hattest du schon ein eigenes Blatt namens „Dashboard“, bleibt es mit Inhalt erhalten und heißt danach „Dashboard (alt)“, bei beiden Wegen. Das Tool legt sein Dashboard daneben neu an.
+- Der Preisverlauf liegt im versteckten Blatt „Kartenverlauf“, eine Zeile pro Karte und Variante. Er kommt bei „Neue Version holen“ mit. Hattest du schon ein eigenes Blatt mit dem Namen, heißt es danach „Kartenverlauf (alt)“.
 - Den Knopf „Einrichtung“ aus der ersten Vorschau gibt es nicht: Den Menüpunkt hat 1.0.3 entfernt, **Karten erfassen** richtet jetzt alles selbst ein.

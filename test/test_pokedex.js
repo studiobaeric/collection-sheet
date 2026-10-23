@@ -170,7 +170,7 @@ t.section('Ohne gemerkte Nummer: Name; Preislauf holt sie nach');
   eq('nach dem Preislauf gemerkt (sv1-1 ohne dexId bei tcgdex: leer)', env.objects('Pokédex-Nummern').map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]).sort(),
     [['sv1-1', ''], ['swsh3-136', '6']]);
   eq('Mewtu weiter über den Namen', dexRow(env, 150).Karten, 1);
-  eq('zweiter Preislauf: Karte mit eigenem Preis nicht mehr abgerufen', env.ctx.priceTargets_().map(x => x.id), ['sv1-1']);
+  eq('zweiter Preislauf: Karte mit eigenem Preis weiter abgerufen (für ihre Preiskurve)', env.ctx.priceTargets_().map(x => x.id), ['sv1-1', 'swsh3-136']);
   eq('eigener Preis zählt im Wert', dexRow(env, 6)['Wert (EUR)'], 99);
 }
 
