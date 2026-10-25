@@ -7,6 +7,14 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.1.2] – 2026-10-25
+
+- Hinzufügen: leeres Formular sofort, Karte speichert im Hintergrund
+- Zuletzt hinzugefügte Karte steht unter dem Formular
+- Antippen zeigt die neue Karte oben in der Sammlung
+- Fehler beim Speichern: zwei neue Versuche, dann „Nochmal versuchen“
+- Keine doppelten Karten, wenn ein Speichern wiederholt wird
+
 ## [1.1.1] – 2026-10-25
 
 - Prüfliste: offene Zeilen sind als freie Karte vorausgewählt

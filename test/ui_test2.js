@@ -78,13 +78,22 @@ function makeServer() {
     return Object.assign({ lang: 'de' }, c);
   };
   function result(r, msgName) {
-    return { eid: r.eid, key: S.key(r), gkey: S.gkey(r), count: r.count, message: msgName + ' hinzugefügt, jetzt ' + r.count + ' Stück.' };
+    return { eid: r.eid, key: S.key(r), gkey: S.gkey(r), count: r.count, message: msgName + ' hinzugefügt, jetzt ' + r.count + ' Stück.',
+      delta: S.delta([S.gkey(r)]) };
   }
+  // Anfrage-ID wie addRid_ in Code.gs: eine schon gespeicherte Anfrage kommt mit derselben Antwort zurück
+  S.rids = {};
+  const once = fn => req => {
+    if (req.rid && S.rids[req.rid]) return Object.assign({}, S.rids[req.rid], { repeat: true, delta: null });
+    const res = fn(req);
+    if (req.rid) S.rids[req.rid] = res;
+    return res;
+  };
   function setOwn(gk, price) {
     const d = '2026-10-15';
     groupRows(gk).forEach(r => { r.ownPrice = price > 0 ? price : ''; r.ownPriceDate = price > 0 ? d : ''; });
   }
-  S.addCard = req => {
+  S.addCard = once(req => {
     const c = S.cards[req.id];
     if (!c) throw new Error('Karte ' + req.id + ' nicht gefunden – nichts gespeichert.');
     const variant = req.variant === 'base' ? c.baseVariant : req.variant;
@@ -96,8 +105,8 @@ function makeServer() {
       version: probe.version, cond: probe.cond, lang: probe.lang, count: qty, price: c.prices ? c.prices.base : '', image: c.image });
     if (req.ownPrice) setOwn(S.gkey(r), req.ownPrice);
     return result(r, c.name);
-  };
-  S.addFreeCard = req => {
+  });
+  S.addFreeCard = once(req => {
     if (!String(req.name || '').trim()) throw new Error('Bitte einen Namen eingeben.');
     const probe = { id: '', name: req.name, setName: req.setName, localId: req.number, variant: req.variant || 'normal',
       version: req.version || '', cond: req.condition || '', lang: req.cardLang || 'DE' };
@@ -106,7 +115,7 @@ function makeServer() {
     if (r) r.count += qty; else r = S.addRow(Object.assign(probe, { count: qty }));
     if (req.ownPrice) setOwn(S.gkey(r), req.ownPrice);
     return result(r, req.name);
-  };
+  });
   const upNum = x => String(x == null ? '' : x).trim().toUpperCase().replace(/^([A-Z]*)0+(\d)/, '$1$2');
   // Gruppe fürs UI wie collGroup_ in Code.gs (mit dex und k zum Suchen und Sortieren im Browser)
   S.uiGroup = gk => {
@@ -453,16 +462,25 @@ function boot(mode, opts) {
     E.pick($('cCond'), 'NM');
     $('cReverse').checked = true; $('cReverse').dispatchEvent(new E.win.Event('change'));
     E.click($('cAdd'));
-    E.click($('cAdd'));
-    ok('addCard nur einmal (Knopf gesperrt)', E.calls('addCard').length === 1);
-    const req = E.calls('addCard')[0].args[0];
+    ok('Hinzufügen: leeres Formular sofort', $('addResults').innerHTML === '' && $('fName').value === '' && !$('cAdd'));
+    ok('addCard genau einmal', E.calls('addCard').length === 1);
+    const req = Object.assign({}, E.calls('addCard')[0].args[0]);
+    ok('addCard mit Anfrage-ID', typeof req.rid === 'string' && req.rid.length > 5, req);
+    delete req.rid;
     ok('addCard sendet cardLang/version/ownPrice', J(req) === J({ id: 'swsh3-025', lang: 'de', variant: 'reverse', condition: 'NM', qty: 2, inputName: 'Glurak', cardLang: 'EN', version: 'Snowflake', ownPrice: 1.5 }), req);
+    ok('letzte Karte darunter: speichert …', /Zuletzt hinzugefügt/.test($('addLast').textContent) && /Glurak/.test($('addLast').textContent) &&
+      /Flammende Finsternis · 025\/\d+ · Reverse Holo/.test($('addLast').textContent) && /speichert/.test($('addLast').textContent), $('addLast').textContent);
+    ok('beim Speichern nicht antippbar, kein Nochmal +1', !$('addLast').querySelector('.info.tap') && !E.btn($('addLast'), 'Nochmal +1'));
+    ok('Hinweis: Seitenleiste offen lassen', /Seitenleiste bitte offen lassen/.test($('addLast').textContent));
     const r = await E.respond('addCard');
-    ok('Erfolgsmeldung + Nochmal +1', /hinzugefügt/.test($('addMsg').textContent) && !!E.btn($('addMsg'), 'Nochmal +1') && $('addResults').innerHTML === '');
-    E.click(E.btn($('addMsg'), 'Nochmal +1'));
+    ok('gespeichert: jetzt 2 Stück, Nochmal +1, antippbar', /hinzugefügt, jetzt 2 Stück/.test($('addLast').textContent) &&
+      !!E.btn($('addLast'), 'Nochmal +1') && !!$('addLast').querySelector('.info.tap') && !/offen lassen/.test($('addLast').textContent), $('addLast').textContent);
+    ok('state.lastEid gesetzt', E.win.state.lastEid === r.res.eid);
+    E.click(E.btn($('addLast'), 'Nochmal +1'));
     ok('Nochmal +1 nutzt adjustEntry(eid, 1)', J(E.calls('adjustEntry')[0].args) === J([r.res.eid, 1]), E.calls('adjustEntry')[0].args);
+    ok('Nochmal +1 gesperrt, solange es speichert', E.btn($('addLast'), 'Speichere …').disabled);
     await E.respond('adjustEntry');
-    ok('Nochmal +1: neue Anzahl', /jetzt 3 Stück/.test($('addMsg').textContent), $('addMsg').textContent);
+    ok('Nochmal +1: neue Anzahl', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
 
     // Standardwerte: DE, keine Version, kein eigener Preis
     E.type($('fName'), 'Glurak');
@@ -471,14 +489,54 @@ function boot(mode, opts) {
     E.click($('cAdd'));
     const req2 = E.calls('addCard')[0].args[0];
     ok('Standard: cardLang DE, version leer, ownPrice null', req2.cardLang === 'DE' && req2.version === '' && req2.ownPrice === null && req2.variant === 'base' && req2.qty === 1, req2);
+    // Gleich die nächste Karte, bevor die erste gespeichert ist: nacheinander
+    E.type($('fName'), 'Glurak');
+    E.click(E.btn($('searchForm'), 'Suchen'));
+    await E.respond('searchCards'); await E.respond('getCardDetail');
+    E.click($('cAdd'));
+    ok('zweite Karte wartet, bis die erste gespeichert ist', E.calls('addCard').length === 1 && /Noch 2 Karten werden gespeichert/.test($('addLast').textContent), $('addLast').textContent);
     // Antwort kommt, nachdem schon neu gesucht wurde: neues Ergebnis bleibt stehen
     S.searchCardsImpl = q => ({ stage: 'de', notes: [], cards: [{ id: 'a', lang: 'de', name: 'X', setName: 'S', localId: '1' }, { id: 'b', lang: 'de', name: 'Y', setName: 'S', localId: '2' }] });
     E.type($('fName'), 'Neu');
     E.click(E.btn($('searchForm'), 'Suchen'));
     await E.respond('searchCards');
     await E.respond('addCard');
-    ok('späte addCard-Antwort löscht neue Suche nicht', /2 Treffer/.test($('addResults').textContent) && /hinzugefügt/.test($('addMsg').textContent));
+    ok('danach geht die zweite raus, mit eigener Anfrage-ID', E.calls('addCard').length === 1 && E.calls('addCard')[0].args[0].rid !== req2.rid);
+    await E.respond('addCard');
+    ok('späte addCard-Antworten lassen die neue Suche stehen', /2 Treffer/.test($('addResults').textContent) && /hinzugefügt, jetzt 2 Stück/.test($('addLast').textContent), $('addLast').textContent);
+    ok('nur die letzte Karte steht da', $('addLast').querySelectorAll('.item').length === 1);
     ok('keine Skriptfehler (Hinzufügen)', E.errors.length === 0, E.errors);
+  }
+
+  // ---- Zuletzt hinzugefügt antippen: Sammlung mit Suche, neue Karte oben und offen (#33) ----
+  for (const loaded of [false, true]) {
+    const E = boot('sidebar');
+    const { $, S } = E;
+    const tag = loaded ? ' (Sammlung schon geladen)' : ' (Sammlung noch nicht geladen)';
+    await E.startup();
+    if (loaded) { await E.openColl(); E.type($('colQuery'), 'Evoli'); E.win.__advance(200); E.click($('tabAdd')); }
+    S.searchCardsImpl = q => ({ stage: 'de', notes: [], cards: [{ id: 'swsh3-025', lang: 'de', name: 'Glurak', setName: 'Flammende Finsternis', localId: '025' }] });
+    E.type($('fName'), 'Glurak');
+    E.click(E.btn($('searchForm'), 'Suchen'));
+    await E.respond('searchCards'); await E.respond('getCardDetail');
+    $('cReverse').checked = true; $('cReverse').dispatchEvent(new E.win.Event('change'));
+    E.click($('cAdd'));
+    E.click($('addLast').querySelector('.info'));
+    ok('antippen, solange es speichert: nichts' + tag, !$('paneAdd').classList.contains('hidden'));
+    const r = await E.respond('addCard');
+    ok('nach dem Speichern kein Neuladen nötig' + tag, E.calls('getCollection').length === 0 && E.win.coll.stale === !loaded);
+    E.click($('addLast').querySelector('.info.tap'));
+    ok('Tab Sammlung offen, Suche mit Name und Nummer' + tag, !$('paneColl').classList.contains('hidden') && $('colQuery').value === 'Glurak 025', $('colQuery').value);
+    ok(loaded ? 'kein Neuladen, delta reicht' + tag : 'lädt die Sammlung' + tag, E.calls('getCollection').length === (loaded ? 0 : 1));
+    if (!loaded) await E.respond('getCollection');
+    const st = E.win.state;
+    ok('neue Karte ganz oben' + tag, st.groups[0].gkey === r.res.gkey && st.groups[0].variant === 'reverse', st.groups.map(g => g.gkey));
+    ok('neue Karte aufgeklappt' + tag, !$('gx0').classList.contains('hidden') && /1× DE/.test($('gr0').textContent), $('gr0').textContent);
+    ok('andere Treffer darunter' + tag, st.groups.length === 2 && st.groups[1].gkey === 'swsh3-025|normal|' && $('gx1').classList.contains('hidden'));
+    // neu suchen: die Karte rückt an ihren Platz
+    E.type($('colQuery'), 'Glurak'); E.win.__advance(200);
+    ok('neue Suche sortiert wieder normal' + tag, st.groups[0].gkey === 'swsh3-025|normal|' && st.groups[1].gkey === r.res.gkey);
+    ok('keine Skriptfehler (antippen)' + tag, E.errors.length === 0, E.errors);
   }
 
   // ---- Stale-Suche im Hinzufügen-Tab ----
@@ -522,22 +580,68 @@ function boot(mode, opts) {
     E.pick($('frVariant'), 'holo'); E.pick($('frCond'), 'EX'); E.pick($('frLang'), 'JP');
     $('frVersion').value = 'Staff'; $('frQty').value = '3'; $('frOwnPrice').value = '2,5';
     E.click($('frSave'));
-    E.click($('frSave'));
+    ok('freie Karte: Formular sofort weg', !$('frName') && !$('frSave'));
     ok('addFreeCard genau einmal', E.calls('addFreeCard').length === 1);
-    const req = E.calls('addFreeCard')[0].args[0];
+    const req = Object.assign({}, E.calls('addFreeCard')[0].args[0]);
+    ok('addFreeCard mit Anfrage-ID', typeof req.rid === 'string' && req.rid.length > 5);
+    delete req.rid;
     ok('addFreeCard-Argumente', J(req) === J({ name: 'Unbekannt', setName: 'Ordner', number: '12', variant: 'holo', condition: 'EX', qty: 3, cardLang: 'JP', version: 'Staff', ownPrice: 2.5 }), req);
+    ok('freie Karte darunter: speichert …', /freie Karte · Ordner · 12 · Holo/.test($('addLast').textContent) && /speichert/.test($('addLast').textContent), $('addLast').textContent);
     const r = await E.respond('addFreeCard');
-    ok('freie Karte gespeichert, Formular weg', /hinzugefügt/.test($('addMsg').textContent) && !$('frName') && E.win.state.lastEid === r.res.eid);
+    ok('freie Karte gespeichert', /hinzugefügt, jetzt 3 Stück/.test($('addLast').textContent) && E.win.state.lastEid === r.res.eid, $('addLast').textContent);
     ok('neue Version gemerkt', /value="Staff"/.test($('versionList').innerHTML));
-    // Serverfehler: Knopf wieder frei
-    E.click(E.btn($('searchForm'), 'Suchen'));
+    // Serverfehler: zweimal von selbst wiederholen, dann rote Zeile
     E.type($('fName'), 'Unbekannt');
     E.win.doSearch();
     await E.respondAll();
     E.click(E.btn($('addResults'), 'Als freie Karte speichern'));
     E.click($('frSave'));
+    const rid = E.calls('addFreeCard')[0].args[0].rid;
     await E.respond('addFreeCard', { error: 'Sperre belegt' });
-    ok('Fehler: Meldung, Knopf wieder aktiv', /Sperre belegt/.test($('addMsg').textContent) && /nichts gespeichert/.test($('addMsg').textContent) && !$('frSave').disabled);
+    ok('Fehler 1: noch keine rote Zeile, wartet', !$('addLast').querySelector('.addfail') && E.calls('addFreeCard').length === 0 && /speichert/.test($('addLast').textContent));
+    E.win.__advance(1500); await flush();
+    ok('Wiederholung 1 mit derselben Anfrage-ID', E.calls('addFreeCard').length === 1 && E.calls('addFreeCard')[0].args[0].rid === rid);
+    await E.respond('addFreeCard', { error: 'Sperre belegt' });
+    E.win.__advance(4000); await flush();
+    ok('Wiederholung 2 mit derselben Anfrage-ID', E.calls('addFreeCard').length === 1 && E.calls('addFreeCard')[0].args[0].rid === rid);
+    await E.respond('addFreeCard', { error: 'Sperre belegt' });
+    E.win.__advance(60000); await flush();
+    ok('nach 3 Versuchen: keine weitere Wiederholung', E.calls('addFreeCard').length === 0);
+    const fail = $('addLast').querySelector('.addfail');
+    ok('rote Zeile „Nicht gespeichert: Grund“', !!fail && /Nicht gespeichert: Sperre belegt/.test(fail.textContent) && /Unbekannt/.test(fail.textContent), $('addLast').textContent);
+    ok('rote Zeile: Nochmal versuchen und Verwerfen', !!E.btn(fail, 'Nochmal versuchen') && !!E.btn(fail, 'Verwerfen'));
+    ok('letzte gespeicherte Karte steht weiter darunter', /hinzugefügt, jetzt 3 Stück/.test($('addLast').textContent));
+    // weitere Karte: rote Zeile bleibt
+    E.type($('fName'), 'Unbekannt');
+    E.win.doSearch();
+    await E.respondAll();
+    E.click(E.btn($('addResults'), 'Als freie Karte speichern'));
+    $('frName').value = 'Andere';
+    E.click($('frSave'));
+    await E.respond('addFreeCard');
+    ok('rote Zeile bleibt nach einer neuen Karte', !!$('addLast').querySelector('.addfail') && /Andere/.test($('addLast').textContent));
+    // Nochmal versuchen: dieselbe Anfrage-ID; war sie doch gespeichert, zählt sie nicht doppelt
+    E.click(E.btn($('addLast').querySelector('.addfail'), 'Nochmal versuchen'));
+    ok('Nochmal versuchen: dieselbe Anfrage-ID', E.calls('addFreeCard').length === 1 && E.calls('addFreeCard')[0].args[0].rid === rid);
+    ok('Nochmal versuchen: rote Zeile weg, speichert …', !$('addLast').querySelector('.addfail') && /speichert/.test($('addLast').textContent));
+    await E.respond('addFreeCard');
+    ok('gespeichert: 1 Stück', /hinzugefügt, jetzt 1 Stück/.test($('addLast').textContent), $('addLast').textContent);
+    const before = S.rows.reduce((n, x) => n + x.count, 0);
+    E.win.queueAdd(E.win.adds[0]); // dieselbe Karte noch einmal schicken (z. B. Antwort verloren)
+    await E.respond('addFreeCard');
+    ok('gleiche Anfrage-ID zählt nicht doppelt', S.rows.reduce((n, x) => n + x.count, 0) === before);
+    // Verwerfen
+    E.type($('fName'), 'Unbekannt');
+    E.win.doSearch();
+    await E.respondAll();
+    E.click(E.btn($('addResults'), 'Als freie Karte speichern'));
+    E.win.ADD_RETRY_MS = [];
+    E.click($('frSave'));
+    await E.respond('addFreeCard', { error: 'Kaputt' });
+    ok('ohne Wiederholungen gleich rot', /Nicht gespeichert: Kaputt/.test($('addLast').textContent));
+    E.click(E.btn($('addLast').querySelector('.addfail'), 'Verwerfen'));
+    ok('Verwerfen: rote Zeile weg, nichts geschickt', !$('addLast').querySelector('.addfail') && E.calls('addFreeCard').length === 0);
+    E.win.ADD_RETRY_MS = [1500, 4000];
 
     // Set-Auswahl: Knopf auch dort, auch nach erfolgloser Nummernsuche
     S.searchCardsImpl = () => ({ stage: 'pickSet', cards: [], notes: [], number: '99', sets: [{ id: 'base1', name: 'Basis-Set', nameEn: 'Base', preferred: true }] });
@@ -970,7 +1074,7 @@ function boot(mode, opts) {
     E.click($('tabAdd')); E.click($('tabColl'));
     ok('Tab zurück: kein Neuladen, Karte bleibt offen', E.pending.length === 0 && !$('gx' + E.gi('Glurak')).classList.contains('hidden'));
     // Hinzufügen: beim nächsten Öffnen neu laden
-    E.win.addDone({ eid: G.gHand.eid, key: 'k', message: 'Glurak hinzugefügt.' }, E.win.searchGen);
+    E.win.markStale(); // Hinzufügen ohne delta (z. B. wiederholte Anfrage)
     E.click($('tabColl'));
     ok('nach Hinzufügen: lädt neu, alte Liste bleibt stehen', E.calls('getCollection').length === 1 && st.groups.length === 5 && $('collReload').disabled &&
       /Lädt/.test($('collReload').textContent));
@@ -1012,7 +1116,7 @@ function boot(mode, opts) {
     // während des Ladens woanders hinzugefügt: die Antwort ist schon alt, beim nächsten Öffnen noch einmal
     E.win.loadCollection();
     E.click($('tabAdd'));
-    E.win.addDone({ eid: G.gHand.eid, key: 'k', message: 'ok' }, E.win.searchGen);
+    E.win.markStale();
     await E.respond('getCollection');
     ok('Hinzufügen während des Ladens: bleibt als veraltet markiert', E.win.coll.stale === true);
     E.click($('tabColl'));

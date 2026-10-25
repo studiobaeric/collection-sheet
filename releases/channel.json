@@ -4,6 +4,20 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.1.2",
+      "tag": "v1.1.2",
+      "date": "2026-10-25",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Hinzufügen: leeres Formular sofort, Karte speichert im Hintergrund",
+        "Zuletzt hinzugefügte Karte steht unter dem Formular",
+        "Antippen zeigt die neue Karte oben in der Sammlung",
+        "Fehler beim Speichern: zwei neue Versuche, dann „Nochmal versuchen“",
+        "Keine doppelten Karten, wenn ein Speichern wiederholt wird"
+      ]
+    },
+    {
       "version": "1.1.1",
       "tag": "v1.1.1",
       "date": "2026-10-25",

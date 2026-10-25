@@ -21,6 +21,7 @@ const H = require('./harness2');
 
 const t = H.runner('test_integration');
 const J = x => JSON.stringify(x);
+const noRid = o => { const c = Object.assign({}, o); delete c.rid; return c; };
 const SRC = path.join(__dirname, '..', 'src');
 const FILES = ['Code.gs'].concat(process.env.IMPORT && fs.existsSync(path.join(SRC, 'Import.gs')) ? ['Import.gs'] : [])
   .concat(fs.existsSync(path.join(SRC, 'Update.gs')) ? ['Update.gs'] : []);
@@ -392,15 +393,15 @@ function seedImport(env) {
   await E.clickSettle($('cAdd'));
   let addRes = E.lastCall('addCard');
   t.ok('addCard ok', addRes && !addRes.error && addRes.res && /^E[0-9a-f]{10}$/.test(addRes.res.eid), addRes);
-  t.ok('Meldung: Glurak, Normal, NM, 2 Stück', /Glurak, Normal, NM hinzugefügt, jetzt 2 Stück\./.test($('addMsg').textContent), $('addMsg').textContent);
+  t.ok('Meldung: Glurak, Normal, NM, 2 Stück', /Glurak, Normal, NM hinzugefügt, jetzt 2 Stück\./.test($('addLast').textContent), $('addLast').textContent);
   let D = dataRows(env);
   const handA = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 2 &&
     handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA);
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
   checkSheets(env, 'nach addCard');
-  await E.clickSettle(E.btn($('addMsg'), 'Nochmal +1'));
-  t.ok('Nochmal +1 -> 3 Stück', /jetzt 3 Stück/.test($('addMsg').textContent), $('addMsg').textContent);
+  await E.clickSettle(E.btn($('addLast'), 'Nochmal +1'));
+  t.ok('Nochmal +1 -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
   t.ok('Daten: 3 Stück', dataRows(env).find(r => r.eid === handA.eid).count === 3);
   t.ok('Nochmal +1 nutzt adjustEntry', J(E.lastCall('adjustEntry').args) === J([handA.eid, 1]));
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
@@ -416,8 +417,9 @@ function seedImport(env) {
   $('cOwnPrice').value = '2,50';
   await E.clickSettle($('cAdd'));
   addRes = E.lastCall('addCard');
-  t.eq('addCard-Anfrage', addRes.args[0], { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'LP', qty: 1, inputName: 'Glurak', cardLang: 'EN', version: 'Staff', ownPrice: 2.5 });
-  t.ok('Meldung nennt Version, Sprache, eigenen Preis', /Glurak · Staff, Normal, LP, Englisch hinzugefügt, jetzt 1 Stück\. Eigener Preis: 2,50 €\./.test($('addMsg').textContent), $('addMsg').textContent);
+  t.ok('addCard mit Anfrage-ID', typeof addRes.args[0].rid === 'string');
+  t.eq('addCard-Anfrage', noRid(addRes.args[0]), { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'LP', qty: 1, inputName: 'Glurak', cardLang: 'EN', version: 'Staff', ownPrice: 2.5 });
+  t.ok('Meldung nennt Version, Sprache, eigenen Preis', /Glurak · Staff, Normal, LP, Englisch hinzugefügt, jetzt 1 Stück\. Eigener Preis: 2,50 €\./.test($('addLast').textContent), $('addLast').textContent);
   D = dataRows(env);
   const staff = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Sprache EN, Version Staff, eigener Preis mit Datum', staff && staff.lang === 'EN' && staff.version === 'Staff' && staff.ownPrice === 2.5 &&
@@ -448,8 +450,8 @@ function seedImport(env) {
   $('frOwnPrice').value = '1,50';
   await E.clickSettle($('frSave'));
   const freeRes = E.lastCall('addFreeCard');
-  t.eq('addFreeCard-Anfrage', freeRes.args[0], { name: 'Unbekannt', setName: 'Grundset', number: '4/102', variant: 'normal', condition: '', qty: 1, cardLang: 'DE', version: '', ownPrice: 1.5 });
-  t.ok('addFreeCard ok', freeRes.res && freeRes.res.gkey === 'frei:unbekannt~grundset~4|normal|' && /hinzugefügt/.test($('addMsg').textContent), [freeRes.res, $('addMsg').textContent]);
+  t.eq('addFreeCard-Anfrage', noRid(freeRes.args[0]), { name: 'Unbekannt', setName: 'Grundset', number: '4/102', variant: 'normal', condition: '', qty: 1, cardLang: 'DE', version: '', ownPrice: 1.5 });
+  t.ok('addFreeCard ok', freeRes.res && freeRes.res.gkey === 'frei:unbekannt~grundset~4|normal|' && /hinzugefügt/.test($('addLast').textContent), [freeRes.res, $('addLast').textContent]);
   D = dataRows(env);
   const free = D.find(r => r.eid === freeRes.res.eid);
   t.ok('Daten: freie Karte', free && free.id === '' && free.source === 'frei' && free.localId === '4' && free.setSize === 102 && free.normNum === '4' &&
@@ -748,7 +750,7 @@ function seedImport(env) {
   $('frQty').value = '2';
   await E.clickSettle($('frSave'));
   const free2 = E.lastCall('addFreeCard').res;
-  t.ok('zweite freie Karte', free2 && free2.key === 'frei:mewtu spezial~altes set~7|reverse||GD|JP' && /Japanisch/.test($('addMsg').textContent), [free2, $('addMsg').textContent]);
+  t.ok('zweite freie Karte', free2 && free2.key === 'frei:mewtu spezial~altes set~7|reverse||GD|JP' && /Japanisch/.test($('addLast').textContent), [free2, $('addLast').textContent]);
   await E.clickSettle($('tabColl'));
   fkey = free2.gkey;
   fi2 = E.gIdx(fkey);

@@ -264,4 +264,31 @@ t.section('getCollection');
   ok('reines JSON (keine Datumsobjekte)', J(res) === J(JSON.parse(J(res))) && !/"\d{4}-\d\d-\d\dT/.test(J(res.groups.map(x => x.k))));
 }
 
+t.section('Hinzufügen im Hintergrund: delta und Anfrage-ID (#33)');
+{
+  const env = setup();
+  const bad = [];
+  const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2, rid: 'r1' });
+  ok('addCard liefert delta mit der neuen Gruppe', a.delta && a.delta.groups.length === 1 && a.delta.groups[0].gkey === a.gkey && a.delta.groups[0].count === 2, a.delta);
+  checkDelta(env, 'addCard', a, bad);
+  const total = () => env.uiCall('getCollection').groups.reduce((n, g) => n + g.count, 0);
+  const again = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2, rid: 'r1' });
+  ok('gleiche Anfrage-ID: nicht doppelt gezählt', total() === 2 && again.repeat === true && again.eid === a.eid && again.count === 2 && !again.delta, again);
+  eq('gleiche Anfrage-ID: dieselbe Meldung', again.message, a.message);
+  const b = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1, rid: 'r2' });
+  ok('neue Anfrage-ID zählt', total() === 3 && b.count === 3 && !b.repeat);
+  checkDelta(env, 'addCard 2', b, bad);
+  const c = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
+  const d = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
+  ok('ohne Anfrage-ID wie bisher: jedes Mal', total() === 5 && c.count === 4 && d.count === 5);
+  const f = env.uiCall('addFreeCard', { name: 'Fantasiemon', setName: 'Ordner', number: '7', qty: 1, rid: 'f1' });
+  checkDelta(env, 'addFreeCard', f, bad);
+  const f2 = env.uiCall('addFreeCard', { name: 'Fantasiemon', setName: 'Ordner', number: '7', qty: 1, rid: 'f1' });
+  ok('freie Karte: gleiche Anfrage-ID nicht doppelt', total() === 6 && f2.repeat === true && f2.count === 1);
+  const odd = env.uiCall('addCard', { id: 'sm9-33', lang: 'de', variant: 'base', qty: 1, rid: 'a b/c' });
+  const odd2 = env.uiCall('addCard', { id: 'sm9-33', lang: 'de', variant: 'base', qty: 1, rid: 'a b/c' });
+  ok('Anfrage-ID mit Sonderzeichen', odd2.repeat === true && odd2.count === odd.count);
+  eq('delta = getCollection', bad, []);
+}
+
 t.done();

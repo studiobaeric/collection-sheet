@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.1
+     Pokémon-Sammlung · Version 1.1.2
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -105,6 +105,11 @@
   .saving { color: var(--muted); font-style: italic; }
   .item .info .s.err { color: var(--err); }
   .erow.pend .einfo { opacity: .7; }
+  .item.addfail { background: var(--errbg); border-radius: 6px; padding: 8px; margin-top: 8px; border-bottom: 0; align-items: flex-start; }
+  .item.addfail .t { color: var(--err); }
+  .item.addfail .actions { margin-top: 6px; }
+  .item .info .s.done { color: var(--ok); }
+  .lasthead { margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -137,6 +142,7 @@
   </form>
   <div id="addMsg"></div>
   <div id="addResults"></div>
+  <div id="addLast"></div>
 </div>
 
 <!-- Sammlung -->
@@ -498,48 +504,169 @@ function backToSearch() {
 
 function addCurrent() {
   var c = state.current;
-  if (!c || $('cAdd').disabled) return;
+  if (!c || !$('cAdd') || $('cAdd').disabled) return;
   var op = readOwnPrice('cOwnPrice', 'addMsg');
   if (!op.ok) return;
   setMsg('addMsg', '');
+  var inputName = state.lastQuery ? state.lastQuery.name : '';
+  var v = chosenVariant();
   var req = {
-    id: c.id, lang: c.lang, variant: chosenVariant(), condition: $('cCond').value,
-    qty: qtyOf($('cQty').value), inputName: state.lastQuery ? state.lastQuery.name : '',
+    id: c.id, lang: c.lang, variant: v, condition: $('cCond').value,
+    qty: qtyOf($('cQty').value), inputName: inputName,
     cardLang: $('cLang').value || 'DE', version: $('cVersion').value.trim(), ownPrice: op.value
   };
-  $('cAdd').disabled = true;
-  var gen = searchGen;
-  call('addCard', req).then(function (res) { rememberVersion(req.version); addDone(res, gen); }).catch(function (e) {
-    if ($('cAdd')) $('cAdd').disabled = false;
-    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  var name = c.lang === 'en' && inputName ? inputName : c.name;
+  startAdd('addCard', req, {
+    name: name, number: c.localId, image: c.image,
+    sub: [c.setName, c.localId + (c.setSize ? '/' + c.setSize : ''), v === 'base' ? c.baseLabel : VARIANT_LABELS[v]]
   });
 }
 
-/** Erfolg nach addCard / addFreeCard. gen: searchGen beim Absenden. */
-function addDone(res, gen) {
-  markStale(); // die Sammlung lädt beim nächsten Öffnen neu
-  state.lastEid = res.eid || null;
-  state.lastKey = res.key || null;
-  setMsg('addMsg', esc(res.message) + (state.lastEid ? '<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>' : ''), 'ok');
-  if (gen !== searchGen) return; // inzwischen neu gesucht: deren Ergebnis stehen lassen
+// Hinzufügen im Hintergrund (#33): Das leere Formular steht sofort wieder da, die Karte speichert über die Warteschlange
+// der Sammlung (nacheinander, nie gleichzeitig mit einer Änderung dort). Jede Karte hat eine Anfrage-ID (rid), so rechnet
+// der Server eine Wiederholung nie doppelt ein. Unter dem Formular steht die zuletzt hinzugefügte Karte, darüber jede,
+// die nicht gespeichert werden konnte, bis sie gespeichert oder verworfen ist.
+var adds = [], addSeq = 0;
+var ADD_RETRY_MS = [1500, 4000]; // zwei Wiederholungen, dann rote Zeile
+
+function newRid() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) + '-' + (++addSeq); }
+function addById(n) { for (var k = 0; k < adds.length; k++) if (adds[k].n === n) return adds[k]; return null; }
+function addPending(a) { return a.status === 'wait' || a.status === 'saving'; }
+
+/** Karte abschicken und sofort das leere Formular zeigen. show: {name, number, image, sub: [..]} für die Anzeige */
+function startAdd(fn, req, show) {
+  req.rid = newRid();
+  var item = { n: addSeq, fn: fn, req: req, name: show.name, number: show.number || '', image: show.image || '',
+    sub: show.sub.filter(function (x) { return x != null && String(x) !== ''; }).join(' · '), status: 'wait', err: '', res: null };
+  adds.push(item);
+  ++searchGen; // späte Antworten zur alten Karte nicht mehr anzeigen
   $('addResults').innerHTML = '';
   $('searchForm').reset();
   state.lastQuery = null;
   state.lastRes = null;
+  state.current = null;
   $('fName').focus();
+  queueAdd(item);
+}
+
+function queueAdd(item) {
+  item.status = 'wait';
+  item.err = '';
+  enqueue({
+    send: function () { item.status = 'saving'; drawAdds(); return tryAdd(item, 0); },
+    done: function (res) { addSaved(item, res); },
+    fail: function (e) { item.status = 'err'; item.err = errText(e); drawAdds(); }
+  });
+  drawAdds();
+}
+
+function tryAdd(item, n) {
+  var send = item.fn === 'addFreeCard' ? call('addFreeCard', item.req) : call('addCard', item.req);
+  return send.catch(function (e) {
+    if (n >= ADD_RETRY_MS.length) throw e;
+    return new Promise(function (ok) { setTimeout(ok, ADD_RETRY_MS[n]); }).then(function () { return tryAdd(item, n + 1); });
+  });
+}
+
+function addSaved(item, res) {
+  item.status = 'ok';
+  item.res = res || {};
+  rememberVersion(item.req.version);
+  var g = res && res.delta ? (res.delta.groups || []).filter(function (x) { return x.gkey === res.gkey; })[0] : null;
+  if (g) { item.name = g.name || item.name; item.number = g.localId || item.number; }
+  if (res && res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } // im Tab Sammlung ohne Neuladen
+  else markStale();
+  drawAdds();
+}
+
+/** Die zuletzt hinzugefügte Karte (die nicht fehlgeschlagen ist) */
+function lastAdd() {
+  for (var k = adds.length - 1; k >= 0; k--) if (adds[k].status !== 'err') return adds[k];
+  return null;
+}
+
+function drawAdds() {
+  var last = lastAdd(), lastOk = null;
+  adds.forEach(function (a) { if (a.status === 'ok') lastOk = a; });
+  adds = adds.filter(function (a) { return a.status !== 'ok' || a === lastOk; }); // gespeicherte vergessen, bis auf die neueste
+  state.lastEid = last && last.status === 'ok' ? last.res.eid || null : null;
+  state.lastKey = last && last.status === 'ok' ? last.res.key || null : null;
+  var html = '';
+  adds.forEach(function (a) {
+    if (a.status !== 'err') return;
+    html += '<div class="item addfail">' + imgTag(cardImg(a.image, 'low')) + '<div class="info"><div class="t">' + esc(a.name) + '</div>' +
+      '<div class="s">' + esc(a.sub) + '</div><div class="s err">Nicht gespeichert: ' + esc(a.err) + '</div>' +
+      '<div class="actions"><button class="btn" onclick="retryAdd(' + a.n + ')">Nochmal versuchen</button>' +
+      '<button class="btn" onclick="dropAdd(' + a.n + ')">Verwerfen</button></div></div></div>';
+  });
+  var pending = adds.filter(addPending).length;
+  if (last) {
+    var ok = last.status === 'ok', r = last.res || {};
+    var status = ok
+      ? '<div class="s done">' + esc(r.message || 'Gespeichert, jetzt ' + r.count + ' Stück.') + '</div>'
+      : '<div class="s saving">speichert …</div>';
+    html += '<div class="notes lasthead">Zuletzt hinzugefügt' + (ok ? ' (antippen zeigt die Karte in der Sammlung)' : '') + '</div>' +
+      '<div class="item">' + imgTag(cardImg(last.image, 'low')) +
+      '<div class="info' + (ok ? ' tap" role="button" tabindex="0" onclick="openAdded(' + last.n + ')" onkeydown="addedKey(event,' + last.n + ')"' : '"') + '>' +
+      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div>' +
+      (ok && r.eid ? '<div class="ctl"><button class="btn" onclick="againPlusOne(this)"' + (last.plus ? ' disabled' : '') + '>' +
+        (last.plus ? 'Speichere …' : 'Nochmal +1') + '</button></div>' : '') + '</div>';
+  }
+  if (pending > 1) html += '<div class="notes">Noch ' + pending + ' Karten werden gespeichert …</div>';
+  if (pending) html += '<div class="hint">' + (MODE === 'sidebar' ? 'Seitenleiste' : 'Seite') + ' bitte offen lassen, bis alles gespeichert ist.</div>';
+  $('addLast').innerHTML = html;
+}
+
+function retryAdd(n) {
+  var a = addById(n);
+  if (!a || a.status !== 'err') return;
+  adds.splice(adds.indexOf(a), 1);
+  adds.push(a); // gilt wieder als zuletzt hinzugefügt
+  queueAdd(a); // dieselbe rid: war sie doch gespeichert, kommt sie nicht doppelt
+}
+
+function dropAdd(n) {
+  var a = addById(n);
+  if (!a || a.status !== 'err') return;
+  adds.splice(adds.indexOf(a), 1);
+  drawAdds();
+}
+
+/** Die gespeicherte Karte im Tab Sammlung zeigen: Suche mit Name und Nummer, die Karte ganz oben und aufgeklappt. */
+function openAdded(n) {
+  var a = addById(n);
+  if (!a || a.status !== 'ok' || !a.res.gkey) return;
+  $('colQuery').value = a.name + (/\d/.test(a.number) ? ' ' + a.number : '');
+  $('colSet').value = '';
+  collSort.dex = null;
+  coll.focus = a.res.gkey;
+  state.open[a.res.gkey] = true;
+  if (coll.all && !coll.stale) coll.resort = true; // collShow sucht dann neu
+  showTab('coll');
+}
+function addedKey(ev, n) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  ev.preventDefault();
+  openAdded(n);
 }
 
 function againPlusOne(btn) {
-  var eid = state.lastEid;
-  if (!eid || (btn && btn.disabled)) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Speichere …'; }
-  call('adjustEntry', eid, 1).then(function (res) {
-    markStale();
-    if (eid !== state.lastEid) return; // inzwischen andere Karte hinzugefügt
-    setMsg('addMsg', 'Noch eine dazu, jetzt ' + esc(res.count) + ' Stück.<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>', 'ok');
-  }).catch(function (e) {
-    if (eid !== state.lastEid) return;
-    setMsg('addMsg', esc(errText(e)), 'err');
+  var a = lastAdd();
+  if (!a || a.status !== 'ok' || !a.res.eid || a.plus) return;
+  var eid = a.res.eid;
+  a.plus = true;
+  drawAdds();
+  enqueue({
+    send: function () { return call('adjustEntry', eid, 1); },
+    done: function (res) {
+      a.plus = false;
+      if (res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } else markStale();
+      if (res.eid) a.res.eid = res.eid;
+      a.res.count = res.count;
+      a.res.message = 'Noch eine dazu, jetzt ' + res.count + ' Stück.';
+      drawAdds();
+    },
+    fail: function (e) { a.plus = false; drawAdds(); setMsg('addMsg', esc(errText(e)), 'err'); }
   });
 }
 
@@ -576,11 +703,9 @@ function saveFree(ev) {
     variant: $('frVariant').value || 'normal', condition: $('frCond').value, qty: qtyOf($('frQty').value),
     cardLang: $('frLang').value || 'DE', version: $('frVersion').value.trim(), ownPrice: op.value
   };
-  $('frSave').disabled = true;
-  var gen = searchGen;
-  call('addFreeCard', req).then(function (res) { rememberVersion(req.version); addDone(res, gen); }).catch(function (e) {
-    if ($('frSave')) $('frSave').disabled = false;
-    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  startAdd('addFreeCard', req, {
+    name: name, number: req.number,
+    sub: ['freie Karte', req.setName, req.number, VARIANT_LABELS[req.variant] || req.variant]
   });
 }
 
@@ -592,7 +717,7 @@ function saveFree(ev) {
 // vom Server; was angezeigt wird, ist base plus die noch laufenden Änderungen (predict). Alle Änderungen laufen
 // nacheinander über eine Warteschlange, Bearbeiten zeigt das Ergebnis sofort mit „speichert …“.
 
-var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, opsDone: 0 };
+var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, opsDone: 0, focus: null };
 var queue = [], queueBusy = false;
 var collTimer = null;
 var CHG_DAYS = 30; // Preisveränderung über 30 Tage, wie im Blatt Sammlung
@@ -745,8 +870,16 @@ function refilter() {
   var nr = collSort.dex ? collSort.dex.nr : 0;
   var list = coll.all.filter(function (g) { return collMatch(g, words, stx, nr); });
   list.sort(function (a, b) { return collCmp(a, b, collSort.sort, collSort.desc); });
+  var top = coll.focus ? coll.byKey[coll.focus] : null;
+  if (top) { // eben hinzugefügt und angetippt: ganz oben und aufgeklappt
+    coll.focus = null;
+    if (list.indexOf(top) >= 0) list.splice(list.indexOf(top), 1);
+    list.unshift(top);
+    state.open[top.gkey] = true;
+  }
   state.groups = list;
   renderCollection();
+  if (top) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }
 }
 
 function groupHtml(g, i) {

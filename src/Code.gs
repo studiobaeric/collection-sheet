@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.1
+ *  Pokémon-Sammlung · Version 1.1.2
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -35,7 +35,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.1.1';
+const TOOL_VERSION = '1.1.2';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -2786,12 +2786,39 @@ function addMessage_(name, variant, cond, cardLang, version, count, priceInfo) {
 }
 
 /**
+ * Hinzufügen im Hintergrund (#33): Die Seitenleiste schickt jede Karte mit einer eigenen Anfrage-ID (rid) und
+ * wiederholt sie bei einem Fehler. Ist die Karte unter dieser ID schon gespeichert, kommt die gemerkte Antwort
+ * zurück, statt sie noch einmal einzurechnen. Gemerkt wird 6 Stunden im Skript-Zwischenspeicher.
+ */
+const ADD_RID_PREFIX = 'add-rid:';
+function addRid_(req) { return String((req && req.rid) || '').replace(/[^\w-]/g, '').slice(0, 64); }
+function addRidGet_(rid) {
+  if (!rid) return null;
+  try {
+    const s = CacheService.getScriptCache().get(ADD_RID_PREFIX + rid);
+    return s ? JSON.parse(s) : null;
+  } catch (e) { return null; }
+}
+function addRidPut_(rid, res) {
+  if (!rid) return;
+  const keep = {};
+  Object.keys(res).forEach(function (k) { if (k !== 'delta') keep[k] = res[k]; });
+  keep.repeat = true;
+  try { CacheService.getScriptCache().put(ADD_RID_PREFIX + rid, JSON.stringify(keep), 21600); } catch (e) { /* ohne Schutz weiter */ }
+}
+
+/**
  * Karte speichern. req = {id, lang ('de'|'en' Datensprache), variant: 'base'|'reverse'|'firstEdition', condition, qty,
- * inputName, cardLang (Sprache der Karte, Standard 'DE'), version (Sonderversion, Standard ''), ownPrice (Zahl|null|'')}
- * -> {eid, key, gkey, count, message}
+ * inputName, cardLang (Sprache der Karte, Standard 'DE'), version (Sonderversion, Standard ''), ownPrice (Zahl|null|''),
+ * rid (Anfrage-ID, optional)}
+ * -> {eid, key, gkey, count, message, delta (collDelta_)}; schon gespeicherte rid: dieselbe Antwort mit
+ * repeat: true und ohne delta
  */
 function addCard(req) {
   req = req || {};
+  const rid = addRid_(req);
+  const prev = addRidGet_(rid);
+  if (prev) return prev;
   ensureSchema_();
   const lang = req.lang === 'en' ? 'en' : 'de';
   const qty = Math.max(1, Math.floor(Number(req.qty) || 1));
@@ -2824,6 +2851,8 @@ function addCard(req) {
 
   let shape = true;
   const result = withLock_(function () {
+    const again = addRidGet_(rid); // dieselbe Anfrage lief inzwischen durch
+    if (again) return { prev: again };
     const st = dataStore_();
     if (setDate) {
       // ältere Einträge dieses Sets ohne Datum nachtragen
@@ -2838,32 +2867,39 @@ function addCard(req) {
     const res = storeAddHand_(st, row, qty, ownPrice, now, { price: price, date: priceDate });
     storeSave_(st);
     storeDexIds_(dexMapOf_(card));
-    shape = afterDataChange_(st).shape;
-    return res;
+    const ch = afterDataChange_(st);
+    shape = ch.shape;
+    res.delta = collDelta_(st, ch);
+    const name = summary.dataLang === 'en' && summary.inputName ? summary.inputName : String(card.name);
+    let priceInfo = '';
+    if (ownPrice != null) priceInfo = ' Eigener Preis: ' + eurText_(ownPrice) + '.';
+    else if (price == null) priceInfo = ' (kein Preis)';
+    const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
+    addRidPut_(rid, out); // noch in der Sperre: eine Wiederholung wartet darauf und bekommt diese Antwort
+    return out;
   });
+  if (result.prev) return result.prev;
 
   // Die Zeilenzahl der Sammlung ändert sich nur mit einer neuen Gruppe oder einer, die über 0 springt
   if (shape) { try { applyRowHeights_(); } catch (e) { /* egal */ } }
-  const name = summary.dataLang === 'en' && summary.inputName ? summary.inputName : String(card.name);
-  let priceInfo = '';
-  if (ownPrice != null) priceInfo = ' Eigener Preis: ' + eurText_(ownPrice) + '.';
-  else if (price == null) priceInfo = ' (kein Preis)';
-  return {
-    eid: result.eid,
-    key: result.key,
-    gkey: result.gkey,
-    count: result.count,
-    message: addMessage_(name, variant, cond, cardLang, version, result.count, priceInfo)
-  };
+  return result;
+}
+
+/** Antwort von addCard / addFreeCard */
+function addResult_(res, message) {
+  return { eid: res.eid, key: res.key, gkey: res.gkey, count: res.count, message: message, delta: res.delta || null };
 }
 
 /**
  * Freie Karte (tcgdex kennt sie nicht): ohne Bild und ohne automatischen Preis.
- * req = {name (Pflicht), setName, number, variant ('normal'), condition, qty, cardLang, version, ownPrice}
- * -> {eid, key, gkey, count, message}
+ * req = {name (Pflicht), setName, number, variant ('normal'), condition, qty, cardLang, version, ownPrice, rid}
+ * -> wie addCard
  */
 function addFreeCard(req) {
   req = req || {};
+  const rid = addRid_(req);
+  const prev = addRidGet_(rid);
+  if (prev) return prev;
   ensureSchema_();
   const name = String(req.name || '').trim();
   if (!name) throw new Error('Bitte einen Namen eingeben.');
@@ -2878,6 +2914,8 @@ function addFreeCard(req) {
 
   let shape = true;
   const result = withLock_(function () {
+    const again = addRidGet_(rid);
+    if (again) return { prev: again };
     const st = dataStore_();
     const row = buildCardRow_(card, {
       variant: variant, cond: cond, lang: cardLang, version: version, count: qty, origin: ORIGIN_HAND, fp: '',
@@ -2885,19 +2923,18 @@ function addFreeCard(req) {
     });
     const res = storeAddHand_(st, row, qty, ownPrice, now, null);
     storeSave_(st);
-    shape = afterDataChange_(st).shape;
-    return res;
+    const ch = afterDataChange_(st);
+    shape = ch.shape;
+    res.delta = collDelta_(st, ch);
+    const priceInfo = ownPrice != null ? ' Eigener Preis: ' + eurText_(ownPrice) + '.' : ' (freie Karte, kein Preis)';
+    const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
+    addRidPut_(rid, out);
+    return out;
   });
+  if (result.prev) return result.prev;
 
   if (shape) { try { applyRowHeights_(); } catch (e) { /* egal */ } }
-  const priceInfo = ownPrice != null ? ' Eigener Preis: ' + eurText_(ownPrice) + '.' : ' (freie Karte, kein Preis)';
-  return {
-    eid: result.eid,
-    key: result.key,
-    gkey: result.gkey,
-    count: result.count,
-    message: addMessage_(name, variant, cond, cardLang, version, result.count, priceInfo)
-  };
+  return result;
 }
 
 // ---------------------------------------------------------------------------
