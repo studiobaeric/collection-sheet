@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.0
+ *  Pokémon-Sammlung · Version 1.1.1
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -626,6 +626,7 @@ function takeoverRun(url) {
       PRERELEASES: st.map.PRERELEASES === '1' ? '1' : ''
     });
     setupSheets_(ss, true);
+    showDashboard_(); // die übernommene Tabelle startet im Dashboard (#28)
     setupTriggers_();
     settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: settingGet_('SETUP_AT') || when });
     shared = updCopySharing_(old, ss);

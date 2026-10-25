@@ -122,7 +122,7 @@ t.section('Einrichtung legt das Dashboard an');
   ok('jeder Knopf: Funktion, Beschriftung, Größe, Lage', wrong.length === 0, wrong);
   const blob = imgs[0].src;
   ok('Bild als PNG-Blob mit Namen eingefügt', blob && blob.getContentType() === 'image/png' && /^[\w-]+\.png$/.test(blob.getName()) && blob.getBytes().length > 1000);
-  ok('Sammlung bleibt aktiv', env.ss.getActiveSheet().getName() === 'Sammlung', env.ss.getActiveSheet().getName());
+  ok('nach der Einrichtung: Dashboard offen (#28)', env.ss.getActiveSheet().getName() === 'Dashboard', env.ss.getActiveSheet().getName());
 }
 
 // ---------------------------------------------------------------------------
@@ -374,6 +374,62 @@ t.section('Startseite');
   const env2 = H.createEnv();
   env2.ctx.onOpen();
   ok('Tabelle ohne Dashboard: Menü wie bisher, kein Fehler', env2.ui.menus.length === 1 && env2.ss.getActiveSheet().getName() === 'Tabellenblatt1');
+}
+
+// ---------------------------------------------------------------------------
+t.section('Nach Einrichtung und Update: das offene Blatt bleibt (#28), Laufmeldung (#29)');
+{
+  const active = env => env.ss.getActiveSheet().getName();
+  const busy = env => (env.ss.toastLog || []).filter(x => x.timeout === -1).map(x => x.msg);
+  const last = env => (env.ss.toastLog || []).slice(-1)[0] || {};
+  // neue Tabelle aus der Vorlage (Weg von „Neue Version holen“): Einrichtung über „Karten erfassen“
+  const e1 = setup();
+  const setRows = e1.values('Tool-Einstellungen');
+  const idRow = setRows.findIndex(r => r[0] === e1.run('SETTING_SHEET_ID'));
+  e1.sheet('Tool-Einstellungen').getRange(idRow + 1, 2).setValue('VORLAGEVORLAGEVORLAGEVORLAGE');
+  e1.run('settingsCache_ = null');
+  ok('frische Kopie', e1.ctx.isFreshCopy_());
+  e1.ctx.onOpen();
+  e1.ss.setActiveSheet(e1.sheet('Sammlung')); // so war die Vorlage zuletzt offen
+  e1.ss.toastLog = [];
+  e1.ctx.kartenErfassen();
+  eq('neue Tabelle: danach Dashboard offen', active(e1), 'Dashboard');
+  eq('Einrichtung: Laufmeldung je Schritt, bleibt stehen', busy(e1), ['Tabelle vorbereiten', 'Blätter anlegen', 'Sammlung aufbauen', 'Pokédex aufbauen',
+    'Dashboard aufbauen', 'Sets und Übersetzung von tcgdex laden'].map((x, i) => 'Einrichtung läuft (' + (i + 1) + ' von 6): ' + x + ' …'));
+  ok('Einrichtung: am Ende normale Meldung', /^Einrichtung fertig\./.test(last(e1).msg) && last(e1).timeout > 0, last(e1));
+  // Update von Hand (neuer Code eingefügt): Dashboard war offen und bleibt offen
+  const e2 = setup();
+  e2.ctx.settingSet_('CODE_VERSION', '1.1.0');
+  e2.ctx.onOpen();
+  e2.ss.toastLog = [];
+  e2.ctx.kartenErfassen();
+  const v = e2.run('TOOL_VERSION');
+  eq('Update: Dashboard bleibt offen', active(e2), 'Dashboard');
+  eq('Update: Laufmeldung je Schritt', busy(e2), ['Daten prüfen', 'Blätter anlegen', 'Sammlung aufbauen', 'Pokédex aufbauen', 'Dashboard aufbauen']
+    .map((x, i) => 'Update auf Version ' + v + ' läuft (' + (i + 1) + ' von 5): ' + x + ' …'));
+  ok('Update: am Ende normale Meldung', last(e2).msg === 'Update auf Version ' + v + ' fertig.' && last(e2).timeout > 0, last(e2));
+  // anderes Blatt offen: bleibt offen
+  e2.ctx.settingSet_('CODE_VERSION', '1.1.0');
+  e2.ss.setActiveSheet(e2.sheet('Pokédex'));
+  e2.ctx.kartenErfassen();
+  eq('Update: Pokédex bleibt offen', active(e2), 'Pokédex');
+  // Ansicht neu aufbauen vom Dashboard aus
+  e2.ss.setActiveSheet(dash(e2));
+  e2.ctx.ansichtNeuAufbauen();
+  eq('Ansicht neu aufbauen: Dashboard bleibt offen', active(e2), 'Dashboard');
+  // Hinweise unterwegs gehen nicht verloren
+  e2.ctx.settingSet_('CODE_VERSION', '1.1.0');
+  e2.ctx.notifyBusy_('läuft');
+  e2.ctx.notify_('Hinweis unterwegs.');
+  e2.ctx.notifyDone_('Fertig.');
+  eq('Hinweise unterwegs kommen in die Fertig-Meldung', last(e2).msg, 'Fertig. Hinweis unterwegs.');
+  // Fehler: die Laufmeldung bleibt nicht stehen
+  const e3 = setup();
+  e3.ctx.settingSet_('CODE_VERSION', '1.1.0');
+  e3.ctx.setupPokedexSheet_ = () => { throw new Error('kaputt'); };
+  let threw = false;
+  try { e3.ctx.upgradeIfNeeded_(); } catch (err) { threw = /kaputt/.test(err.message); }
+  ok('Fehler im Update: Meldung „abgebrochen“ statt Laufmeldung', threw && /abgebrochen: kaputt/.test(last(e3).msg) && last(e3).timeout > 0, last(e3));
 }
 
 // ---------------------------------------------------------------------------

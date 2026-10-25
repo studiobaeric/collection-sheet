@@ -662,7 +662,7 @@ safe(() => {
     ['Kramurx', '62', 'Legend Maker']
   ], 'SRCRECOG2X');
   const h1 = get('Hundemon', '82', 'HeartGold & SoulSilver');
-  t.eq('RECOG-2: Serienname im Set: unklar statt Quapsel', [h1.status, h1.card ? h1.card.id : '', h1.candidates.map((x) => x.id)], ['unklar', '', ['hgss3-82', 'hgss1-82']]);
+  t.eq('RECOG-2: Serienname im Set: unklar statt Quapsel', [h1.status, h1.card && !h1.card.free ? h1.card.id : '', h1.candidates.map((x) => x.id)], ['unklar', '', ['hgss3-82', 'hgss1-82']]);
   t.ok('RECOG-2: Grund nennt den Widerspruch', /^Name passt nicht zu Set und Nummer\./.test(h1.reason) && !/—/.test(h1.reason), h1.reason);
   const h2 = get('Hundemon', '82', '');
   t.eq('RECOG-2: fremder Link: unklar, Despotar nur Kandidat', [h2.status, h2.candidates.map((x) => x.id).indexOf('hgss2-88') >= 0, /Cardmarket-Link/.test(h2.reason)], ['unklar', true, true]);
@@ -672,7 +672,7 @@ safe(() => {
   t.eq('RECOG-2: ohne Namen zählt der Name aus dem Link', get('', '', '').card.id, 'hgss2-88');
   t.eq('RECOG-2: richtiges Set: eindeutig', get('Hundemon', '82', 'Unerschrocken').card.id, 'hgss3-82');
   const di = get('Ditto', '62', 'Legend Maker');
-  t.eq('RECOG-2: falsches Set (Ditto in Legend Maker): unklar, nicht Murkrow', [di.status, di.card ? di.card.id : ''], ['unklar', '']);
+  t.eq('RECOG-2: falsches Set (Ditto in Legend Maker): unklar, nicht Murkrow', [di.status, di.card && !di.card.free ? di.card.id : ''], ['unklar', '']);
   t.eq('RECOG-2: Set ohne deutsche Daten, deutscher Name über die Übersetzung', get('Kramurx', '62', 'Legend Maker').card.id, 'ex12-62');
   // Vorschau: Quapsel kommt nicht mehr dazu
   const pv = env.uiCall('importBuildPreview');

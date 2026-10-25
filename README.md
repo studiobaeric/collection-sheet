@@ -32,9 +32,11 @@ Das Dashboard kommt im Look Rot-weiß. Zwei weitere Looks, Dunkel und Hell-neutr
 
 Das Suchfeld der Sammlung (im Blatt wie in Seitenleiste und Web-App) findet Karten über Name, Nummer, Sonderversion oder Künstler: „Arita“ zeigt alle Karten von Mitsuhiro Arita, „Arita 025“ nur die mit Nummer 025. Seitenleiste und Web-App zeigen den Künstler unter jeder Karte.
 
-Der nächtliche Preislauf merkt sich den Cardmarket-Trendpreis jeder Karte (je Variante) im versteckten Blatt „Kartenverlauf“, immer wenn er sich ändert. Daraus zeigt die Sammlung, wie sich der Preis einer Karte verändert hat, in Euro und Prozent, grün bei Plus und rot bei Minus. Das Blatt Sammlung rechnet über 30 Tage, Seitenleiste und Web-App schalten zwischen 7, 30 und 90 Tagen um. Solange es den Verlauf einer Karte noch nicht so lange gibt, zählt er ab ihrem ersten Tag, und das Datum steht dabei („seit 23.10.“). Klappst du eine Karte in Seitenleiste oder Web-App auf, siehst du ihre Preiskurve.
+Der nächtliche Preislauf merkt sich den Cardmarket-Trendpreis jeder Karte (je Variante) im versteckten Blatt „Kartenverlauf“, immer wenn er sich ändert. Daraus zeigt die Sammlung (Blatt, Seitenleiste und Web-App), wie sich der Preis einer Karte in den letzten 30 Tagen verändert hat, in Euro und Prozent, grün bei Plus und rot bei Minus. Solange es den Verlauf einer Karte noch nicht so lange gibt, zählt er ab ihrem ersten Tag, und das Datum steht dabei („seit 23.10.“).
 
-Die Veränderung gilt für den Preis einer Karte, nicht mal Anzahl. Karten mit eigenem Preis bekommen keine Veränderung, weil ihr Wert nicht Cardmarket folgt; der Preislauf ruft sie trotzdem ab, damit ihre Kurve den Trend zeigt.
+Die Veränderung gilt für den Preis einer Karte, nicht mal Anzahl. Karten mit eigenem Preis bekommen keine Veränderung, weil ihr Wert nicht Cardmarket folgt; der Preislauf ruft sie trotzdem ab, damit ihr Verlauf weiterläuft.
+
+Seitenleiste und Web-App laden die ganze Sammlung einmal, wenn du den Tab öffnest. Suchen und Sortieren laufen danach ohne Warten. +1, −1 und Bearbeiten speichern im Hintergrund, die Karte zeigt so lange „speichert …“ und bleibt an ihrer Stelle, bis du neu suchst oder sortierst. Hast du im Blatt oder auf einem anderen Gerät etwas geändert, holt **Neu laden** den aktuellen Stand.
 
 ## Updates
 

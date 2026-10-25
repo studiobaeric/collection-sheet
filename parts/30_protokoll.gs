@@ -457,7 +457,7 @@ function prNewPlan_(mode, sourceId) {
     mode: mode, sourceId: sourceId, newRows: [], gleich: [], abgleich: [], spalten: [], answers: [],
     handMatch: [], removedByYou: [], added: [], decreased: [], skipped: [],
     counts: { neu: 0, mehr: 0, weniger: 0, uebersprungen: 0, pruefOffen: 0, bekannt: 0, kopien: 0, gleich: 0, entfernt: 0 },
-    valueBefore: 0, valueChange: 0, absent: 0, notes: [], warnings: [], moves: []
+    valueBefore: 0, valueChange: 0, absent: 0, autoFree: 0, notes: [], warnings: [], moves: []
   };
 }
 
@@ -645,6 +645,7 @@ function prPlan_(draft, items, choices, st, imports, proto) {
       plan.skipped.push({ fp: fp, title: prValuesTitle_(it), reason: 'In der Prüfliste noch offen' });
       return;
     }
+    if (res.kind === 'free' && d && d.auto) plan.autoFree++;
     if (res.kind === 'skip') {
       plan.counts.uebersprungen++;
       plan.skipped.push({ fp: fp, title: prValuesTitle_(it), reason: 'Von dir übersprungen' });
@@ -858,6 +859,7 @@ function prPreviewOut_(plan, draft) {
     newColumns: plan.spalten.map(function (x) { return x.name; }),
     sourceSkipped: { summe: Number(s.summe) || 0, leer: Number(s.leer) || 0, nichtAngehakt: Number(s.nichtAngehakt) || 0 },
     valueChange: plan.valueChange,
+    autoFree: plan.autoFree,
     notes: plan.notes.slice(),
     warnings: plan.warnings.slice()
   };
