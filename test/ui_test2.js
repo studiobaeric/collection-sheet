@@ -107,30 +107,47 @@ function makeServer() {
     if (req.ownPrice) setOwn(S.gkey(r), req.ownPrice);
     return result(r, req.name);
   };
+  const upNum = x => String(x == null ? '' : x).trim().toUpperCase().replace(/^([A-Z]*)0+(\d)/, '$1$2');
+  // Gruppe fürs UI wie collGroup_ in Code.gs (mit dex und k zum Suchen und Sortieren im Browser)
+  S.uiGroup = gk => {
+    const rs = sortRows(groupRows(gk));
+    const f = rs[0];
+    const count = rs.reduce((s, r) => s + r.count, 0);
+    const own = ownOf(rs);
+    return {
+      gkey: gk, id: f.id, name: f.name, nameEn: f.nameEn, source: f.source, isFree: !f.id, setName: f.setName, localId: f.localId,
+      setSize: f.setSize, variant: f.variant, variantLabel: VL[f.variant], version: f.version, count, image: f.image,
+      price: own != null ? own : (typeof f.price === 'number' ? f.price : null), priceManual: own != null, ownPrice: own,
+      exemplare: exText(rs), rarity: f.rarity || '', illustrator: f.illustrator || '', chg: f.chg || null, dex: f.dex || [],
+      k: { words: [low(f.name), low(f.nameEn), low(f.version), low(f.illustrator)], num: upNum(f.localId), size: Number(f.setSize) || 0,
+        setId: f.setId || '', sets: [low(f.setName)], setDate: f.setDate || '', numSort: Number(String(f.localId).replace(/\D/g, '')) || 0,
+        localId: String(f.localId || ''), variant: f.variant, version: f.version || '', name: f.name, rank: f.rank == null ? null : f.rank,
+        added: S.rows.indexOf(f) },
+      rows: rs.map(r => {
+        const nr = nrOf(r);
+        return { eid: r.eid, key: S.key(r), cond: r.cond, lang: r.lang, count: r.count, origin: r.origin,
+          originLabel: nr ? (S.imports[nr] ? S.imports[nr] + ', Import ' + nr : 'Import ' + nr) : 'von Hand',
+          isImport: !!nr, importNr: nr || null, extras: Object.assign({}, r.extras) };
+      })
+    };
+  };
+  S.delta = keys => {
+    keys = keys.filter((k, i) => keys.indexOf(k) === i);
+    return { groups: keys.filter(k => groupRows(k).length).map(S.uiGroup), gone: keys.filter(k => !groupRows(k).length) };
+  };
+  S.getCollection = () => {
+    const keys = [];
+    S.rows.forEach(r => { const k = S.gkey(r); if (keys.indexOf(k) < 0) keys.push(k); });
+    return { groups: keys.map(S.uiGroup), total: keys.length };
+  };
+  // nur noch für den Tab Pokédex
   S.searchCollection = (query, setText) => {
     const words = low(query).split(/\s+/).filter(Boolean);
     const st = low(setText);
-    const rows = S.rows.filter(r => words.every(w => low(r.name).includes(w) || low(r.version).includes(w)) && (!st || low(r.setName).includes(st)));
-    const map = new Map();
-    rows.forEach(r => { const k = S.gkey(r); if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
-    const groups = [...map].map(([gk, rs0]) => {
-      const rs = sortRows(rs0);
-      const f = rs[0];
-      const count = rs.reduce((s, r) => s + r.count, 0);
-      const own = ownOf(rs);
-      return {
-        gkey: gk, name: f.name, nameEn: f.nameEn, source: f.source, isFree: !f.id, setName: f.setName, localId: f.localId,
-        setSize: f.setSize, variant: f.variant, variantLabel: VL[f.variant], version: f.version, count, image: f.image,
-        price: own != null ? own : (typeof f.price === 'number' ? f.price : null), priceManual: own != null, ownPrice: own,
-        exemplare: exText(rs),
-        rows: rs.map(r => {
-          const nr = nrOf(r);
-          return { eid: r.eid, key: S.key(r), cond: r.cond, lang: r.lang, count: r.count, origin: r.origin,
-            originLabel: nr ? (S.imports[nr] ? S.imports[nr] + ', Import ' + nr : 'Import ' + nr) : 'von Hand',
-            isImport: !!nr, importNr: nr || null, extras: Object.assign({}, r.extras) };
-        })
-      };
-    });
+    const keys = [];
+    S.rows.filter(r => words.every(w => low(r.name).includes(w) || low(r.version).includes(w)) && (!st || low(r.setName).includes(st)))
+      .forEach(r => { const k = S.gkey(r); if (keys.indexOf(k) < 0) keys.push(k); });
+    const groups = keys.map(S.uiGroup);
     groups.sort((a, b) => (a.count > 0 ? 0 : 1) - (b.count > 0 ? 0 : 1));
     return { total: groups.length, groups: groups.slice(0, 60) };
   };
@@ -151,7 +168,8 @@ function makeServer() {
     const logIds = [];
     if (delta < 0 && row.origin !== 'Hand' && applied) { const id = 'L' + S.proto.length; S.proto.push({ id, eid: row.eid, qty: -applied }); logIds.push(id); }
     const token = { eid: target.eid, applied, logIds, createdEid };
-    return { token, eid: target.eid, count: target.count, groupCount: groupCount(S.gkey(target)), applied, gkey: S.gkey(target) };
+    return { token, eid: target.eid, count: target.count, groupCount: groupCount(S.gkey(target)), applied, gkey: S.gkey(target),
+      delta: applied ? S.delta([S.gkey(target)]) : null };
   };
   S.revertAdjust = token => {
     const row = byEid(token.eid);
@@ -160,12 +178,13 @@ function makeServer() {
     S.proto = S.proto.filter(p => token.logIds.indexOf(p.id) < 0);
     const gk = S.gkey(row);
     if (token.createdEid && token.createdEid === row.eid && row.count === 0) S.rows.splice(S.rows.indexOf(row), 1);
-    return { eid: row.eid, count: row.count, groupCount: groupCount(gk), gkey: gk };
+    return { eid: row.eid, count: row.count, groupCount: groupCount(gk), gkey: gk, delta: S.delta([gk]) };
   };
   S.editEntry = (eid, changes, qty) => {
     const row = byEid(eid);
     if (!row) throw new Error('Eintrag nicht gefunden.');
     qty = qty == null ? row.count : Math.max(1, Math.min(row.count, Number(qty)));
+    const oldGk = S.gkey(row);
     let t = row;
     if (qty < row.count) { row.count -= qty; t = S.addRow(Object.assign({}, row, { eid: S.newEid(), count: qty, extras: Object.assign({}, row.extras) })); }
     if ('cond' in changes) t.cond = changes.cond;
@@ -174,7 +193,7 @@ function makeServer() {
     if (changes.extras) Object.assign(t.extras, changes.extras);
     const other = S.rows.find(r => r !== t && S.key(r) === S.key(t) && r.origin === t.origin && r.fp === t.fp);
     if (other) { other.count += t.count; S.rows.splice(S.rows.indexOf(t), 1); t = other; }
-    return { ok: true, eid: t.eid, gkey: S.gkey(t) };
+    return { ok: true, eid: t.eid, gkey: S.gkey(t), delta: S.delta([oldGk, S.gkey(t)]) };
   };
   S.setGroupOwnPrice = (gk, price) => {
     const rs = groupRows(gk);
@@ -182,7 +201,7 @@ function makeServer() {
     setOwn(gk, Number(price) > 0 ? Number(price) : 0);
     const own = ownOf(rs);
     const f = sortRows(rs)[0];
-    return { gkey: gk, price: own != null ? own : (typeof f.price === 'number' ? f.price : null), priceManual: own != null };
+    return { gkey: gk, price: own != null ? own : (typeof f.price === 'number' ? f.price : null), priceManual: own != null, delta: S.delta([gk]) };
   };
   S.linkFreeGroup = (gk, cardId, dataLang, variant) => {
     const c = S.cards[cardId];
@@ -193,7 +212,7 @@ function makeServer() {
         variant: variant === 'base' ? c.baseVariant : variant, image: c.image, price: c.prices ? c.prices.base : '' });
       if (dataLang === 'de') r.name = c.name;
     });
-    return { gkey: S.gkey(rs[0]) };
+    return { gkey: S.gkey(rs[0]), delta: S.delta([gk, S.gkey(rs[0])]) };
   };
   S.adjustCount = () => { throw new Error('adjustCount sollte die neue UI nicht mehr benutzen'); };
   // Updates (Update.gs), Vertrag aus SPEC §11
@@ -304,7 +323,7 @@ function boot(mode, opts) {
     async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo'); },
     async openColl() {
       E.click(E.$('tabColl'));
-      await E.respond('searchCollection');
+      await E.respond('getCollection');
     },
     expand(i) { E.click(E.$('gh' + i).querySelector('.info')); }
   };
@@ -348,8 +367,8 @@ function boot(mode, opts) {
     ok('Import-Pane sichtbar, andere versteckt', !$('paneImport').classList.contains('hidden') && $('paneAdd').classList.contains('hidden') && $('paneColl').classList.contains('hidden'));
     ok('Import-Tab aktiv', $('tabImport').classList.contains('active') && !$('tabAdd').classList.contains('active'));
     E.click($('tabColl'));
-    ok('Sammlung-Tab lädt die Liste', E.calls('searchCollection').length === 1 && !$('paneColl').classList.contains('hidden') && $('paneImport').classList.contains('hidden'));
-    await E.respond('searchCollection');
+    ok('Sammlung-Tab lädt die Liste', E.calls('getCollection').length === 1 && !$('paneColl').classList.contains('hidden') && $('paneImport').classList.contains('hidden'));
+    await E.respond('getCollection');
     E.click($('tabAdd'));
     ok('zurück zu Hinzufügen', !$('paneAdd').classList.contains('hidden') && $('tabAdd').classList.contains('active'));
     ok('keine Skriptfehler (Sidebar)', E.errors.length === 0, E.errors);
@@ -575,7 +594,9 @@ function boot(mode, opts) {
     ok('Eigener-Preis-Feld in der Gruppe', !!$('op' + gi) && !!E.btn($('gp' + gi), 'Speichern') && E.btn($('gp' + gi), 'Entfernen').disabled);
     E.expand(gi);
     ok('wieder zugeklappt', $('gx' + gi).classList.contains('hidden'));
-    ok('keine Treffer: Hinweis', (E.win.renderCollection({ total: 0, groups: [] }), /Nichts gefunden/.test($('collResults').textContent)));
+    E.type($('colQuery'), 'Gibtsnicht');
+    E.win.__advance(200);
+    ok('keine Treffer: Hinweis, kein Serveraufruf', /Nichts gefunden/.test($('collResults').textContent) && E.pending.length === 0 && $('collInfo').textContent === '0 von 5 Einträgen');
     ok('kein Gedankenstrich in der Sammlung', $('paneColl').textContent.indexOf('—') < 0);
     ok('keine Skriptfehler (Darstellung)', E.errors.length === 0, E.errors);
     ok('kein XSS ausgeführt', E.win.__xss === undefined);
@@ -738,18 +759,32 @@ function boot(mode, opts) {
     ok('Formular übersteht Neuzeichnen', $('eCond' + gi).value === 'LP' && $('eX' + gi + '_0').value === 'Box 1');
     ok('Formular nach +1 aktualisiert (max 3, Menge bleibt 1, Kopf 3×)', $('eQty' + gi).max === '3' && $('eQty' + gi).value === '1' && /Bearbeiten: 3× DE NM/.test($('ge' + gi).textContent), $('ge' + gi).textContent);
     E.click(E.btn($('ge' + gi), 'Speichern'));
-    ok('während des Speicherns: Knopf gesperrt', E.btn($('ge' + gi), 'Speichere …') && E.btn($('ge' + gi), 'Speichere …').disabled);
-    E.win.saveEdit(gi); // Doppelklick
+    const rowsNow = () => [...$('gr' + gi).querySelectorAll('.einfo')].map(e => e.textContent);
+    ok('sofort: Formular zu, Karte offen, „speichert …“', $('ge' + gi).innerHTML === '' && !$('gx' + gi).classList.contains('hidden') &&
+      /speichert/.test($('gh' + gi).textContent), $('gh' + gi).textContent);
+    ok('sofort: Zeile geteilt (2× NM, 1× LP mit Box 1, speichert)', rowsNow().some(x => x.indexOf('2× DE NM · von Hand') === 0) &&
+      rowsNow().some(x => x.indexOf('1× DE LP · von Hand · speichert') === 0 && /Box 1/.test(x)), rowsNow());
+    ok('während des Speicherns: −1/+1 der Karte gesperrt, geteilte Zeile nicht bearbeitbar', E.btn($('gh' + gi), '+1').disabled &&
+      E.btn([...$('gr' + gi).querySelectorAll('.erow')].find(el => /speichert/.test(el.textContent)), 'Bearbeiten').disabled);
     ok('editEntry genau einmal', E.calls('editEntry').length === 1);
     const a = E.calls('editEntry')[0].args;
     ok('editEntry(eid, nur Änderungen, qty)', J(a) === J([G.gHand.eid, { cond: 'LP', extras: { Ordner: 'Box 1' } }, 1]), a);
+    // gleich die nächste Karte bearbeiten, während noch gespeichert wird
+    const pi = E.gi('Pikachu');
+    E.expand(pi);
+    E.click(E.btn($('gr' + pi), 'Bearbeiten'));
+    E.pick($('eCond' + pi), 'GD');
+    E.click(E.btn($('ge' + pi), 'Speichern'));
+    ok('zweite Änderung wartet, zeigt sie aber schon', E.calls('editEntry').length === 1 && /speichert/.test($('gh' + pi).textContent) &&
+      /2× DE GD/.test($('gh' + pi).textContent), $('gh' + pi).textContent);
     await E.respond('editEntry');
-    ok('nach editEntry: Liste neu laden', E.calls('searchCollection').length === 1);
-    await E.respond('searchCollection');
-    gi = E.gi('Glurak');
-    ok('Gespeichert-Meldung, Gruppe bleibt offen', /Gespeichert/.test($('collMsg').textContent) && !$('gx' + gi).classList.contains('hidden'));
-    const t = [...$('gr' + gi).querySelectorAll('.einfo')].map(e => e.textContent);
-    ok('aufgeteilt: 2× NM (nach +1), 1× LP', t.some(x => x.indexOf('2× DE NM · von Hand') === 0) && t.some(x => x.indexOf('1× DE LP · von Hand') === 0 && /Box 1/.test(x)), t);
+    ok('erste gespeichert: nicht neu geladen, „speichert“ weg', E.calls('getCollection').length === 0 && !/speichert/.test($('gh' + gi).textContent) &&
+      E.gi('Glurak') === gi);
+    const t = rowsNow();
+    ok('aufgeteilt (Serverstand): 2× NM (nach +1), 1× LP', t.some(x => x.indexOf('2× DE NM · von Hand') === 0) && t.some(x => x.indexOf('1× DE LP · von Hand') === 0 && /Box 1/.test(x)), t);
+    ok('danach geht die zweite raus', E.calls('editEntry').length === 1 && E.calls('editEntry')[0].args[0] === G.pImp.eid);
+    await E.respond('editEntry');
+    ok('zweite gespeichert', !/speichert/.test($('gh' + pi).textContent) && S.rows.find(r => r.eid === G.pImp.eid).cond === 'GD');
     // Zeile mit Anzahl 1: kein Mengenfeld, qty 1; Sprache + Version
     const impIdx = erows().findIndex(el => /Import 3/.test(el.textContent));
     E.click(E.btn(erows()[impIdx], 'Bearbeiten'));
@@ -760,18 +795,26 @@ function boot(mode, opts) {
     E.click(E.btn($('ge' + gi), 'Speichern'));
     const b = E.calls('editEntry')[0].args;
     ok('editEntry(importEid, {cardLang, version}, 1)', J(b) === J([G.gImp.eid, { cardLang: 'EN', version: 'Snowflake' }, 1]), b);
+    ok('Vorschau: das Exemplar wandert aus der Karte', !/Import 3/.test($('gr' + gi).textContent) && /speichert/.test($('gh' + gi).textContent));
     await E.respond('editEntry');
-    await E.respond('searchCollection');
-    const pi = E.gIdx(g => g.name === 'Glurak' && g.version === 'Snowflake');
-    ok('Version verschiebt in neue Gruppe, die offen ist', pi >= 0 && !$('gx' + pi).classList.contains('hidden') && $('gh' + pi).querySelector('.t').textContent === 'Glurak · Snowflake');
-    // Fehler
-    E.click(E.btn($('gr' + pi), 'Bearbeiten'));
-    E.pick($('eCond' + pi), 'PO');
-    E.click(E.btn($('ge' + pi), 'Speichern'));
+    const vi = E.gIdx(g => g.name === 'Glurak' && g.version === 'Snowflake');
+    ok('Version: neue Karte offen direkt unter der alten', vi >= 0 && !$('gx' + vi).classList.contains('hidden') &&
+      $('gh' + vi).querySelector('.t').textContent === 'Glurak · Snowflake' && $('g' + gi).nextElementSibling === $('g' + vi));
+    ok('Liste nicht neu geladen oder sortiert', E.calls('getCollection').length === 0 && $('collInfo').textContent === '6 Einträge', $('collInfo').textContent);
+    // Fehler: die Karte geht zurück und zeigt den Fehler
+    E.click(E.btn($('gr' + vi), 'Bearbeiten'));
+    E.pick($('eCond' + vi), 'PO');
+    E.click(E.btn($('ge' + vi), 'Speichern'));
+    ok('Vorschau PO', /EN PO/.test($('gr' + vi).textContent));
     await E.respond('editEntry', { error: 'Eintrag nicht gefunden.' });
-    ok('editEntry-Fehler: Formular bleibt, Meldung', /nicht gefunden/.test($('collMsg').textContent) && !!$('eCond' + pi) && !E.btn($('ge' + pi), 'Speichern').disabled);
-    E.click(E.btn($('ge' + pi), 'Abbrechen'));
-    ok('Abbrechen schließt das Formular', $('ge' + pi).innerHTML === '');
+    ok('editEntry-Fehler: Änderung zurück, Meldung oben und an der Karte', !/PO/.test($('gr' + vi).textContent) && /nicht gefunden/.test($('collMsg').textContent) &&
+      /Nicht gespeichert: Eintrag nicht gefunden/.test($('gh' + vi).textContent) && !/speichert …/.test($('gh' + vi).textContent), [$('gr' + vi).textContent, $('collMsg').textContent]);
+    E.click(E.btn($('gr' + vi), 'Bearbeiten'));
+    E.click(E.btn($('ge' + vi), 'Abbrechen'));
+    ok('Abbrechen schließt das Formular', $('ge' + vi).innerHTML === '');
+    E.click(E.btn($('gh' + vi), '+1'));
+    await E.respond('adjustEntry');
+    ok('nächste Änderung räumt die Fehlermeldung weg', !/Nicht gespeichert/.test($('gh' + vi).textContent));
     ok('keine Skriptfehler (Bearbeiten)', E.errors.length === 0, E.errors);
   }
 
@@ -840,19 +883,22 @@ function boot(mode, opts) {
     ok('linkFreeGroup(gkey, id, lang, base)', J(E.calls('linkFreeGroup')[0].args) === J([oldGkey, 'base1-8', 'de', 'base']), E.calls('linkFreeGroup')[0].args);
     E.win.linkPick(fi, 0);
     ok('kein zweiter linkFreeGroup', E.calls('linkFreeGroup').length === 1);
+    const prev = $('g' + fi).previousElementSibling;
     const r = await E.respond('linkFreeGroup');
-    ok('danach Liste neu laden', E.calls('searchCollection').length === 1);
-    await E.respond('searchCollection');
     const ni = E.gIdx(g => g.gkey === r.res.gkey);
-    ok('verknüpfte Gruppe offen, nicht mehr frei, Meldung', ni >= 0 && !E.win.state.groups[ni].isFree && !$('gx' + ni).classList.contains('hidden') && /verknüpft/.test($('collMsg').textContent));
-    ok('alte Gruppe nicht mehr als offen gemerkt', !E.win.state.open[oldGkey]);
+    ok('nicht neu geladen, verknüpfte Gruppe an derselben Stelle, offen, Meldung', E.calls('getCollection').length === 0 && ni >= 0 &&
+      !E.win.state.groups[ni].isFree && !$('gx' + ni).classList.contains('hidden') && $('g' + ni).previousElementSibling === prev &&
+      !$('g' + fi) && /verknüpft/.test($('collMsg').textContent));
+    ok('alte Gruppe nicht mehr als offen gemerkt', !E.win.state.open[oldGkey] && !E.win.coll.byKey[oldGkey]);
 
-    // Set-Auswahl im Verknüpfen
+    // Set-Auswahl im Verknüpfen; die neue Karte kam von woanders: erst „Neu laden“
     S.addRow({ id: '', name: 'Celebi', setName: 'Ordner', localId: '7', count: 1 });
     S.cards['base1-7'] = { id: 'base1-7', name: 'Celebi', setName: 'Basis-Set', setId: 'base1', localId: '7', setSize: 102, baseVariant: 'holo', baseLabel: 'Holo', image: '' };
     E.type($('colQuery'), 'Celebi');
-    E.win.__advance(400);
-    await E.respond('searchCollection');
+    E.win.__advance(200);
+    ok('Celebi noch nicht in der geladenen Sammlung', E.gi('Celebi') < 0 && E.pending.length === 0);
+    E.click($('collReload'));
+    await E.respond('getCollection');
     fi = E.gi('Celebi');
     E.expand(fi);
     E.click(E.btn($('gl' + fi), 'Mit tcgdex-Karte verknüpfen'));
@@ -882,61 +928,100 @@ function boot(mode, opts) {
     ok('keine Skriptfehler (Verknüpfen)', E.errors.length === 0, E.errors);
   }
 
-  // ---- Veraltete Antworten in der Sammlung ----
+  // ---- Sammlung im Browser: Suche ohne Server, Neu laden, veraltete Antworten (#30) ----
   {
     const E = boot('sidebar');
     const { $, S, G } = E;
+    const st = E.win.state;
     await E.startup();
     E.click($('tabColl'));
-    E.type($('colQuery'), 'Glurak');
-    E.win.loadCollection();
-    // erste (leere Suche) kommt zuletzt
-    await E.respond('searchCollection', { last: true });
-    await E.respond('searchCollection');
-    ok('ältere Listenantwort ignoriert', E.win.state.groups.length === 1 && E.win.state.groups[0].name === 'Glurak');
-    // Debounce: nur eine Anfrage
+    ok('Sammlung einmal laden', E.calls('getCollection').length === 1 && /Lade die Sammlung/.test($('collResults').textContent));
+    await E.respond('getCollection');
+    ok('Zahl der Einträge', $('collInfo').textContent === '5 Einträge', $('collInfo').textContent);
+    // Debounce, dann ohne Server
     E.type($('colQuery'), 'G'); E.type($('colQuery'), 'Gl'); E.type($('colQuery'), 'Glurak');
-    E.win.__advance(399);
-    ok('Debounce: noch keine Anfrage', E.calls('searchCollection').length === 0);
+    E.win.__advance(199);
+    ok('Debounce: Liste noch unverändert', st.groups.length === 5);
     E.win.__advance(1);
-    ok('Debounce: genau eine Anfrage', E.calls('searchCollection').length === 1);
-    await E.respond('searchCollection');
-    // Antwort kommt nach Neuladen: kein Fehler, neue Liste nachgezogen
-    E.click(E.btn($('gh0'), '+1'));
-    E.win.loadCollection();
-    await E.respond('searchCollection');           // neue Liste (Server hat +1 schon)
-    $('gh0').setAttribute('data-x', 'neu');
-    let threw = false;
-    try { await E.respond('adjustEntry'); } catch (e) { threw = true; }
-    ok('späte adjust-Antwort nach Neuladen wirft nicht', !threw && E.errors.length === 0, E.errors);
-    ok('neue Liste per gkey nachgezogen', $('gh0').querySelector('.cnt').textContent === '4' && E.win.state.groups[0].count === 4);
-    ok('kein Rückgängig in der neuen Liste', !E.btn($('gh0'), 'Rückgängig'));
-    // Listenantwort mit altem Stand, adjust-Antwort kam während des Ladens
-    const stale = S.searchCollection('Glurak', '');
-    E.click(E.btn($('gh0'), '+1'));          // 4 -> 5
-    E.win.loadCollection();                   // Liste angefragt, bevor adjust zurück ist
-    await E.respond('adjustEntry');           // kommt während des Ladens an
-    await E.respond('searchCollection', { value: stale }); // Server las noch den alten Stand (4)
-    ok('verspätete Änderung auf neue Liste übertragen', $('gh0').querySelector('.cnt').textContent === '5' && /1× DE, 4× DE NM/.test($('gh0').textContent), $('gh0').textContent);
-    // Änderung, die vor dem Neuladen fertig war, wird nicht noch einmal angewendet
-    S.rows.find(r => r.eid === G.gHand.eid).count = 9; // jemand anderes hat geändert
-    E.win.loadCollection();
-    await E.respond('searchCollection');
-    ok('ältere Ergebnisse überschreiben frische Liste nicht', $('gh0').querySelector('.cnt').textContent === '10');
-    // Preis-Antwort nach Neuladen
-    E.expand(0);
-    E.type($('op0'), '3');
-    E.click(E.btn($('gp0'), 'Speichern'));
-    E.win.loadCollection();
-    await E.respond('searchCollection', { value: S.searchCollection('Glurak', '') });
-    await E.respond('setGroupOwnPrice');
-    ok('Preis-Antwort zieht neue Liste nach', /3,00\s€ manuell/.test($('gh0').textContent));
-    // Liste-Fehler nach neuerer Liste ignoriert
+    ok('Suche im Browser: nur Glurak, kein Serveraufruf', E.pending.length === 0 && st.groups.length === 1 && st.groups[0].name === 'Glurak' &&
+      $('collInfo').textContent === '1 von 5 Einträgen', $('collInfo').textContent);
+    const q = text => { E.type($('colQuery'), text); E.win.__advance(200); return st.groups.map(g => g.name); };
+    ok('Nummer mit Setgröße', J(q('025/189')) === J(['Glurak']) && J(q('25')) === J(['Glurak']) && J(q('025/100')) === J([]));
+    ok('Nummer mit Buchstaben, führende Null', J(q('dp016')) === J(['Pikachu']));
+    ok('Sonderversion und zwei Wörter', J(q('snowflake')) === J(['Pikachu']) && J(q('glurak 025')) === J(['Glurak']) && J(q('glurak 133')) === J([]));
+    q('');
+    E.type($('colSet'), 'karmesin');
+    E.win.__advance(200);
+    ok('Set-Filter', J(st.groups.map(g => g.name).sort()) === J(['Bisasam', 'Evoli']));
+    E.type($('colSet'), 'SV1');
+    E.win.__advance(200);
+    ok('Set-ID', st.groups.length === 2);
+    E.type($('colSet'), '');
+    E.pick($('colSort'), 'name');
+    ok('Sortieren nach Name im Browser, 0er am Ende', E.pending.length === 0 && J(st.groups.map(g => g.name).filter(n => n[0] !== '<')) ===
+      J(['Evoli', 'Glurak', 'Pikachu', 'Bisasam']), st.groups.map(g => g.name));
+    E.click($('colDir'));
+    ok('Richtung umgedreht, 0er bleiben am Ende', st.groups[0].name === 'Pikachu' && st.groups[st.groups.length - 1].name === 'Bisasam', st.groups.map(g => g.name));
+    E.pick($('colSort'), 'price');
+    ok('Preis: teuerste zuerst', st.groups[0].name === 'Pikachu' && st.groups[1].name === 'Glurak', st.groups.map(g => g.name));
+    E.pick($('colSort'), 'set');
+    // Tab wechseln: Liste bleibt, kein Neuladen
+    E.expand(E.gi('Glurak'));
+    E.click($('tabAdd')); E.click($('tabColl'));
+    ok('Tab zurück: kein Neuladen, Karte bleibt offen', E.pending.length === 0 && !$('gx' + E.gi('Glurak')).classList.contains('hidden'));
+    // Hinzufügen: beim nächsten Öffnen neu laden
+    E.win.addDone({ eid: G.gHand.eid, key: 'k', message: 'Glurak hinzugefügt.' }, E.win.searchGen);
+    E.click($('tabColl'));
+    ok('nach Hinzufügen: lädt neu, alte Liste bleibt stehen', E.calls('getCollection').length === 1 && st.groups.length === 5 && $('collReload').disabled &&
+      /Lädt/.test($('collReload').textContent));
+    await E.respond('getCollection');
+    ok('neu geladen, Karte weiter offen', !$('collReload').disabled && !$('gx' + E.gi('Glurak')).classList.contains('hidden'));
+    // Neu laden holt Änderungen von woanders
+    S.rows.find(r => r.eid === G.gHand.eid).count = 9;
+    E.click($('collReload'));
+    await E.respond('getCollection');
+    let gi = E.gi('Glurak');
+    ok('Neu laden: Änderung von woanders', $('gh' + gi).querySelector('.cnt').textContent === '10');
+    // Neu laden, während gespeichert wird: wartet
+    E.click(E.btn($('gh' + gi), '+1'));
+    E.click($('collReload'));
+    ok('Neu laden wartet auf das Speichern', E.calls('getCollection').length === 0 && /sobald alles gespeichert/.test($('collMsg').textContent));
+    await E.respond('adjustEntry');
+    ok('danach lädt es', E.calls('getCollection').length === 1);
+    await E.respond('getCollection');
+    gi = E.gi('Glurak');
+    ok('Stand nach Laden: 11', $('gh' + gi).querySelector('.cnt').textContent === '11');
+    // Liste angefragt, dann eine Änderung: die alte Antwort zählt nicht, es lädt noch einmal
+    const stale = S.getCollection();
+    E.click($('collReload'));
+    E.click(E.btn($('gh' + gi), '+1'));
+    await E.respond('adjustEntry');
+    await E.respond('getCollection', { value: stale }); // Stand von vor dem +1
+    ok('veraltete Liste verworfen, lädt noch einmal', E.calls('getCollection').length === 1 && $('gh' + gi).querySelector('.cnt').textContent === '12');
+    await E.respond('getCollection');
+    gi = E.gi('Glurak');
+    ok('frisch: 12', $('gh' + gi).querySelector('.cnt').textContent === '12' && st.groups[gi].count === 12);
+    // zwei Ladeaufträge: nur der neueste zählt, ein alter Fehler auch nicht
     E.win.loadCollection(); E.win.loadCollection();
-    await E.respond('searchCollection', { last: true });
-    await E.respond('searchCollection', { error: 'alt' });
-    ok('veralteter Listenfehler ignoriert', !/alt/.test($('collMsg').textContent) && E.win.state.groups.length === 1);
-    ok('keine Skriptfehler (stale)', E.errors.length === 0, E.errors);
+    await E.respond('getCollection', { last: true });
+    await E.respond('getCollection', { error: 'alt' });
+    ok('veralteter Listenfehler ignoriert', !/alt/.test($('collMsg').textContent) && st.groups.length === 5);
+    E.win.loadCollection();
+    await E.respond('getCollection', { error: 'Zeitüberschreitung' });
+    ok('Ladefehler: Meldung, alte Liste bleibt', /Zeitüberschreitung/.test($('collMsg').textContent) && st.groups.length === 5 && !$('collReload').disabled);
+    // während des Ladens woanders hinzugefügt: die Antwort ist schon alt, beim nächsten Öffnen noch einmal
+    E.win.loadCollection();
+    E.click($('tabAdd'));
+    E.win.addDone({ eid: G.gHand.eid, key: 'k', message: 'ok' }, E.win.searchGen);
+    await E.respond('getCollection');
+    ok('Hinzufügen während des Ladens: bleibt als veraltet markiert', E.win.coll.stale === true);
+    E.click($('tabColl'));
+    ok('beim Öffnen lädt es noch einmal', E.calls('getCollection').length === 1);
+    await E.respond('getCollection');
+    ok('jetzt aktuell', E.win.coll.stale === false);
+    E.click($('tabAdd')); E.click($('tabColl'));
+    ok('Tab hin und her, während nichts geändert wurde: nichts geladen', E.pending.length === 0);
+    ok('keine Skriptfehler (Sammlung im Browser)', E.errors.length === 0, E.errors);
   }
 
   // ---- Weitere Fälle: mehrere Hand-Zeilen, Tastatur, 44px, Fehler, applied 0 ----
@@ -960,13 +1045,14 @@ function boot(mode, opts) {
     // applied 0: kein Rückgängig
     E.click(E.btn($('gh' + gi), '−1'));
     E.click(E.btn($('gc' + gi), '1× DE · Pokemon Ordner, Import 3'));
-    await E.respond('adjustEntry', { value: { token: { eid: G.gImp.eid, applied: 0, logIds: [], createdEid: '' }, eid: G.gImp.eid, count: 0, groupCount: 4, applied: 0, gkey: E.win.state.groups[gi].gkey } });
-    ok('applied 0: kein Rückgängig, Anzahl vom Server', !E.btn($('gh' + gi), 'Rückgängig') && $('gh' + gi).querySelector('.cnt').textContent === '4');
+    await E.respond('adjustEntry', { value: { token: { eid: G.gImp.eid, applied: 0, logIds: [], createdEid: '' }, eid: G.gImp.eid, count: 0, groupCount: 4, applied: 0, gkey: E.win.state.groups[gi].gkey, delta: null } });
+    ok('applied 0 (ohne delta): kein Rückgängig, nichts geändert', !E.btn($('gh' + gi), 'Rückgängig') && $('gh' + gi).querySelector('.cnt').textContent === '5');
     // Fehler bei adjustEntry
     E.click(E.btn($('gh' + gi), '−1'));
     E.click($('gc' + gi).querySelector('button.opt'));
     await E.respond('adjustEntry', { error: 'Sperre belegt' });
-    ok('adjust-Fehler: Meldung, Knöpfe frei, Anzahl unverändert', /Sperre belegt/.test($('collMsg').textContent) && !E.btn($('gh' + gi), '+1').disabled && $('gh' + gi).querySelector('.cnt').textContent === '4');
+    ok('adjust-Fehler: Meldung oben und an der Karte, Knöpfe frei, Anzahl unverändert', /Sperre belegt/.test($('collMsg').textContent) &&
+      /Nicht geändert: Sperre belegt/.test($('gh' + gi).textContent) && !E.btn($('gh' + gi), '+1').disabled && $('gh' + gi).querySelector('.cnt').textContent === '5');
     // Tastatur
     const info = $('gh' + gi).querySelector('.info');
     info.dispatchEvent(new E.win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -1190,7 +1276,7 @@ function boot(mode, opts) {
     await E.respond('getUpdateInfo');
     ok('Leiste weg nach der Übernahme', $('updBar').classList.contains('hidden'));
     E.click(E.btn($('takeMsg'), 'Zur Sammlung'));
-    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('searchCollection').length === 1);
+    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('getCollection').length === 1);
     E.click(E.btn($('takeBox'), 'Prüfen'));
     await E.respond('takeoverPreview', { error: 'In dieser Tabelle sind schon Karten.' });
     ok('Vorschau-Fehler', $('takeMsg').querySelector('.msg.err') && /schon Karten/.test($('takeMsg').textContent));

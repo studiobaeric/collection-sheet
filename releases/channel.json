@@ -6,7 +6,7 @@
     {
       "version": "1.1.1",
       "tag": "v1.1.1",
-      "date": "2026-10-23",
+      "date": "2026-10-25",
       "prerelease": false,
       "schema": "2",
       "notes": [
@@ -14,7 +14,13 @@
         "Prüfliste: Leiste oben mit „Weiter zur Vorschau“",
         "Vorschau: zeigt, wie viele Zeilen als freie Karte kommen",
         "Nach Einrichtung und Update öffnet das Dashboard, nicht die Sammlung",
-        "Laufanzeige unten rechts, bis Einrichtung oder Update fertig ist"
+        "Laufanzeige unten rechts, bis Einrichtung oder Update fertig ist",
+        "Seitenleiste und Handy-Seite: keine Preiskurve und kein 7/30/90 mehr",
+        "Preisänderung in der Sammlung fest über 30 Tage",
+        "Sammlung zeigt alle Karten, Suchen und Sortieren ohne Warten",
+        "Änderungen speichern im Hintergrund, Karte bleibt an ihrer Stelle",
+        "„Neu laden“ holt Änderungen aus dem Blatt oder vom Handy",
+        "Hinzufügen, +1/−1 und Bearbeiten speichern schneller"
       ]
     },
     {

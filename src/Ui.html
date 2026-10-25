@@ -100,16 +100,11 @@
   .chg.up { color: #137333; }
   .chg.down { color: #c5221f; }
   .chg.flat { color: var(--muted); font-weight: 400; }
-  .curve { position: relative; margin-top: 8px; }
-  .curve .plot { touch-action: pan-y; outline: none; border-radius: 4px; }
-  .curve .plot:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-  .curve svg { display: block; width: 100%; height: 150px; }
-  .curve .tip { position: absolute; top: 0; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 6px;
-    padding: 4px 8px; font-size: 12px; color: var(--muted); box-shadow: 0 1px 3px rgba(0,0,0,.12); white-space: nowrap; }
-  .curve .tip b { display: block; font-size: 14px; color: var(--fg); }
-  .curve details { margin-top: 6px; font-size: 13px; }
-  .curve summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
-  .curve ul { margin: 4px 0 0 18px; padding: 0; }
+  .collbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+  .collbar .notes { margin-top: 0; }
+  .saving { color: var(--muted); font-style: italic; }
+  .item .info .s.err { color: var(--err); }
+  .erow.pend .einfo { opacity: .7; }
 </style>
 </head>
 <body>
@@ -164,13 +159,8 @@
     <button class="btn small" id="colDir" type="button" onclick="toggleDir()">↑</button>
   </div>
   <div class="hint" id="colDirHint"></div>
-  <label id="colChgLbl">Preisveränderung über</label>
-  <div class="seg" id="colChg" role="group" aria-labelledby="colChgLbl">
-    <button type="button" id="chg7" onclick="setChgDays(7)">7 Tage</button>
-    <button type="button" id="chg30" onclick="setChgDays(30)">30 Tage</button>
-    <button type="button" id="chg90" onclick="setChgDays(90)">90 Tage</button>
-  </div>
   <div id="colDex"></div>
+  <div class="collbar"><span class="notes" id="collInfo"></span><button type="button" class="lnk" id="collReload" onclick="loadCollection()">Neu laden</button></div>
   <div id="collMsg"></div>
   <div id="collResults"></div>
 </div>
@@ -344,9 +334,9 @@ function showTab(t) {
     if (b) b.classList.toggle('active', k === t);
     if (p) p.classList.toggle('hidden', k !== t);
   });
-  if (t === 'coll') { loadCollection(); $('colQuery').focus(); }
+  if (t === 'coll') { collShow(); $('colQuery').focus(); }
   else if (t === 'dex') loadDex();
-  else if (t === 'import') { if (typeof impInit === 'function') impInit(); }
+  else if (t === 'import') { markStale(); if (typeof impInit === 'function') impInit(); } // ein Import ändert die Sammlung
   else if (t === 'upd') updRender();
   else $('fName').focus();
 }
@@ -527,6 +517,7 @@ function addCurrent() {
 
 /** Erfolg nach addCard / addFreeCard. gen: searchGen beim Absenden. */
 function addDone(res, gen) {
+  markStale(); // die Sammlung lädt beim nächsten Öffnen neu
   state.lastEid = res.eid || null;
   state.lastKey = res.key || null;
   setMsg('addMsg', esc(res.message) + (state.lastEid ? '<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>' : ''), 'ok');
@@ -543,6 +534,7 @@ function againPlusOne(btn) {
   if (!eid || (btn && btn.disabled)) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Speichere …'; }
   call('adjustEntry', eid, 1).then(function (res) {
+    markStale();
     if (eid !== state.lastEid) return; // inzwischen andere Karte hinzugefügt
     setMsg('addMsg', 'Noch eine dazu, jetzt ' + esc(res.count) + ' Stück.<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>', 'ok');
   }).catch(function (e) {
@@ -593,69 +585,280 @@ function saveFree(ev) {
 }
 
 // ---------- Sammlung ----------
+// Die ganze Sammlung kommt einmal vom Server (getCollection, #30), Suchen, Filtern und Sortieren laufen hier im Browser.
+// state.groups ist die angezeigte Liste in der Reihenfolge der letzten Suche. Ihre Indizes bleiben fest, bis wieder
+// gesucht oder sortiert wird: eine Karte, die nach einer Änderung neu entsteht, kommt hinten ins Array und steht im Bild
+// neben ihrer Ausgangskarte, eine weggefallene wird nur ausgeblendet. Jede Gruppe merkt sich in base den letzten Stand
+// vom Server; was angezeigt wird, ist base plus die noch laufenden Änderungen (predict). Alle Änderungen laufen
+// nacheinander über eine Warteschlange, Bearbeiten zeigt das Ergebnis sofort mit „speichert …“.
 
+var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, opsDone: 0 };
+var queue = [], queueBusy = false;
 var collTimer = null;
-var opSeq = 0, recentOps = []; // Ergebnisse, die nach dem Absenden einer Listensuche ankamen, auf die neue Liste übertragen
-function debouncedCollection() { clearTimeout(collTimer); collTimer = setTimeout(function () { loadCollection(); }, 400); }
+var CHG_DAYS = 30; // Preisveränderung über 30 Tage, wie im Blatt Sammlung
+function debouncedCollection() { clearTimeout(collTimer); collTimer = setTimeout(refilter, 200); }
 
-function noteOp(fn) {
-  recentOps.push({ seq: ++opSeq, fn: fn });
-  if (recentOps.length > 30) recentOps.shift();
+/** Woanders geändert (Hinzufügen, Import, Übernahme): beim nächsten Öffnen des Tabs neu laden */
+function markStale() { coll.stale = true; coll.staleSeq++; }
+
+function cloneData(o) { return JSON.parse(JSON.stringify(o)); }
+/** Neuer Stand vom Server für eine Gruppe; die Bedienzustände (offen, Formulare …) bleiben. */
+function setServer(g, data) { g.base = cloneData(data); showBase(g); return g; }
+/** Anzeige = Serverstand + Änderungen, die noch in der Warteschlange stehen */
+function showBase(g) {
+  var b = cloneData(g.base);
+  Object.keys(b).forEach(function (k) { g[k] = b[k]; });
+  g.rows = g.rows || [];
+  queue.forEach(function (op) { if (op.g === g && op.predict) op.predict(g); });
+}
+function saving(g) { var n = 0; queue.forEach(function (op) { if (op.g === g && op.predict) n++; }); return n; }
+function isBusy(g) { return !!g.busy || saving(g) > 0; }
+
+function enqueue(op) { queue.push(op); runQueue(); }
+function runQueue() {
+  if (queueBusy) return;
+  var op = queue[0];
+  if (!op) {
+    if (coll.reloadWanted) { coll.reloadWanted = false; loadCollection(); }
+    return;
+  }
+  queueBusy = true;
+  var next = function () { queueBusy = false; runQueue(); };
+  op.send().then(function (res) {
+    queue.shift(); coll.opsDone++;
+    try { op.done(res); } finally { next(); }
+  }, function (e) {
+    queue.shift();
+    try { op.fail(e); } finally { next(); }
+  });
 }
 
-/** okText: Erfolgsmeldung, die nach dem Neuladen gezeigt wird. */
+/** Ganze Sammlung vom Server holen (beim ersten Öffnen, „Neu laden“, nach Hinzufügen oder Import). */
 function loadCollection(okText) {
-  var gen = ++collGen;
-  var since = opSeq;
-  (state.groups || []).forEach(function (g) { clearTimeout(g.undoTimer); g.undo = null; });
-  spinner('collResults', 'Suche in der Sammlung …');
+  if (queue.length) { coll.reloadWanted = true; setMsg('collMsg', 'Lädt neu, sobald alles gespeichert ist …'); return; }
+  var gen = ++coll.gen, seen = coll.opsDone, staleSeq = coll.staleSeq;
+  coll.loading = true;
+  drawReload();
+  if (!coll.all) spinner('collResults', 'Lade die Sammlung …');
   setMsg('collMsg', '');
   drawCollDex();
-  call('searchCollection', $('colQuery').value, $('colSet').value, collOpts())
-    .then(function (res) {
-      if (gen !== collGen) return;
-      renderCollection(res);
-      recentOps.forEach(function (op) { if (op.seq > since) op.fn(); });
-      if (okText) setMsg('collMsg', esc(okText), 'ok');
-    })
-    .catch(function (e) { if (gen !== collGen) return; $('collResults').innerHTML = ''; setMsg('collMsg', esc(errText(e)), 'err'); });
-}
-
-function renderCollection(res) {
-  var groups = (res && res.groups) || [];
-  state.groups = groups;
-  if (!groups.length) { $('collResults').innerHTML = '<div class="notes">Nichts gefunden.</div>'; return; }
-  var html = res.total > groups.length ? '<div class="notes">' + esc(res.total) + ' Treffer, die ersten ' + groups.length + ' werden gezeigt.</div>' : '';
-  groups.forEach(function (g, i) {
-    g.rows = g.rows || [];
-    g.open = !!state.open[g.gkey];
-    html += '<div class="grp" id="g' + i + '"><div id="gh' + i + '"></div><div id="gc' + i + '"></div>' +
-      '<div class="gx hidden" id="gx' + i + '"><div id="gv' + i + '"></div><div id="gr' + i + '"></div><div id="ge' + i + '"></div><div id="gp' + i + '"></div><div id="gl' + i + '"></div></div></div>';
+  call('getCollection').then(function (res) {
+    if (gen !== coll.gen) return;
+    if (queue.length || coll.opsDone !== seen) { coll.loading = false; coll.reloadWanted = true; runQueue(); return; } // inzwischen geändert
+    coll.loading = false;
+    coll.stale = coll.staleSeq !== staleSeq; // während des Ladens woanders geändert: beim nächsten Öffnen noch einmal
+    coll.all = []; coll.byKey = {};
+    ((res && res.groups) || []).forEach(function (data) {
+      var g = setServer({}, data);
+      coll.all.push(g);
+      coll.byKey[g.gkey] = g;
+    });
+    refilter();
+    drawReload();
+    if (okText) setMsg('collMsg', esc(okText), 'ok');
+  }).catch(function (e) {
+    if (gen !== coll.gen) return;
+    coll.loading = false;
+    drawReload();
+    if (!coll.all) $('collResults').innerHTML = '';
+    setMsg('collMsg', esc(errText(e)), 'err');
   });
-  $('collResults').innerHTML = html;
-  groups.forEach(function (g, i) { draw(i, g, 'all'); });
 }
 
-/** Teile einer Gruppe neu zeichnen: h Kopf, c Auswahl, v Preiskurve, r Exemplare, e Bearbeiten, p Preis, l Verknüpfen. */
-function draw(i, g, parts) {
-  if (!state.groups || state.groups[i] !== g) return; // Gruppe gehört zu einer älteren Liste
+/** Tab Sammlung zeigen: beim ersten Mal und nach Änderungen woanders laden, sonst bleibt die Liste, wie sie war. */
+function collShow() {
+  if (coll.loading && !coll.stale) return; // lädt schon
+  if (!coll.all || coll.stale) loadCollection();
+  else if (coll.resort) refilter();
+}
+
+function drawReload() {
+  var b = $('collReload');
+  b.disabled = coll.loading;
+  b.textContent = coll.loading ? 'Lädt …' : 'Neu laden';
+}
+
+function collInfo() {
+  var el = $('collInfo');
+  if (!coll.all) { el.textContent = ''; return; }
+  var total = coll.all.length, shown = (state.groups || []).filter(function (g) { return !g.gone; }).length;
+  var word = function (n) { return n === 1 ? 'Eintrag' : 'Einträge'; };
+  el.textContent = shown === total ? total + ' ' + word(total) : shown + ' von ' + total + ' Einträgen';
+}
+
+// Suche und Sortierung wie searchCollection und collCompare_ in Code.gs, mit den Werten in g.k
+function normNum(s) { return String(s == null ? '' : s).trim().toUpperCase().replace(/^([A-Z]*)0+(\d)/, '$1$2'); }
+function collMatch(g, words, stx, dexNr) {
+  var k = g.k || {};
+  if (stx && String(k.setId || '').toLowerCase() !== stx && !(k.sets || []).some(function (s) { return s.indexOf(stx) >= 0; })) return false;
+  if (dexNr && (g.dex || []).indexOf(dexNr) < 0) return false;
+  return words.every(function (w) {
+    if (/\d/.test(w)) { // Nummer, auch 025/165
+      var parts = w.split('/'), size = parts.length > 1 ? parseInt(parts[1], 10) : NaN;
+      return k.num === normNum(parts[0]) && !(size && k.size !== size);
+    }
+    var lw = w.toLowerCase();
+    return (k.words || []).some(function (x) { return String(x).indexOf(lw) >= 0; });
+  });
+}
+function cmpVal(a, b) {
+  a = a == null ? '' : a; b = b == null ? '' : b;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b), 'de');
+}
+function setCmp(a, b) {
+  var x = a.k || {}, y = b.k || {};
+  return cmpVal(x.setDate, y.setDate) || cmpVal(x.setId, y.setId) || cmpVal(x.numSort || 0, y.numSort || 0) ||
+    cmpVal(x.localId, y.localId) || cmpVal(x.variant, y.variant) || cmpVal(x.version, y.version) || cmpVal(x.name, y.name);
+}
+function sortVal(g, sort) {
+  var k = g.k || {};
+  if (sort === 'dex') return g.dex && g.dex.length ? g.dex[0] : null;
+  if (sort === 'rarity') return k.rank == null ? null : k.rank;
+  if (sort === 'name') return String(k.name || '').toLowerCase() || null;
+  if (sort === 'price') return g.price == null || g.price === '' ? null : Number(g.price);
+  if (sort === 'added') return k.added == null ? null : k.added;
+  return null;
+}
+/** Karten mit 0 Exemplaren immer am Ende, dann ohne Sortierwert, dann der Wert; bei Gleichstand nach Set */
+function collCmp(a, b, sort, desc) {
+  var dir = desc ? -1 : 1;
+  var z = (a.count > 0 ? 0 : 1) - (b.count > 0 ? 0 : 1);
+  if (z) return z;
+  if (sort === 'set') return dir * setCmp(a, b);
+  var x = sortVal(a, sort), y = sortVal(b, sort);
+  if (x == null || y == null) {
+    if (x != null || y != null) return x == null ? 1 : -1;
+    return setCmp(a, b);
+  }
+  return dir * cmpVal(x, y) || setCmp(a, b);
+}
+
+/** Suche, Set, Pokédex-Filter und Sortierung auf die geladene Sammlung anwenden (ohne Server). */
+function refilter() {
+  clearTimeout(collTimer);
+  if (!coll.all) { if (!coll.loading) loadCollection(); return; }
+  coll.resort = false;
+  drawCollDex();
+  var words = $('colQuery').value.trim().split(/\s+/).filter(Boolean);
+  var stx = $('colSet').value.trim().toLowerCase();
+  var nr = collSort.dex ? collSort.dex.nr : 0;
+  var list = coll.all.filter(function (g) { return collMatch(g, words, stx, nr); });
+  list.sort(function (a, b) { return collCmp(a, b, collSort.sort, collSort.desc); });
+  state.groups = list;
+  renderCollection();
+}
+
+function groupHtml(g, i) {
+  return '<div class="grp" id="g' + i + '"><div id="gh' + i + '">' + headHtml(g, i) + '</div><div id="gc' + i + '">' + chooserHtml(g, i) + '</div>' +
+    '<div class="gx' + (g.open ? '' : ' hidden') + '" id="gx' + i + '"><div id="gr' + i + '"></div><div id="ge' + i + '"></div>' +
+    '<div id="gp' + i + '"></div><div id="gl' + i + '"></div></div></div>';
+}
+
+/** Die ganze Liste in einem Rutsch zeichnen (auch bei vielen Karten schnell); Bilder laden erst beim Scrollen. */
+function renderCollection() {
+  var groups = state.groups || [];
+  collInfo();
+  if (!groups.length) {
+    $('collResults').innerHTML = '<div class="notes">' + (coll.all && coll.all.length ? 'Nichts gefunden.' : 'Noch keine Karten in der Sammlung.') +
+      '</div><div id="collList"></div>';
+    return;
+  }
+  $('collResults').innerHTML = '<div id="collList">' + groups.map(function (g, i) {
+    g.open = !!state.open[g.gkey];
+    return groupHtml(g, i);
+  }).join('') + '</div>';
+  groups.forEach(function (g, i) { if (g.open) draw(i, g, 'repl'); });
+}
+
+/** Eingabe in einem Feld darin? Dann bei Antworten vom Server nicht neu zeichnen (sonst ist das Getippte weg). */
+function typing(el) {
+  var a = document.activeElement;
+  return !!(a && a !== document.body && el.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName));
+}
+
+/**
+ * Teile einer Gruppe neu zeichnen: h Kopf, c Auswahl, r Exemplare, e Bearbeiten, p Preis, l Verknüpfen.
+ * soft: Teile mit dem Cursor in einem Eingabefeld bleiben stehen.
+ */
+function draw(i, g, parts, soft) {
+  if (!state.groups || state.groups[i] !== g || g.gone) return; // Gruppe gehört zu einer älteren Liste
   var all = parts === 'all';
-  function put(id, fn) { if (all || parts.indexOf(id) >= 0) { var el = $('g' + id + i); if (el) el.innerHTML = fn(g, i); } }
+  function put(id, fn) {
+    if (!all && parts.indexOf(id) < 0) return;
+    var el = $('g' + id + i);
+    if (el && !(soft && typing(el))) el.innerHTML = fn(g, i);
+  }
   put('h', headHtml);
   put('c', chooserHtml);
   var x = $('gx' + i);
   if (x) x.classList.toggle('hidden', !g.open);
   if (!g.open) return;
-  loadHist(i, g);
-  put('v', curveHtml);
   put('r', rowsHtml);
   put('e', editHtml);
   put('p', priceHtml);
   put('l', linkHtml);
 }
+/** Gruppe neu zeichnen, wo sie gerade in der Liste steht */
+function redraw(g, parts, soft) { var i = (state.groups || []).indexOf(g); if (i >= 0) draw(i, g, parts, soft); }
+
+/** Neue Gruppe nach einer Änderung: gleich hinter ihrer Ausgangskarte zeigen (wird erst bei der nächsten Suche einsortiert). */
+function showNear(g, anchor) {
+  var list = $('collList');
+  if (!list) return;
+  var a = anchor ? state.groups.indexOf(anchor) : -1;
+  var j = state.groups.push(g) - 1;
+  g.open = !!(anchor && anchor.open);
+  if (g.open) state.open[g.gkey] = true;
+  var ref = a >= 0 ? $('g' + a) : null;
+  if (ref) ref.insertAdjacentHTML('afterend', groupHtml(g, j));
+  else list.insertAdjacentHTML('beforeend', groupHtml(g, j));
+  if (g.open) draw(j, g, 'repl');
+}
+
+/**
+ * Antwort einer Änderung (delta aus Code.gs): nur die betroffenen Karten austauschen, nichts neu laden. anchor: die
+ * geänderte Karte; result: Schlüssel der Karte, in der das Ergebnis steht. Fällt anchor weg (verknüpft, ganz in eine
+ * andere Karte gewandert), rückt diese an ihre Stelle und ist aufgeklappt, wenn anchor es war.
+ */
+function applyDelta(d, anchor, result) {
+  if (!d || !coll.all) return;
+  (d.groups || []).forEach(function (data) {
+    var g = coll.byKey[data.gkey];
+    if (g) {
+      setServer(g, data);
+      if (state.groups.indexOf(g) >= 0) redraw(g, 'all', true);
+      else showNear(g, anchor); // passt nicht zur Suche, bleibt aber neben der geänderten Karte stehen
+      return;
+    }
+    g = setServer({}, data);
+    coll.all.push(g);
+    coll.byKey[g.gkey] = g;
+    showNear(g, anchor);
+  });
+  var t = result ? coll.byKey[result] : null;
+  if (t && anchor && t !== anchor && (d.gone || []).indexOf(anchor.gkey) >= 0) {
+    var ti = state.groups.indexOf(t), ai = state.groups.indexOf(anchor);
+    var tn = ti >= 0 ? $('g' + ti) : null, an = ai >= 0 ? $('g' + ai) : null;
+    if (tn && an && tn !== an.nextSibling) an.parentNode.insertBefore(tn, an.nextSibling);
+    if (anchor.open && !t.open) { t.open = true; state.open[t.gkey] = true; redraw(t, 'all', true); }
+  }
+  (d.gone || []).forEach(function (k) {
+    var g = coll.byKey[k];
+    if (!g) return;
+    delete coll.byKey[k];
+    coll.all.splice(coll.all.indexOf(g), 1);
+    var i = state.groups.indexOf(g);
+    g.gone = true;
+    delete state.open[k];
+    var el = i >= 0 ? $('g' + i) : null;
+    if (el) el.parentNode.removeChild(el);
+  });
+  collInfo();
+}
 
 function isHand(r) { return r.origin ? r.origin === 'Hand' : !r.isImport; }
-function rowByEid(g, eid) { for (var k = 0; k < g.rows.length; k++) if (g.rows[k].eid === eid) return g.rows[k]; return null; }
+function rowByEid(g, eid) { for (var k = 0; k < g.rows.length; k++) if (eid && g.rows[k].eid === eid) return g.rows[k]; return null; }
 function copyObj(o) { var c = {}; Object.keys(o || {}).forEach(function (k) { c[k] = o[k]; }); return c; }
 function copyRow(r) { var c = copyObj(r); c.extras = copyObj(r.extras); return c; }
 function titleHtml(g) { return esc(g.name) + (g.version ? ' · ' + esc(g.version) : '') + (g.source === 'en-Ersatz' ? ' (EN)' : ''); }
@@ -687,6 +890,21 @@ function exemplareText(rows) {
 }
 function sumCounts(rows) { return rows.reduce(function (s, r) { return s + (Number(r.count) || 0); }, 0); }
 
+/** 'yyyy-MM-dd' -> '23.10.' im laufenden Jahr, sonst '23.10.2025' */
+function shortDate(ymd) {
+  var p = String(ymd || '').split('-');
+  if (p.length !== 3) return String(ymd || '');
+  return p[2] + '.' + p[1] + '.' + (Number(p[0]) === new Date().getFullYear() ? '' : p[0]);
+}
+/** Veränderung {eur, pct, since} -> „+1,20 € (+12 %)“ grün, Minus rot; bei kürzerem Verlauf „seit 23.10.“ dahinter */
+function chgHtml(c) {
+  var e = Number(c.eur) || 0;
+  var sign = e > 0 ? '+' : e < 0 ? '−' : '±';
+  var txt = sign + eur(Math.abs(e)) + (c.pct == null ? '' : ' (' + sign + Math.abs(c.pct) + ' %)');
+  return '<span class="chg ' + (e > 0 ? 'up' : e < 0 ? 'down' : 'flat') + '">' + esc(txt) + '</span>' +
+    (c.since ? ' seit ' + esc(shortDate(c.since)) : '');
+}
+
 function headHtml(g, i) {
   var sub = [];
   if (g.isFree) sub.push('freie Karte');
@@ -695,21 +913,24 @@ function headHtml(g, i) {
   sub.push(esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant));
   var p = g.price == null || g.price === '' ? NaN : Number(g.price);
   if (!isNaN(p)) sub.push(esc(eur(p)) + (g.priceManual ? ' manuell' : ''));
-  var ch = g.priceManual || !g.chg ? null : g.chg[chgDays];
+  var ch = g.priceManual || !g.chg ? null : g.chg[CHG_DAYS];
   if (ch) sub.push(chgHtml(ch));
   if (g.exemplare) sub.push(esc(g.exemplare));
   if (collSort.sort === 'rarity' && g.rarity) sub.push(esc(g.rarity));
   if (collSort.sort === 'dex' && g.dex && g.dex.length) sub.push('#' + g.dex.map(esc).join(', #'));
+  var busy = isBusy(g);
   return '<div class="item' + (g.count ? '' : ' zero') + '">' + imgTag(cardImg(g.image, 'low')) +
     '<div class="info tap" role="button" tabindex="0" aria-expanded="' + (g.open ? 'true' : 'false') + '" onclick="toggleGroup(' + i + ')"' +
     ' onkeydown="groupKey(event,this,' + i + ')">' +
     '<div class="t">' + titleHtml(g) + '</div><div class="s">' + sub.join(' · ') +
     ' <span class="chev">' + (g.open ? '▲' : '▼') + '</span></div>' +
     (g.illustrator ? '<div class="s">Illus. ' + esc(g.illustrator) + '</div>' : '') +
-    (g.undo && !g.busy ? '<button class="undo" onclick="event.stopPropagation();undoGroup(' + i + ')">Rückgängig</button>' : '') + '</div>' +
-    '<div class="ctl"><button class="btn small" onclick="groupMinus(' + i + ')"' + (!g.count || g.busy ? ' disabled' : '') + '>−1</button>' +
+    (saving(g) ? '<div class="s saving">speichert …</div>' : '') +
+    (g.err ? '<div class="s err">' + esc(g.err) + '</div>' : '') +
+    (g.undo && !busy ? '<button class="undo" onclick="event.stopPropagation();undoGroup(' + i + ')">Rückgängig</button>' : '') + '</div>' +
+    '<div class="ctl"><button class="btn small" onclick="groupMinus(' + i + ')"' + (!g.count || busy ? ' disabled' : '') + '>−1</button>' +
     '<span class="cnt">' + esc(g.count) + '</span>' +
-    '<button class="btn small" onclick="groupPlus(' + i + ')"' + (g.busy ? ' disabled' : '') + '>+1</button></div></div>';
+    '<button class="btn small" onclick="groupPlus(' + i + ')"' + (busy ? ' disabled' : '') + '>+1</button></div></div>';
 }
 
 function chooserHtml(g, i) {
@@ -719,21 +940,23 @@ function chooserHtml(g, i) {
     (c.delta > 0 ? '<div class="hint">Die neue Karte zählt dann als von Hand erfasst.</div>' : '');
   c.eids.forEach(function (eid, k) {
     var r = rowByEid(g, eid);
-    if (r) html += '<button class="btn opt" onclick="pickChoice(' + i + ',' + k + ')"' + (g.busy ? ' disabled' : '') + '>' + rowLabel(r) + '</button>';
+    if (r) html += '<button class="btn opt" onclick="pickChoice(' + i + ',' + k + ')"' + (isBusy(g) ? ' disabled' : '') + '>' + rowLabel(r) + '</button>';
   });
   return html + '<button class="btn opt" onclick="closeChooser(' + i + ')">Abbrechen</button></div>';
 }
 
 function rowsHtml(g, i) {
   if (!g.rows.length) return '<div class="notes">Keine Exemplare.</div>';
+  var busy = isBusy(g);
   return g.rows.map(function (r, j) {
     var ex = extrasHtml(r);
     var editing = g.edit && g.edit.eid === r.eid;
-    return '<div class="erow' + (r.count ? '' : ' zero') + (editing ? ' sel' : '') + '"><div class="einfo">' + rowLabel(r) +
-      (ex ? '<div class="x">' + ex + '</div>' : '') + '</div><div class="ctl">' +
-      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',-1)"' + (!r.count || g.busy ? ' disabled' : '') + '>−1</button>' +
-      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',1)"' + (g.busy ? ' disabled' : '') + '>+1</button>' +
-      '<button class="btn small" onclick="openEdit(' + i + ',' + j + ')"' + (g.editBusy ? ' disabled' : '') + '>Bearbeiten</button></div></div>';
+    var off = r.pending ? ' disabled' : '';
+    return '<div class="erow' + (r.count ? '' : ' zero') + (editing ? ' sel' : '') + (r.pending ? ' pend' : '') + '"><div class="einfo">' + rowLabel(r) +
+      (r.pending ? ' · <span class="saving">speichert …</span>' : '') + (ex ? '<div class="x">' + ex + '</div>' : '') + '</div><div class="ctl">' +
+      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',-1)"' + (!r.count || busy ? ' disabled' : '') + '>−1</button>' +
+      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',1)"' + (busy ? ' disabled' : '') + '>+1</button>' +
+      '<button class="btn small" onclick="openEdit(' + i + ',' + j + ')"' + off + '>Bearbeiten</button></div></div>';
   }).join('');
 }
 
@@ -755,121 +978,96 @@ function groupKey(ev, el, i) {
 // -1 / +1 auf der Gruppe
 function groupMinus(i) {
   var g = state.groups[i];
-  if (!g || g.busy) return;
+  if (!g || isBusy(g)) return;
   var rows = g.rows.filter(function (r) { return r.count > 0; });
   if (!rows.length) return;
-  if (rows.length === 1) { g.choose = null; adjust(i, g, rows[0], -1); return; }
+  if (rows.length === 1) { g.choose = null; adjust(g, rows[0], -1); return; }
   g.choose = { delta: -1, eids: rows.map(function (r) { return r.eid; }) }; // Kurz nachfragen
   draw(i, g, 'c');
 }
 
 function groupPlus(i) {
   var g = state.groups[i];
-  if (!g || g.busy || !g.rows.length) return;
+  if (!g || isBusy(g) || !g.rows.length) return;
   var hand = g.rows.filter(isHand);
   var direct = hand.length === 1 ? hand[0] : (!hand.length && g.rows.length === 1 ? g.rows[0] : null);
-  if (direct) { g.choose = null; adjust(i, g, direct, 1); return; }
+  if (direct) { g.choose = null; adjust(g, direct, 1); return; }
   g.choose = { delta: 1, eids: g.rows.map(function (r) { return r.eid; }) };
   draw(i, g, 'c');
 }
 
 function pickChoice(i, k) {
   var g = state.groups[i];
-  if (!g || !g.choose || g.busy) return;
+  if (!g || !g.choose || isBusy(g)) return;
   var c = g.choose, r = rowByEid(g, c.eids[k]);
   g.choose = null;
   if (!r || (c.delta < 0 && !r.count)) { draw(i, g, 'c'); return; }
-  adjust(i, g, r, c.delta);
+  adjust(g, r, c.delta);
 }
 
 function closeChooser(i) { var g = state.groups[i]; if (g) { g.choose = null; draw(i, g, 'c'); } }
 
 function rowAdjust(i, j, delta) {
   var g = state.groups[i];
-  if (!g || g.busy) return;
+  if (!g || isBusy(g)) return;
   var r = g.rows[j];
-  if (!r || (delta < 0 && !r.count)) return;
+  if (!r || r.pending || (delta < 0 && !r.count)) return;
   g.choose = null;
-  adjust(i, g, r, delta);
+  adjust(g, r, delta);
 }
 
-/** Antwort von adjustEntry auf eine Gruppe anwenden (auch auf neu geladene Listen). */
-function applyAdjust(g, res, src) {
-  var r = rowByEid(g, res.eid);
-  if (!r && src && res.eid) {
-    if (res.eid === src.eid) r = copyRow(src);
-    else { // +1 auf eine Import-Zeile landet in der Zeile „von Hand“ (ggf. neu angelegt)
-      r = copyRow(src);
-      r.eid = res.eid; r.count = 0; r.origin = 'Hand'; r.originLabel = 'von Hand'; r.isImport = false; r.importNr = null;
-    }
-    var at = 0;
-    if (isHand(r)) { while (at < g.rows.length && isHand(g.rows[at])) at++; } else at = g.rows.length;
-    g.rows.splice(at, 0, r);
-  }
-  if (r && res.count != null) r.count = Number(res.count) || 0;
-  g.count = res.groupCount != null ? Number(res.groupCount) || 0 : sumCounts(g.rows);
-  g.exemplare = exemplareText(g.rows);
+/** Fehler einer Änderung: Karte zurück auf den Stand vom Server, Fehler an der Karte und oben. */
+function opFail(g, e, text) {
+  showBase(g);
+  g.err = (text || 'Nicht gespeichert') + ': ' + errText(e);
+  redraw(g, 'all', true);
+  setMsg('collMsg', esc(errText(e)), 'err');
 }
 
-function applyRevert(g, res, token) {
-  var r = rowByEid(g, res.eid);
-  if (r && res.count != null) r.count = Number(res.count) || 0;
-  if (r && token && token.createdEid && token.createdEid === r.eid && !r.count) g.rows.splice(g.rows.indexOf(r), 1);
-  g.count = res.groupCount != null ? Number(res.groupCount) || 0 : sumCounts(g.rows);
-  g.exemplare = exemplareText(g.rows);
-}
-
-/** Dieselbe Gruppe in einer inzwischen neu geladenen Liste nachziehen */
-function syncOthers(g, fn, parts) {
-  (state.groups || []).forEach(function (x, j) {
-    if (x !== g && x.gkey === g.gkey && !x.busy) { fn(x); draw(j, x, typeof parts === 'function' ? parts(x) : parts); }
-  });
-}
-/** Nach einer Zähländerung: Kopf, Auswahl, Exemplare und ein offenes Bearbeiten-Formular (Werte stehen in g.edit) */
-function cntParts(x) { return x.edit ? 'hcre' : 'hcr'; }
-
-function adjust(i, g, row, delta) {
-  if (g.busy) return;
+function adjust(g, row, delta) {
+  if (isBusy(g)) return;
   clearTimeout(g.undoTimer); g.undo = null; // alte Rückgängig-Option verwerfen
-  g.busy = true; draw(i, g, 'hcr');
-  var src = copyRow(row);
-  call('adjustEntry', row.eid, delta).then(function (res) {
-    g.busy = false;
-    var fn = function (x) { applyAdjust(x, res, src); };
-    fn(g);
-    if (res.applied && res.token) {
-      g.undo = res.token;
-      clearTimeout(g.undoTimer);
-      g.undoTimer = setTimeout(function () { g.undo = null; draw(i, g, 'h'); }, 5000);
-    }
-    draw(i, g, cntParts(g));
-    syncOthers(g, fn, cntParts);
-    noteOp(function () { syncOthers(g, fn, cntParts); });
-  }).catch(function (e) { g.busy = false; draw(i, g, 'hcr'); setMsg('collMsg', esc(errText(e)), 'err'); });
+  g.busy = true; g.err = '';
+  redraw(g, 'hcr');
+  var eid = row.eid;
+  enqueue({
+    g: g,
+    send: function () { return call('adjustEntry', eid, delta); },
+    done: function (res) {
+      g.busy = false;
+      applyDelta(res && res.delta, g);
+      if (res && res.applied && res.token) {
+        g.undo = res.token;
+        clearTimeout(g.undoTimer);
+        g.undoTimer = setTimeout(function () { g.undo = null; redraw(g, 'h'); }, 5000);
+      }
+      redraw(g, 'hcr');
+    },
+    fail: function (e) { g.busy = false; opFail(g, e, 'Nicht geändert'); }
+  });
 }
 
 function undoGroup(i) {
   var g = state.groups[i];
-  if (!g || !g.undo || g.busy) return;
+  if (!g || !g.undo || isBusy(g)) return;
   var token = g.undo;
   g.undo = null; clearTimeout(g.undoTimer);
-  g.busy = true; draw(i, g, 'hcr');
-  call('revertAdjust', token).then(function (res) {
-    g.busy = false;
-    var fn = function (x) { applyRevert(x, res, token); };
-    fn(g);
-    draw(i, g, cntParts(g));
-    syncOthers(g, fn, cntParts);
-    noteOp(function () { syncOthers(g, fn, cntParts); });
-  }).catch(function (e) { g.busy = false; draw(i, g, 'hcr'); setMsg('collMsg', esc(errText(e)), 'err'); });
+  g.busy = true; g.err = '';
+  draw(i, g, 'hcr');
+  enqueue({
+    g: g,
+    send: function () { return call('revertAdjust', token); },
+    done: function (res) { g.busy = false; applyDelta(res && res.delta, g); redraw(g, 'hcr'); },
+    fail: function (e) { g.busy = false; opFail(g, e, 'Nicht rückgängig gemacht'); }
+  });
 }
 
 // Bearbeiten (pro Exemplar-Zeile)
 function openEdit(i, j) {
   var g = state.groups[i];
-  if (!g || g.editBusy) return;
+  if (!g) return;
   var r = g.rows[j];
-  if (!r) return;
+  if (!r || r.pending) return;
   if (g.edit && g.edit.eid === r.eid) { g.edit = null; draw(i, g, 're'); return; }
   var ex = r.extras || {};
   var names = UI_CONFIG.extras.slice();
@@ -883,7 +1081,7 @@ function openEdit(i, j) {
 
 function editField(i, field, value) { var g = state.groups[i]; if (g && g.edit) g.edit[field] = value; }
 function editExtra(i, k, value) { var g = state.groups[i]; if (g && g.edit) g.edit.extras[k] = value; }
-function closeEdit(i) { var g = state.groups[i]; if (g && !g.editBusy) { g.edit = null; draw(i, g, 're'); } }
+function closeEdit(i) { var g = state.groups[i]; if (g) { g.edit = null; draw(i, g, 're'); } }
 
 function editHtml(g, i) {
   var e = g.edit;
@@ -900,13 +1098,40 @@ function editHtml(g, i) {
     html += '<label for="eQty' + i + '">Wie viele davon?</label><input type="number" id="eQty' + i + '" min="1" max="' + esc(r.count) + '" value="' + esc(e.qty) + '" inputmode="numeric" oninput="editField(' + i + ',\'qty\',this.value)">' +
       '<div class="hint">Von ' + esc(r.count) + ' Stück. Die übrigen bleiben, wie sie sind.</div>';
   }
-  return html + '<div class="actions"><button class="btn" onclick="closeEdit(' + i + ')"' + (g.editBusy ? ' disabled' : '') + '>Abbrechen</button>' +
-    '<button class="btn primary" onclick="saveEdit(' + i + ')"' + (g.editBusy ? ' disabled' : '') + '>' + (g.editBusy ? 'Speichere …' : 'Speichern') + '</button></div></div>';
+  return html + '<div class="actions"><button class="btn" onclick="closeEdit(' + i + ')">Abbrechen</button>' +
+    '<button class="btn primary" onclick="saveEdit(' + i + ')">Speichern</button></div></div>';
 }
 
+/**
+ * Vorschau einer Bearbeitung, bis der Server antwortet (gleiche Regeln wie editEntry): Zeile ändern oder teilen;
+ * mit anderer Sonderversion wandert das Exemplar zu einer anderen Karte, bei der einzigen Zeile ändert sich der Titel.
+ */
+function predictEdit(g, eid, ch, qty) {
+  var r = rowByEid(g, eid);
+  if (!r) return;
+  var n = qty == null ? r.count : Math.min(qty, r.count);
+  var t = r;
+  if (r.count && n < r.count) {
+    t = copyRow(r);
+    r.count -= n; t.count = n; t.eid = '';
+    g.rows.splice(g.rows.indexOf(r) + 1, 0, t);
+  }
+  if (ch.cond != null) t.cond = ch.cond;
+  if (ch.cardLang != null) t.lang = ch.cardLang;
+  if (ch.extras) Object.keys(ch.extras).forEach(function (k) { t.extras[k] = ch.extras[k]; });
+  t.pending = true;
+  if (ch.version != null && ch.version !== (g.version || '')) {
+    if (g.rows.length === 1) g.version = ch.version;
+    else g.rows.splice(g.rows.indexOf(t), 1);
+  }
+  g.count = sumCounts(g.rows);
+  g.exemplare = exemplareText(g.rows);
+}
+
+/** Speichern: Formular zu, die Karte zeigt die Änderung sofort, gespeichert wird im Hintergrund (#30). */
 function saveEdit(i) {
   var g = state.groups[i];
-  if (!g || !g.edit || g.editBusy) return;
+  if (!g || !g.edit) return;
   var e = g.edit, r = rowByEid(g, e.eid);
   if (!r) { g.edit = null; draw(i, g, 're'); return; }
   var changes = {}, any = false;
@@ -928,13 +1153,23 @@ function saveEdit(i) {
     if (!(qty >= 1 && qty <= r.count)) { setMsg('collMsg', 'Wie viele davon? Bitte eine Zahl von 1 bis ' + esc(r.count) + ' eingeben.', 'err'); return; }
   } else if (r.count === 1) qty = 1;
   setMsg('collMsg', '');
-  g.editBusy = true; draw(i, g, 're');
-  call('editEntry', e.eid, changes, qty).then(function (res) {
-    g.editBusy = false; g.edit = null;
-    rememberVersion(ver);
-    if (res && res.gkey) state.open[res.gkey] = true;
-    loadCollection('Gespeichert.');
-  }).catch(function (err) { g.editBusy = false; draw(i, g, 're'); setMsg('collMsg', esc(errText(err)), 'err'); });
+  rememberVersion(ver);
+  g.edit = null; g.err = '';
+  var eid = e.eid;
+  enqueue({
+    g: g,
+    predict: function (x) { predictEdit(x, eid, changes, qty); },
+    send: function () { return call('editEntry', eid, changes, qty); },
+    done: function (res) {
+      if (res && res.delta) applyDelta(res.delta, g, res.gkey);
+      else { showBase(g); redraw(g, 'all', true); } // auf dem Server war nichts zu ändern
+      var t = res && res.gkey ? coll.byKey[res.gkey] : null; // das bearbeitete Exemplar steht jetzt dort: aufklappen
+      if (t && t !== g && g.open && !t.open) { t.open = true; state.open[t.gkey] = true; redraw(t, 'all', true); }
+    },
+    fail: function (err) { opFail(g, err); }
+  });
+  showBase(g);
+  draw(i, g, 'all');
 }
 
 // Eigener Preis (gilt für die ganze Gruppe)
@@ -954,34 +1189,31 @@ function savePrice(i) {
   if (!g || g.priceBusy) return;
   var v = parseEuro(g.priceText);
   if (v === null || isNaN(v) || v <= 0) { setMsg('collMsg', 'Bitte einen Preis größer als 0 eingeben, z. B. 1,50.', 'err'); return; }
-  sendPrice(i, g, Math.round(v * 100) / 100);
+  sendPrice(g, Math.round(v * 100) / 100);
 }
 
 function clearPrice(i) {
   var g = state.groups[i];
   if (!g || g.priceBusy || g.ownPrice == null) return;
-  sendPrice(i, g, null);
+  sendPrice(g, null);
 }
 
-function applyPrice(x, res) {
-  x.price = res.price == null || res.price === '' ? null : Number(res.price);
-  x.priceManual = !!res.priceManual;
-  x.ownPrice = x.priceManual ? x.price : null;
-  x.priceText = euroText(x.ownPrice);
-}
-
-function sendPrice(i, g, price) {
-  g.priceBusy = true; draw(i, g, 'p');
+function sendPrice(g, price) {
+  g.priceBusy = true; g.err = '';
+  redraw(g, 'p');
   setMsg('collMsg', '');
-  call('setGroupOwnPrice', g.gkey, price).then(function (res) {
-    g.priceBusy = false;
-    var fn = function (x) { applyPrice(x, res); };
-    fn(g);
-    draw(i, g, 'hpv');
-    syncOthers(g, fn, 'hpv');
-    noteOp(function () { syncOthers(g, fn, 'hpv'); });
-    setMsg('collMsg', price == null ? 'Eigener Preis entfernt.' : 'Eigener Preis gespeichert.', 'ok');
-  }).catch(function (e) { g.priceBusy = false; draw(i, g, 'p'); setMsg('collMsg', esc(errText(e)), 'err'); });
+  enqueue({
+    g: g,
+    send: function () { return call('setGroupOwnPrice', g.gkey, price); },
+    done: function (res) {
+      g.priceBusy = false;
+      g.priceText = null; // aus dem neuen Preis
+      applyDelta(res && res.delta, g);
+      redraw(g, 'hp');
+      setMsg('collMsg', price == null ? 'Eigener Preis entfernt.' : 'Eigener Preis gespeichert.', 'ok');
+    },
+    fail: function (e) { g.priceBusy = false; opFail(g, e); }
+  });
 }
 
 // Freie Karte mit tcgdex-Karte verknüpfen
@@ -1109,14 +1341,20 @@ function linkPick(i, k) {
   L.linking = true; L.busy = true; L.msg = ''; L.busyText = 'Verknüpfe mit ' + c.name + ' …';
   L.gen = ++linkGen; // laufende Suchen verwerfen
   draw(i, g, 'l');
-  call('linkFreeGroup', g.gkey, c.id, c.lang, linkVariant(g)).then(function (res) {
-    delete state.open[g.gkey];
-    if (res && res.gkey) state.open[res.gkey] = true;
-    if (g.link === L) g.link = null;
-    loadCollection('Mit tcgdex-Karte verknüpft.');
-  }).catch(function (e) {
-    L.linking = false; L.busy = false; L.msg = errText(e);
-    draw(i, g, 'l');
+  var variant = linkVariant(g);
+  enqueue({
+    g: g,
+    send: function () { return call('linkFreeGroup', g.gkey, c.id, c.lang, variant); },
+    done: function (res) {
+      if (g.link === L) g.link = null;
+      applyDelta(res && res.delta, g, res && res.gkey); // die verknüpfte Karte ersetzt die freie an derselben Stelle
+      redraw(g, 'l');
+      setMsg('collMsg', 'Mit tcgdex-Karte verknüpft.', 'ok');
+    },
+    fail: function (e) {
+      L.linking = false; L.busy = false; L.msg = errText(e);
+      redraw(g, 'l');
+    }
   });
 }
 
@@ -1137,7 +1375,6 @@ function sortDef(k) { for (var i = 0; i < COLL_SORTS.length; i++) if (COLL_SORTS
 // Auswahl pro Gerät merken (ohne Speicher, z. B. privates Fenster, geht es auch)
 function memSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* egal */ } }
 function memGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-function collOpts() { return { sort: collSort.sort, desc: collSort.desc, dex: collSort.dex ? collSort.dex.nr : null }; }
 
 function initSort() {
   $('colSort').innerHTML = COLL_SORTS.map(function (o) { return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('');
@@ -1161,215 +1398,20 @@ function sortChanged() {
   memSet('pkmSort', collSort.sort);
   memSet('pkmSortDesc', collSort.desc ? '1' : '0');
   drawDir();
-  loadCollection();
+  refilter();
 }
 function toggleDir() {
   collSort.desc = !collSort.desc;
   memSet('pkmSortDesc', collSort.desc ? '1' : '0');
   drawDir();
-  loadCollection();
+  refilter();
 }
 function drawCollDex() {
   var d = collSort.dex;
   $('colDex').innerHTML = d ? '<div class="chip">Nur #' + esc(d.nr) + ' ' + esc(d.name) +
     '<button type="button" onclick="clearCollDex()" aria-label="Pokédex-Filter entfernen">×</button></div>' : '';
 }
-function clearCollDex() { collSort.dex = null; loadCollection(); }
-
-// ---------- Preisveränderung und Preiskurve (Kartenverlauf) ----------
-
-var CHG_DAYS = [7, 30, 90];
-var chgDays = 30;   // Zeitraum der Veränderung, pro Gerät gemerkt
-var histCache = {}; // gkey -> {series, until}, solange die Seite offen ist
-// Kurve: Höhe und Ränder in px, eine Linie in Blau (Rot und Grün stehen für Minus und Plus)
-var CV = { h: 150, r: 12, t: 16, b: 22, line: '#2a78d6', grid: '#e1e0d9', ink: '#5f6368', cross: '#9aa0a6' };
-
-function initChg() {
-  var d = Number(memGet('pkmChgDays'));
-  if (CHG_DAYS.indexOf(d) >= 0) chgDays = d;
-  drawChg();
-}
-function drawChg() {
-  CHG_DAYS.forEach(function (d) {
-    var b = $('chg' + d);
-    b.classList.toggle('on', d === chgDays);
-    b.setAttribute('aria-pressed', d === chgDays ? 'true' : 'false');
-  });
-}
-function setChgDays(d) {
-  if (CHG_DAYS.indexOf(d) < 0 || d === chgDays) return;
-  chgDays = d;
-  memSet('pkmChgDays', String(d));
-  drawChg();
-  (state.groups || []).forEach(function (g, i) { draw(i, g, 'h'); });
-}
-
-/** 'yyyy-MM-dd' -> '23.10.' im laufenden Jahr, sonst '23.10.2025'; longDate immer mit Jahr */
-function shortDate(ymd) {
-  var p = String(ymd || '').split('-');
-  if (p.length !== 3) return String(ymd || '');
-  return p[2] + '.' + p[1] + '.' + (Number(p[0]) === new Date().getFullYear() ? '' : p[0]);
-}
-function longDate(ymd) {
-  var p = String(ymd || '').split('-');
-  return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : String(ymd || '');
-}
-
-/** Veränderung {eur, pct, since} -> „+1,20 € (+12 %)“ grün, Minus rot; bei kürzerem Verlauf „seit 23.10.“ dahinter */
-function chgHtml(c) {
-  var e = Number(c.eur) || 0;
-  var sign = e > 0 ? '+' : e < 0 ? '−' : '±';
-  var txt = sign + eur(Math.abs(e)) + (c.pct == null ? '' : ' (' + sign + Math.abs(c.pct) + ' %)');
-  return '<span class="chg ' + (e > 0 ? 'up' : e < 0 ? 'down' : 'flat') + '">' + esc(txt) + '</span>' +
-    (c.since ? ' seit ' + esc(shortDate(c.since)) : '');
-}
-
-/** Verlauf einer aufgeklappten Gruppe einmal laden (freie Karten haben keinen) */
-function loadHist(i, g) {
-  if (g.isFree || g.hist || g.histBusy) return;
-  if (histCache[g.gkey]) { g.hist = histCache[g.gkey]; return; }
-  g.histBusy = true;
-  call('getPriceHistory', g.gkey).then(function (res) {
-    g.histBusy = false;
-    g.hist = histCache[g.gkey] = { series: (res && res.series) || [], until: (res && res.until) || '' };
-    draw(i, g, 'v');
-  }).catch(function (e) {
-    g.histBusy = false;
-    g.hist = { series: [], until: '', error: errText(e) }; // nicht merken: beim nächsten Laden der Liste neu
-    draw(i, g, 'v');
-  });
-}
-
-function dayNum(ymd) { var p = String(ymd).split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5; }
-function niceStep(x) {
-  var e = Math.pow(10, Math.floor(Math.log(x) / Math.LN10)), f = x / e;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
-}
-/** Achsenwerte: runde Schritte, die lo..hi einschließen (nie unter 0) */
-function niceTicks(lo, hi) {
-  if (hi - lo < 0.01) { var pad = Math.max(0.05, hi * 0.1); lo -= pad; hi += pad; }
-  var step = niceStep((hi - lo) / 3);
-  var a = Math.max(0, Math.floor(lo / step) * step), out = [];
-  for (var v = a; v < hi + step * 0.999 && out.length < 7; v += step) out.push(Math.round(v * 100) / 100);
-  if (out.length < 2) out.push(Math.round((a + step) * 100) / 100);
-  return { ticks: out, step: step };
-}
-function tickText(v, step) {
-  return step >= 1 ? Math.round(v).toLocaleString('de-DE') + ' €' : eur(v);
-}
-
-/** Lage aller Punkte: Preisänderungen als Stufen bis zum letzten Preislauf (until) */
-function curveModel(series, until, w) {
-  var pts = series.map(function (e) { return { d: String(e[0]), p: Number(e[1]), n: dayNum(e[0]) }; });
-  var last = pts[pts.length - 1];
-  var endD = until && until > last.d ? until : last.d;
-  var lo = Infinity, hi = -Infinity;
-  pts.forEach(function (q) { lo = Math.min(lo, q.p); hi = Math.max(hi, q.p); });
-  var nt = niceTicks(lo, hi), ticks = nt.ticks;
-  var left = 8 + 6.5 * Math.max.apply(null, ticks.map(function (v) { return tickText(v, nt.step).length; }));
-  var x0 = pts[0].n, x1 = Math.max(dayNum(endD), x0 + 1);
-  var y0 = ticks[0], y1 = ticks[ticks.length - 1];
-  var px = function (n) { return Math.round((left + (n - x0) / (x1 - x0) * (w - left - CV.r)) * 10) / 10; };
-  var py = function (v) { return Math.round((CV.t + (1 - (v - y0) / (y1 - y0)) * (CV.h - CV.t - CV.b)) * 10) / 10; };
-  var marks = pts.map(function (q) { return { d: q.d, p: q.p, x: px(q.n), y: py(q.p) }; });
-  if (endD > last.d) marks.push({ d: endD, p: last.p, x: px(dayNum(endD)), y: py(last.p), end: true });
-  else marks[marks.length - 1].end = true;
-  return { w: w, left: left, ticks: ticks, step: nt.step, py: py, marks: marks, pts: pts, lo: lo, hi: hi, first: pts[0].d, endD: endD };
-}
-
-/** Endwert über oder unter den Endpunkt, auf die Seite, von der die Linie nicht kommt */
-function endLabelY(m) {
-  var end = m[m.length - 1], prev = end;
-  for (var k = m.length - 2; k >= 0 && Math.abs(prev.y - end.y) < 1; k--) prev = m[k];
-  var below = prev.y < end.y - 1 || end.y < CV.t + 14;
-  if (end.y > CV.h - CV.b - 16) below = false;
-  return below ? end.y + 18 : end.y - 9;
-}
-
-function curveHtml(g, i) {
-  if (g.isFree) return '';
-  var head = '<div class="box"><h3>Preisverlauf (Cardmarket-Trend)</h3>';
-  var h = g.hist;
-  if (!h || g.histBusy) return head + '<div class="spin">Preisverlauf wird geladen …</div></div>';
-  if (h.error) return head + '<div class="msg err">' + esc(h.error) + '</div></div>';
-  if (!h.series.length) {
-    return head + '<div class="hint">Noch kein Verlauf. Der nächtliche Preislauf merkt sich den Trendpreis dieser Karte ab jetzt, immer wenn er sich ändert.</div></div>';
-  }
-  var el = $('gv' + i);
-  var c = g.curve = curveModel(h.series, h.until, Math.max(240, Math.round(((el && el.clientWidth) || 300) - 22)));
-  var m = c.marks, end = m[m.length - 1], H = CV.h;
-  // Fokus und Zeiger am umgebenden div (Fokus-Ereignisse an SVG-Elementen kennen nicht alle Browser)
-  var svg = '<div class="plot" id="cvp' + i + '" role="img" tabindex="0"' +
-    ' aria-label="' + esc('Preiskurve vom ' + longDate(c.first) + ' bis ' + longDate(c.endD) + ': jetzt ' + eur(end.p) + ', tiefster ' + eur(c.lo) +
-      ', höchster ' + eur(c.hi) + '. Mit den Pfeiltasten durch die Preise gehen.') + '"' +
-    ' onpointermove="curveMove(event,' + i + ')" onpointerleave="curveHide(' + i + ')" onfocus="curveFocus(' + i + ')" onblur="curveHide(' + i + ')"' +
-    ' onkeydown="curveKey(event,' + i + ')"><svg viewBox="0 0 ' + c.w + ' ' + H + '" width="' + c.w + '" height="' + H + '" aria-hidden="true">';
-  c.ticks.forEach(function (v) {
-    var y = c.py(v);
-    svg += '<line x1="' + c.left + '" x2="' + (c.w - CV.r) + '" y1="' + y + '" y2="' + y + '" stroke="' + CV.grid + '" stroke-width="1"/>' +
-      '<text x="' + (c.left - 6) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="' + CV.ink + '">' + esc(tickText(v, c.step)) + '</text>';
-  });
-  svg += '<text x="' + c.left + '" y="' + (H - 6) + '" font-size="11" fill="' + CV.ink + '">' + esc(longDate(c.first)) + '</text>';
-  if (c.endD !== c.first) svg += '<text x="' + (c.w - CV.r) + '" y="' + (H - 6) + '" text-anchor="end" font-size="11" fill="' + CV.ink + '">' + esc(longDate(c.endD)) + '</text>';
-  var d = 'M' + m[0].x + ',' + m[0].y;
-  for (var k = 1; k < m.length; k++) d += 'H' + m[k].x + 'V' + m[k].y;
-  svg += '<path d="' + d + '" fill="none" stroke="' + CV.line + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
-    '<circle cx="' + end.x + '" cy="' + end.y + '" r="4" fill="' + CV.line + '" stroke="#fff" stroke-width="2"/>' +
-    '<text x="' + (end.x - 8) + '" y="' + endLabelY(m) + '" text-anchor="end" font-size="12" font-weight="600" fill="#202124"' +
-    ' stroke="#fff" stroke-width="3" paint-order="stroke">' + esc(eur(end.p)) + '</text>' +
-    '<line id="cvx' + i + '" y1="' + CV.t + '" y2="' + (H - CV.b) + '" stroke="' + CV.cross + '" stroke-width="1" visibility="hidden"/>' +
-    '<circle id="cvd' + i + '" r="4" fill="' + CV.line + '" stroke="#fff" stroke-width="2" visibility="hidden"/></svg></div>';
-  var cap = c.lo === c.hi ? 'Seit ' + longDate(c.first) + ' unverändert bei ' + eur(c.lo) + '.'
-    : 'Seit ' + longDate(c.first) + ' · tiefster ' + eur(c.lo) + ' · höchster ' + eur(c.hi);
-  var list = c.pts.slice().reverse();
-  var items = list.slice(0, 100).map(function (q) { return '<li>' + esc(longDate(q.d)) + ': ' + esc(eur(q.p)) + '</li>'; }).join('') +
-    (list.length > 100 ? '<li>… und ' + (list.length - 100) + ' ältere</li>' : '');
-  return head + (g.priceManual ? '<div class="hint">In der Sammlung zählt dein eigener Preis (' + esc(eur(g.ownPrice)) + '). Die Kurve zeigt den Cardmarket-Trend.</div>' : '') +
-    '<div class="curve">' + svg + '<div class="tip hidden" id="cvt' + i + '"></div>' +
-    '<div class="hint">' + esc(cap) + '</div>' +
-    '<details><summary>Alle Preisänderungen (' + list.length + ')</summary><ul>' + items + '</ul></details></div></div>';
-}
-
-/** Fadenkreuz und Preis am nächsten Punkt (Maus, Finger oder Pfeiltasten) */
-function curveShow(i, k) {
-  var g = state.groups[i], c = g && g.curve;
-  var line = $('cvx' + i), dot = $('cvd' + i), tip = $('cvt' + i);
-  if (!c || !line || !dot || !tip) return;
-  k = Math.max(0, Math.min(c.marks.length - 1, k));
-  c.sel = k;
-  var m = c.marks[k];
-  line.setAttribute('x1', m.x); line.setAttribute('x2', m.x); line.setAttribute('visibility', 'visible');
-  dot.setAttribute('cx', m.x); dot.setAttribute('cy', m.y); dot.setAttribute('visibility', 'visible');
-  tip.innerHTML = '<b>' + esc(eur(m.p)) + '</b>' + esc(m.end && k === c.marks.length - 1 && m.d !== c.pts[c.pts.length - 1].d ? 'Stand ' + longDate(m.d) : 'ab ' + longDate(m.d));
-  tip.classList.remove('hidden');
-  var r = line.ownerSVGElement.getBoundingClientRect();
-  var x = m.x * (r.width / c.w), tw = tip.offsetWidth;
-  tip.style.left = Math.max(0, Math.min(r.width - tw, x - tw / 2)) + 'px';
-}
-function curveMove(ev, i) {
-  var g = state.groups[i], c = g && g.curve;
-  if (!c) return;
-  var r = ev.currentTarget.getBoundingClientRect();
-  var x = (ev.clientX - r.left) * (c.w / (r.width || c.w));
-  var best = 0, bd = Infinity;
-  c.marks.forEach(function (m, k) { var dd = Math.abs(m.x - x); if (dd < bd) { bd = dd; best = k; } });
-  curveShow(i, best);
-}
-function curveKey(ev, i) {
-  var g = state.groups[i], c = g && g.curve;
-  if (!c) return;
-  var k = c.sel == null ? c.marks.length - 1 : c.sel;
-  if (ev.key === 'ArrowLeft') k--; else if (ev.key === 'ArrowRight') k++;
-  else if (ev.key === 'Home') k = 0; else if (ev.key === 'End') k = c.marks.length - 1; else return;
-  ev.preventDefault();
-  curveShow(i, k);
-}
-function curveFocus(i) { var g = state.groups[i], c = g && g.curve; if (c) curveShow(i, c.sel == null ? c.marks.length - 1 : c.sel); }
-function curveHide(i) {
-  ['cvx', 'cvd'].forEach(function (p) { var el = $(p + i); if (el) el.setAttribute('visibility', 'hidden'); });
-  var tip = $('cvt' + i);
-  if (tip) tip.classList.add('hidden');
-}
+function clearCollDex() { collSort.dex = null; refilter(); }
 
 // ---------- Pokédex ----------
 
@@ -1525,6 +1567,7 @@ function dexOpenColl(nr) {
   collSort.dex = { nr: nr, name: e[1] };
   $('colQuery').value = '';
   $('colSet').value = '';
+  coll.resort = true;
   showTab('coll');
 }
 
@@ -1762,6 +1805,7 @@ function takeRun() {
   call('takeoverRun', url).then(function (r) {
     // bis die neue Info da ist: nichts mehr zum Übernehmen anbieten
     if (UPD) { UPD.pendingTake = ''; UPD.collectionEmpty = false; UPD.takenFrom = url; }
+    markStale(); // ganz neue Sammlung
     takeLock(false);
     setMsg('takeMsg', esc(r.message) + '<br>Nutzt du die Handy-Seite: Sie braucht in dieser Tabelle einen neuen Link. Dafür Erweiterungen > Apps Script > Bereitstellen > Neue Bereitstellung > Web-App wählen, den Link unter Pokémon > Web-App-Link anzeigen einfügen und am Handy als Lesezeichen speichern.' +
       '<div class="actions"><button class="btn" type="button" onclick="showTab(\'coll\')">Zur Sammlung</button></div>', 'ok');
@@ -1784,7 +1828,6 @@ if (MODE === 'sidebar') {
   $('takeBox').classList.remove('hidden');
 }
 initSort();
-initChg();
 initDex();
 call('getSetSuggestions').then(function (names) {
   $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');

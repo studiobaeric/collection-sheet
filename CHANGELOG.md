@@ -7,13 +7,19 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
-## [1.1.1] – 2026-10-23
+## [1.1.1] – 2026-10-25
 
 - Prüfliste: offene Zeilen sind als freie Karte vorausgewählt
 - Prüfliste: Leiste oben mit „Weiter zur Vorschau“
 - Vorschau: zeigt, wie viele Zeilen als freie Karte kommen
 - Nach Einrichtung und Update öffnet das Dashboard, nicht die Sammlung
 - Laufanzeige unten rechts, bis Einrichtung oder Update fertig ist
+- Seitenleiste und Handy-Seite: keine Preiskurve und kein 7/30/90 mehr
+- Preisänderung in der Sammlung fest über 30 Tage
+- Sammlung zeigt alle Karten, Suchen und Sortieren ohne Warten
+- Änderungen speichern im Hintergrund, Karte bleibt an ihrer Stelle
+- „Neu laden“ holt Änderungen aus dem Blatt oder vom Handy
+- Hinzufügen, +1/−1 und Bearbeiten speichern schneller
 
 ## [1.1.0] – 2026-10-23
 

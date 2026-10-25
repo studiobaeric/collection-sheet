@@ -8,7 +8,7 @@
  *   Argumente und Ergebnisse laufen durch JSON wie bei Apps Script; ein Date im Ergebnis
  *   wird (wie bei Apps Script) zu null und zählt als Fehler, undefined-Felder ebenso.
  * - Nach jedem Schritt: Blätter Daten, Gruppen, Import-Protokoll prüfen und die Liste im UI
- *   mit einer frischen searchCollection-Antwort vergleichen.
+ *   mit einer frischen getCollection-Antwort vergleichen (auch die Such- und Sortierwerte k).
  *
  * Aufruf: node test_integration.js   (IMPORT=1 lädt zusätzlich src/Import.gs, falls vorhanden;
  *   IMPORTUI=1 bindet das echte src/ImportUi.html statt des Platzhalters ein)
@@ -240,15 +240,19 @@ function checkSheets(env, label) {
   t.ok(label + ': Sperre nie verschachtelt', env.lock.nested === 0 && env.lock.depth === 0, env.lock);
 }
 
-/** Die Liste im UI (nach lokalen Änderungen) muss dem Server entsprechen. */
+/** Die Liste im UI (nach Änderungen nur der betroffenen Karten) muss dem Server entsprechen. */
 function checkUiMatchesServer(E, label) {
-  const res = E.env.uiCall('searchCollection', E.$('colQuery').value, E.$('colSet').value, E.win.collOpts());
+  const res = E.env.uiCall('getCollection');
   const byG = {};
   res.groups.forEach(g => { byG[g.gkey] = g; });
   const diffs = [];
-  (E.win.state.groups || []).forEach(g => {
+  const all = E.win.coll.all || [];
+  if (all.length !== res.groups.length) diffs.push(['Anzahl Gruppen', all.length, res.groups.length]);
+  (E.win.state.groups || []).filter(g => !g.gone).forEach(g => {
     const s = byG[g.gkey];
     if (!s) { diffs.push([g.gkey, 'fehlt am Server']); return; }
+    if (J(g.k) !== J(s.k) || J(g.dex) !== J(s.dex)) diffs.push([g.gkey, 'k/dex', g.k, s.k]);
+    if (E.win.coll.byKey[g.gkey] !== g) diffs.push([g.gkey, 'nicht in coll.byKey']);
     if (g.count !== s.count) diffs.push([g.gkey, 'count', g.count, s.count]);
     if ((g.exemplare || '') !== (s.exemplare || '')) diffs.push([g.gkey, 'exemplare', g.exemplare, s.exemplare]);
     const ue = g.rows.map(r => r.eid + ':' + r.count).sort();
@@ -332,7 +336,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getPokedex', 'getPriceHistory', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
@@ -576,31 +580,34 @@ function seedImport(env) {
   t.ok('handentfernt für Import-Zeile B', he.length === 1 && he[0]['Eintrag-ID'] === imp.eidB && he[0]['Quellzeile'] === 'fpbbbbbbbbbb' && J(JSON.parse(he[0]['Daten'])) === J({ countBefore: 2 }), he);
   checkUiMatchesServer(E, 'nach −1 Import-Gruppe');
 
-  // ---- 8b. Antworten in anderer Reihenfolge (Liste neu geladen, während -1/+1 unterwegs ist) ----
-  t.section('Antworten in anderer Reihenfolge');
+  // ---- 8b. Neu laden, während -1/+1 unterwegs ist: erst nach dem Speichern ----
+  t.section('Neu laden während einer Änderung');
   {
     const SK = 'swsh3-025|normal|Staff';
     let k = E.gIdx(SK);
     E.click(E.btn($('gh' + k), '+1'));
     E.click(E.btn($('gh' + k), '+1')); // Doppelklick: Knopf ist gesperrt
     t.ok('Doppelklick: nur ein adjustEntry offen', E.pending.filter(p => p.fn === 'adjustEntry').length === 1, E.pending.map(p => p.fn));
-    E.win.loadCollection();
-    // Server bearbeitet die Suche zuerst (alter Stand), dann +1
-    await E.serveFn('searchCollection');
+    const nLoad = E.calls('getCollection').length;
+    E.click($('collReload'));
+    t.ok('Neu laden wartet auf das Speichern', !E.pending.some(p => p.fn === 'getCollection') && /sobald alles gespeichert/.test($('collMsg').textContent), $('collMsg').textContent);
     await E.serveFn('adjustEntry');
+    t.ok('danach lädt es neu', E.pending.some(p => p.fn === 'getCollection'), E.pending.map(p => p.fn));
     await E.settle();
     k = E.gIdx(SK);
-    t.ok('späte +1-Antwort auf neue Liste übertragen', E.group(SK).count === 2 && $('gh' + k).querySelector('.cnt').textContent === '2', E.group(SK));
-    checkUiMatchesServer(E, 'späte +1-Antwort');
-    // umgekehrt: -1 wird vor der Suche ausgeführt, die Suchantwort kommt danach
+    t.ok('+1 in der neu geladenen Liste', E.calls('getCollection').length === nLoad + 1 && E.group(SK).count === 2 && $('gh' + k).querySelector('.cnt').textContent === '2', E.group(SK));
+    checkUiMatchesServer(E, 'nach Neu laden');
+    // Neu laden läuft schon, dann −1: die alte Antwort wird verworfen und noch einmal geladen
+    E.click($('collReload'));
+    t.ok('Knopf zeigt „Lädt …“', $('collReload').disabled && /Lädt/.test($('collReload').textContent));
     E.click(E.btn($('gh' + k), '−1'));
-    E.win.loadCollection();
     await E.serveFn('adjustEntry');
-    await E.serveFn('searchCollection');
+    await E.serveFn('getCollection'); // Stand von vor dem −1? Egal, das UI lädt noch einmal
     await E.settle();
     k = E.gIdx(SK);
-    t.ok('-1 vor der Suche: kein doppeltes Abziehen', E.group(SK).count === 1 && $('gh' + k).querySelector('.cnt').textContent === '1', E.group(SK));
-    checkUiMatchesServer(E, '-1 vor der Suche');
+    t.ok('−1 während Neu laden: kein doppeltes Abziehen', E.group(SK).count === 1 && $('gh' + k).querySelector('.cnt').textContent === '1' &&
+      E.calls('getCollection').length === nLoad + 3 && !$('collReload').disabled, [E.group(SK).count, E.calls('getCollection').length - nLoad]);
+    checkUiMatchesServer(E, '−1 während Neu laden');
     t.ok('Daten: Staff wieder 1', dataRows(env).find(r => r.key === 'swsh3-025|normal|Staff|LP|EN').count === 1);
     // Liste wieder in den gewohnten Zustand: Glurak offen lassen
     if (!E.group(GK).open) E.expand(E.gIdx(GK));
@@ -618,7 +625,11 @@ function seedImport(env) {
     $('eCond' + gi).value === 'NM' && $('eLang' + gi).value === 'DE' && $('eQty' + gi).value === '3', $('ge' + gi).textContent.slice(0, 200));
   E.pick($('eCond' + gi), 'LP');
   E.type($('eQty' + gi), '1');
-  await E.clickSettle(E.btn($('ge' + gi), 'Speichern'));
+  const nColl = E.calls('getCollection').length;
+  E.click(E.btn($('ge' + gi), 'Speichern'));
+  t.ok('Sofort: Formular zu, Karte zeigt die Änderung mit „speichert …“', !$('eCond' + gi) && /speichert/.test($('gh' + gi).textContent) &&
+    /2× DE NM · von Hand/.test($('gr' + gi).textContent) && /1× DE LP · von Hand · speichert/.test($('gr' + gi).textContent), $('gr' + gi).textContent);
+  await E.settle();
   const ed = E.lastCall('editEntry');
   t.eq('editEntry(eid, {cond}, 1)', ed.args, [handA.eid, { cond: 'LP' }, 1]);
   D = dataRows(env);
@@ -626,7 +637,8 @@ function seedImport(env) {
   const split = D.find(r => r.eid === ed.res.eid);
   t.ok('Aufgeteilt: NM 2, neue Zeile LP 1 (von Hand, gleiches Hinzufügedatum)', handNm.count === 2 && split && split.eid !== handA.eid && split.count === 1 &&
     split.cond === 'LP' && split.origin === 'Hand' && split.key === 'swsh3-025|normal||LP|DE' && +split.added === +handNm.added, [handNm, split]);
-  t.ok('Liste neu geladen, Gruppe bleibt offen, Meldung', E.calls('searchCollection').length >= 5 && E.group(GK).open && /Gespeichert/.test($('collMsg').textContent));
+  t.ok('Liste nicht neu geladen, Gruppe bleibt offen, Formular zu', E.calls('getCollection').length === nColl && E.group(GK).open && !$('eCond' + gi) &&
+    !/speichert/.test($('gh' + gi).textContent), E.calls('getCollection').length);
   G = env.groups().find(x => x['Gruppenschlüssel'] === GK);
   t.ok('Gruppen: Exemplare 1× DE, 2× DE NM, 1× DE LP', G['Exemplare'] === '1× DE, 2× DE NM, 1× DE LP', G['Exemplare']);
   checkSheets(env, 'nach Aufteilen');
@@ -710,6 +722,7 @@ function seedImport(env) {
   t.eq('searchCards mit Name/Nummer/Set', E.lastCall('searchCards').args, [{ name: 'Glurak', number: '4/102', set: 'Grundset' }]);
   const tiles = $('lkRes' + fi2).querySelectorAll('.tile');
   t.ok('eine Kachel base1-4', tiles.length === 1 && /Grundset · 4/.test(tiles[0].textContent), $('lkRes' + fi2).textContent);
+  const prevOfFree = $('g' + fi2).previousElementSibling;
   await E.clickSettle(tiles[0]);
   const link = E.lastCall('linkFreeGroup');
   t.eq('linkFreeGroup(gkey, base1-4, de, base)', link.args, [fkey, 'base1-4', 'de', 'base']);
@@ -718,8 +731,9 @@ function seedImport(env) {
   const b1 = D.filter(r => r.id === 'base1-4');
   t.ok('Daten: mit Zeile von Hand zusammengelegt (2 Stück), eigener Preis übernommen', b1.length === 1 && b1[0].eid === base1Hand.eid && b1[0].count === 2 &&
     b1[0].ownPrice === 1.5 && !D.some(r => r.source === 'frei'), b1);
-  t.ok('UI: neu geladen, verknüpfte Gruppe offen, Meldung', E.group('base1-4|holo|') && E.group('base1-4|holo|').open && !E.group(fkey) &&
-    /Mit tcgdex-Karte verknüpft/.test($('collMsg').textContent));
+  const bk = E.gIdx('base1-4|holo|');
+  t.ok('UI: verknüpfte Gruppe offen an der Stelle der freien Karte, Meldung', bk >= 0 && E.group('base1-4|holo|').open && !$('g' + fi2) &&
+    $('gh' + bk).closest('.grp').previousElementSibling === prevOfFree && /Mit tcgdex-Karte verknüpft/.test($('collMsg').textContent));
   checkSheets(env, 'nach Verknüpfen');
   checkUiMatchesServer(E, 'nach Verknüpfen');
 

@@ -139,19 +139,6 @@ const S = scenario();
 }
 
 // ---------------------------------------------------------------------------
-t.section('getPriceHistory');
-{
-  const { env, a, f } = S;
-  eq('Glurak normal', env.uiCall('getPriceHistory', a.gkey),
-    { series: [['2026-09-01', 1.5], ['2026-09-02', 1.6], ['2026-09-27', 1.9], ['2026-10-05', 2]], until: '2026-10-06' });
-  eq('Sonderversion nutzt denselben Verlauf', env.uiCall('getPriceHistory', 'swsh3-025|normal|Snowflake').series.length, 4);
-  eq('freie Karte und Unbekanntes: leer', [env.uiCall('getPriceHistory', f.gkey), env.uiCall('getPriceHistory', 'nix-1|normal|'), env.uiCall('getPriceHistory', '')],
-    [{ series: [], until: '' }, { series: [], until: '' }, { series: [], until: '' }]);
-  const env2 = setup();
-  eq('ohne Kartenverlauf: leer', env2.uiCall('getPriceHistory', 'swsh3-025|normal|'), { series: [], until: '' });
-}
-
-// ---------------------------------------------------------------------------
 t.section('Blatt Sammlung');
 {
   const { env } = S;
@@ -292,74 +279,36 @@ async function boot(env) {
 }
 
 (async () => {
-  t.section('Seitenleiste: Künstler, Veränderung, Umschalter, Kurve');
+  t.section('Seitenleiste: Künstler, Veränderung über 30 Tage, keine Kurve (#30)');
   const { env, a, r, b, f } = S;
   // eine Karte ohne Verlauf (nach dem letzten Preislauf erfasst)
   const n = env.uiCall('addCard', { id: 'swsh3-136', lang: 'de', variant: 'base', qty: 1 });
   const E = await boot(env);
   ok('Suchfeld nennt den Künstler', /Künstler/.test(E.doc.querySelector('label[for=colQuery]').textContent) && /Arita/.test(E.$('colQuery').placeholder));
-  ok('Umschalter: 30 Tage gewählt', E.$('chg30').classList.contains('on') && E.$('chg30').getAttribute('aria-pressed') === 'true' && !E.$('chg7').classList.contains('on'));
+  ok('kein Umschalter 7/30/90 mehr', !E.$('chg7') && !E.$('chg30') && !E.$('chg90') && !E.$('colChg') && !/Preisveränderung über/.test(E.$('paneColl').textContent));
   E.win.showTab('coll');
   await E.settle();
   const ia = E.idx(a.gkey), ir = E.idx(r.gkey), ib = E.idx(b.gkey), iff = E.idx(f.gkey), inn = E.idx(n.gkey);
   ok('alle Gruppen da', [ia, ir, ib, iff, inn].every(i => i >= 0), E.win.state.groups.map(g => g.gkey));
-  ok('Glurak: +0,40 € (+25 %) grün', /\+0,40\s€ \(\+25 %\)/.test(E.head(ia)) && E.$('gh' + ia).querySelector('.chg.up'), E.head(ia));
+  ok('Glurak: 30 Tage +0,40 € (+25 %) grün', /\+0,40\s€ \(\+25 %\)/.test(E.head(ia)) && E.$('gh' + ia).querySelector('.chg.up'), E.head(ia));
   ok('Künstler unter der Karte', /Illus\. Mitsuhiro Arita/.test(E.head(ia)), E.head(ia));
   ok('reverse: ±0,00 € (±0 %) grau', /±0,00\s€ \(±0 %\)/.test(E.head(ir)) && E.$('gh' + ir).querySelector('.chg.flat'), E.head(ir));
   ok('eigener Preis: keine Veränderung', !E.$('gh' + ib).querySelector('.chg') && /10,00\s€ manuell/.test(E.head(ib)), E.head(ib));
   ok('freie Karte und Karte ohne Verlauf: keine Veränderung', !E.$('gh' + iff).querySelector('.chg') && !E.$('gh' + inn).querySelector('.chg'));
-  E.win.setChgDays(7);
-  ok('7 Tage: +0,10 € (+5 %)', /\+0,10\s€ \(\+5 %\)/.test(E.head(ia)) && E.$('chg7').classList.contains('on'), E.head(ia));
-  E.win.setChgDays(90);
-  ok('90 Tage: +0,50 € (+33 %) seit 01.09.', /\+0,50\s€ \(\+33 %\) seit 01\.09\./.test(E.head(ia)), E.head(ia));
-  ok('Zeitraum gemerkt', E.win.localStorage.getItem('pkmChgDays') === '90');
-  ok('kein Serveraufruf beim Umschalten', E.pending.length === 0);
-
-  // Kurve aufklappen
+  // Aufklappen: keine Kurve, kein Abruf
+  const nCalls = E.log.length;
   E.win.toggleGroup(ia);
-  ok('Aufklappen lädt den Verlauf', E.pending.some(p => p.fn === 'getPriceHistory' && p.args[0] === a.gkey) && /wird geladen/.test(E.$('gv' + ia).textContent));
-  await E.settle();
-  const box = E.$('gv' + ia);
-  const svg = box.querySelector('svg');
-  ok('Kurve: SVG mit Stufenlinie und Endpunkt', svg && svg.querySelector('path') && /H.*V/.test(svg.querySelector('path').getAttribute('d')) && svg.querySelectorAll('circle').length === 2, box.innerHTML.slice(0, 300));
-  ok('Kurve: Endwert und Datum unten', /2,00\s€/.test(svg.textContent) && /01\.09\.2026/.test(svg.textContent) && /06\.10\.2026/.test(svg.textContent), svg.textContent);
-  const plot = E.$('cvp' + ia);
-  ok('Kurve: Beschreibung für Screenreader', plot.getAttribute('role') === 'img' && plot.tabIndex === 0 &&
-    /jetzt 2,00\s€, tiefster 1,50\s€, höchster 2,00\s€/.test(plot.getAttribute('aria-label')), plot.getAttribute('aria-label'));
-  ok('Unterzeile: seit, tiefster, höchster', /Seit 01\.09\.2026 · tiefster 1,50\s€ · höchster 2,00\s€/.test(box.textContent), box.textContent);
-  ok('Liste aller Preisänderungen, neueste zuerst', box.querySelectorAll('details li').length === 4 && /05\.10\.2026: 2,00/.test(box.querySelector('details li').textContent));
-  plot.dispatchEvent(new E.win.Event('focus'));
-  const tip = E.$('cvt' + ia);
-  ok('Fokus: Fadenkreuz und Wert am letzten Punkt', !tip.classList.contains('hidden') && /2,00\s€/.test(tip.textContent) && /Stand 06\.10\.2026/.test(tip.textContent) &&
-    E.$('cvx' + ia).getAttribute('visibility') === 'visible', tip.textContent);
-  plot.dispatchEvent(new E.win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-  ok('Pfeil links: vorige Preisänderung', /2,00\s€/.test(tip.textContent) && /ab 05\.10\.2026/.test(tip.textContent), tip.textContent);
-  plot.dispatchEvent(new E.win.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-  ok('Pos1: erster Preis', /1,50\s€/.test(tip.textContent) && /ab 01\.09\.2026/.test(tip.textContent), tip.textContent);
-  plot.dispatchEvent(new E.win.Event('blur'));
-  ok('Fokus weg: Fadenkreuz weg', tip.classList.contains('hidden') && E.$('cvx' + ia).getAttribute('visibility') === 'hidden');
-
   E.win.toggleGroup(ib);
   await E.settle();
-  ok('eigener Preis: Kurve mit Hinweis auf den Trend', /eigener Preis \(10,00\s€\)/.test(E.$('gv' + ib).textContent) && E.$('gv' + ib).querySelector('svg') &&
-    /Seit 01\.09\.2026 unverändert bei 1,50\s€/.test(E.$('gv' + ib).textContent), E.$('gv' + ib).textContent);
-  E.win.toggleGroup(inn);
-  await E.settle();
-  ok('ohne Verlauf: Hinweis statt Kurve', /Noch kein Verlauf/.test(E.$('gv' + inn).textContent) && !E.$('gv' + inn).querySelector('svg'));
-  const before = E.log.filter(x => x === 'getPriceHistory').length;
-  E.win.toggleGroup(iff);
-  await E.settle();
-  ok('freie Karte: keine Kurve, kein Abruf', E.$('gv' + iff).innerHTML === '' && E.log.filter(x => x === 'getPriceHistory').length === before);
-  // neu laden: Verlauf aus dem Zwischenspeicher, aufgeklappte Gruppen bleiben offen
-  E.win.loadCollection();
-  await E.settle();
-  ok('neu geladen: kein zweiter Abruf für dieselbe Karte', E.log.filter(x => x === 'getPriceHistory').length === before &&
-    E.$('gv' + E.idx(a.gkey)).querySelector('svg'));
-  // Künstlersuche im Tab
+  ok('Aufklappen ohne Serveraufruf und ohne Kurve', E.log.length === nCalls && !E.$('paneColl').querySelector('svg') && !E.$('gv' + ia) &&
+    !!E.$('gr' + ia).querySelector('.erow'), E.log.slice(nCalls));
+  ok('Ui.html ohne Preiskurve', !/getPriceHistory|curveHtml|setChgDays/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'Ui.html'), 'utf8')));
+  ok('Code.gs ohne getPriceHistory', typeof env.ctx.getPriceHistory === 'undefined');
+  // Künstlersuche im Tab: im Browser
   E.$('colQuery').value = 'Sugimori';
-  E.win.loadCollection();
-  await E.settle();
+  E.win.refilter();
   eq('Tab Sammlung: Suche nach Künstler', E.win.state.groups.map(g => g.gkey), [b.gkey]);
+  ok('Suche ohne Serveraufruf', E.log.length === nCalls && E.pending.length === 0);
   ok('keine Skriptfehler', E.errors.length === 0, E.errors);
   t.done();
 })().catch(e => { console.log('FAIL Ausnahme', e && e.stack || e); process.exitCode = 1; t.done(); });

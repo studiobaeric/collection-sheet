@@ -864,7 +864,8 @@ function missingPaths(res, paths) {
   eyes(E, 'Sammlung mit Import-Zeilen', E.$('paneColl'));
   E.pick(E.$('eCond' + des), 'LP');
   await E.clickSettle(E.btn(E.$('ge' + des), 'Speichern'), 'Speichern');
-  t.ok('Bearbeiten: gespeichert', /Gespeichert\./.test(E.$('collMsg').textContent) && rowsOf(env, 1).find((d) => d.name === 'Despotar').cond === 'LP');
+  t.ok('Bearbeiten: gespeichert, ohne die Liste neu zu laden', rowsOf(env, 1).find((d) => d.name === 'Despotar').cond === 'LP' &&
+    !/speichert/.test(E.$('gh' + des).textContent) && /1× DE LP · Pokemon Ordner\.xlsx, Import 1/.test(E.$('gr' + des).textContent), E.$('gr' + des).textContent);
   checkSheets(env, 'Nach der Sammlung', { verlauf: VERLAUF });
 
   /* ---------------- 9. Zurücknehmen ---------------- */
