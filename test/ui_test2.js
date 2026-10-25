@@ -231,6 +231,10 @@ function makeServer() {
     collectionEmpty: false, takenFrom: '', pendingTake: ''
   };
   S.getUpdateInfo = () => S.updInfo;
+  // wie getFileVersions in Code.gs: die .gs-Dateien vom Server, die HTML-Dateien von der Seite
+  S.gsVersions = { 'Code.gs': UI_VERSION, 'Update.gs': UI_VERSION, 'Import.gs': UI_VERSION };
+  S.getFileVersions = ui => ({ files: Object.keys(S.gsVersions).map(n => ({ name: n, version: S.gsVersions[n] }))
+    .concat(Object.keys(ui || {}).map(n => ({ name: n, version: ui[n] }))) });
   S.setPrereleases = on => Object.assign(S.updInfo, { prereleases: !!on });
   S.updateCopy = () => ({ state: 'copied', version: '1.1.0', url: 'https://docs.google.com/spreadsheets/d/NEUNEU/edit', name: 'Pokémon-Sammlung (neu, Version 1.1.0)',
     message: 'Die neue Tabelle mit Version 1.1.0 liegt im selben Ordner wie diese.' });
@@ -261,7 +265,8 @@ function seedCollection(S) {
 // ---------------------------------------------------------------------------
 // Seite starten
 // ---------------------------------------------------------------------------
-const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-PANE</div><script>var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
+const UI_VERSION = /var UI_FILE_VERSION = '([^']*)'/.exec(RAW)[1];
+const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-PANE</div><script>var impFileVersion = \'' + UI_VERSION + '\'; var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
 function render(mode, include, start) {
   return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(INCLUDE_LET, include == null ? IMPORT_STUB : include);
@@ -279,7 +284,8 @@ function boot(mode, opts) {
   function makeRun() {
     let okH, failH;
     const t = { withSuccessHandler(f) { okH = f; return px; }, withFailureHandler(f) { failH = f; return px; } };
-    const px = new Proxy(t, { get: (o, p) => p in o ? o[p] : (...args) => { pending.push({ fn: p, args: JSON.parse(JSON.stringify(args)), ok: okH, fail: failH }); } });
+    const px = new Proxy(t, { get: (o, p) => p in o ? o[p] : (opts.missing || []).indexOf(p) >= 0 ? undefined // Funktion fehlt im Skript
+      : (...args) => { pending.push({ fn: p, args: JSON.parse(JSON.stringify(args)), ok: okH, fail: failH }); } });
     return px;
   }
   if (opts.server) opts.server(S);
@@ -329,7 +335,7 @@ function boot(mode, opts) {
     pick(el, v) { if (!el) throw new Error('Auswahl fehlt'); el.value = v; el.dispatchEvent(new win.Event('change', { bubbles: true })); },
     gi(name) { return win.state.groups.findIndex(g => g.name === name); },
     gIdx(pred) { return win.state.groups.findIndex(pred); },
-    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo'); },
+    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo'); await flush(); await E.respond('getFileVersions'); },
     async openColl() {
       E.click(E.$('tabColl'));
       await E.respond('getCollection');
@@ -537,6 +543,67 @@ function boot(mode, opts) {
     E.type($('colQuery'), 'Glurak'); E.win.__advance(200);
     ok('neue Suche sortiert wieder normal' + tag, st.groups[0].gkey === 'swsh3-025|normal|' && st.groups[1].gkey === r.res.gkey);
     ok('keine Skriptfehler (antippen)' + tag, E.errors.length === 0, E.errors);
+  }
+
+  // ---- Versionen der Script-Dateien (#35) ----
+  {
+    const start3 = async E => { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo'); await flush(); };
+    // alles gleich
+    let E = boot('sidebar');
+    await start3(E);
+    ok('fragt getFileVersions mit den Versionen der HTML-Dateien', E.calls('getFileVersions').length === 1 &&
+      J(E.calls('getFileVersions')[0].args) === J([{ 'Ui.html': UI_VERSION, 'ImportUi.html': UI_VERSION }]), E.calls('getFileVersions').map(c => c.args));
+    await E.respond('getFileVersions');
+    ok('alles gleich: keine rote Leiste', E.$('verBar').classList.contains('hidden') && E.$('verBar').innerHTML === '');
+    E.click(E.btn(E.doc.querySelector('.foot'), 'Updates'));
+    ok('Updates: Liste der Dateien, keine Warnung', /Dateien: Code\.gs [\d.]+ · Update\.gs [\d.]+ · Import\.gs [\d.]+ · Ui\.html [\d.]+ · ImportUi\.html [\d.]+/.test(E.$('updFiles').textContent) &&
+      !E.$('updFiles').querySelector('.msg.err, .fodd'), E.$('updFiles').textContent);
+    ok('keine Skriptfehler (Versionen gleich)', E.errors.length === 0, E.errors);
+
+    // eine .gs-Datei alt
+    E = boot('sidebar', { server: S => { S.gsVersions['Update.gs'] = 'alt'; } });
+    await start3(E);
+    await E.respond('getFileVersions');
+    const bar = E.$('verBar');
+    ok('rote Leiste: Update.gs älter, die anderen aktuell', !bar.classList.contains('hidden') &&
+      bar.textContent.indexOf('Script-Dateien passen nicht zusammen: Update.gs älter als 1.1.2, die anderen ' + UI_VERSION + '.') >= 0, bar.textContent);
+    E.click(E.btn(bar, 'Details'));
+    ok('Details öffnet Updates: Update.gs rot, Anleitung für die Seitenleiste', !E.$('paneUpd').classList.contains('hidden') &&
+      [...E.$('updFiles').querySelectorAll('.fodd')].map(x => x.textContent).join() === 'Update.gs älter als 1.1.2' &&
+      /aus Version [\d.]+ ersetzen/.test(E.$('updFiles').textContent) && /Seitenleiste schließen/.test(E.$('updFiles').textContent), E.$('updFiles').textContent);
+    E.click(bar.querySelector('.x'));
+    ok('× blendet die Leiste aus, die Liste unter Updates bleibt', bar.classList.contains('hidden') && !!E.$('updFiles').querySelector('.fodd'));
+
+    // Handy-Seite, Code.gs älter als die anderen
+    E = boot('web', { server: S => { S.gsVersions['Code.gs'] = '1.1.1'; } });
+    await start3(E);
+    await E.respond('getFileVersions');
+    ok('Handy-Seite: Code.gs 1.1.1 in der Leiste', /Code\.gs 1\.1\.1, die anderen /.test(E.$('verBar').textContent), E.$('verBar').textContent);
+    E.win.showTab('upd');
+    ok('Handy-Seite: Anleitung mit neu bereitstellen', /Web-App neu bereitstellen/.test(E.$('updFiles').textContent), E.$('updFiles').textContent);
+
+    // Code.gs von vor 1.1.2: getFileVersions fehlt
+    E = boot('sidebar', { missing: ['getFileVersions'] });
+    await start3(E);
+    ok('ohne getFileVersions: kein Aufruf, Code.gs älter', E.calls('getFileVersions').length === 0 &&
+      /Code\.gs älter als 1\.1\.2, die anderen /.test(E.$('verBar').textContent), E.$('verBar').textContent);
+    ok('keine Skriptfehler (Code.gs alt)', E.errors.length === 0, E.errors);
+
+    // ImportUi.html fehlt / ist alt
+    E = boot('sidebar', { include: '' });
+    await start3(E);
+    ok('ImportUi.html fehlt: null', J(E.calls('getFileVersions')[0].args[0]) === J({ 'Ui.html': UI_VERSION, 'ImportUi.html': null }));
+    await E.respond('getFileVersions');
+    ok('Leiste: ImportUi.html fehlt', /ImportUi\.html fehlt/.test(E.$('verBar').textContent), E.$('verBar').textContent);
+    E = boot('sidebar', { include: '<div id="paneImport" class="panel hidden"></div><script>function impInit() {}</script>' });
+    await start3(E);
+    ok('ImportUi.html ohne Versions-Konstante: alt', E.calls('getFileVersions')[0].args[0]['ImportUi.html'] === 'alt');
+
+    // Fehler beim Fragen: still weiter
+    E = boot('sidebar');
+    await start3(E);
+    await E.respond('getFileVersions', { error: 'Zeitüberschreitung' });
+    ok('Fehler beim Fragen: keine Leiste, keine Skriptfehler', E.$('verBar').classList.contains('hidden') && E.errors.length === 0, E.errors);
   }
 
   // ---- Stale-Suche im Hinzufügen-Tab ----

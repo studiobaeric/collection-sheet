@@ -29,7 +29,8 @@ const REAL_IMPORTUI = !!process.env.IMPORTUI;
 const TODAY = H.formatDate(new Date(), '', 'yyyy-MM-dd');
 const TODAY_DMY = H.formatDate(new Date(), '', 'dd.MM.yyyy');
 const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-STUB</div>' +
-  '<script>var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
+  '<script>var impFileVersion = \'' + /var UI_FILE_VERSION = '([^']*)'/.exec(fs.readFileSync(path.join(__dirname, '..', 'src', 'Ui.html'), 'utf8'))[1] +
+  '\'; var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
 // ---------------------------------------------------------------------------
 // Vorlage auswerten wie HtmlService (nur druckende Scriptlets kommen vor)
@@ -337,7 +338,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);

@@ -13,6 +13,9 @@
  * 0. Gemeinsame Konstanten und Zustände des Imports
  * ========================================================================= */
 
+/** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
+const IMPORT_FILE_VERSION = '1.1.2';
+
 const IMP_SHEETS = {
   imports: 'Importe',
   terms: 'Import-Begriffe',

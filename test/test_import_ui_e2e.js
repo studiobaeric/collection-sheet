@@ -543,7 +543,7 @@ function missingPaths(res, paths) {
   t.section('1. Seitenleiste, Import-Tab, Einstellungen');
   let E = boot(env, 'sidebar', 'Seitenleiste');
   await E.settle();
-  t.ok('Start lädt nur Set-Vorschläge, getUiConfig und getUpdateInfo', J(E.callLog.map((x) => x.fn).sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
+  t.ok('Start lädt nur Set-Vorschläge, getUiConfig, getUpdateInfo und getFileVersions', J(E.callLog.map((x) => x.fn).sort()) === J(['getFileVersions', 'getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
   t.ok('Import-Tab sichtbar', !E.$('tabImport').classList.contains('hidden'));
   t.ok('Import-Bereich noch versteckt, kein importState', E.$('paneImport').classList.contains('hidden') && E.calls('importState').length === 0);
   await E.clickSettle(E.$('tabImport'), 'Tab Import');

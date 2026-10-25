@@ -14,6 +14,7 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Antippen zeigt die neue Karte oben in der Sammlung
 - Fehler beim Speichern: zwei neue Versuche, dann „Nochmal versuchen“
 - Keine doppelten Karten, wenn ein Speichern wiederholt wird
+- Warnung, wenn die Script-Dateien nicht dieselbe Version haben
 
 ## [1.1.1] – 2026-10-25
 

@@ -1200,7 +1200,7 @@ const SETTINGS_HEADERS = ['Schlüssel', 'Wert'];
 const SETTING_SHEET_ID = 'Tabellen-ID';
 /** Gelten nur für genau diese Tabelle. In einer Kopie lesen sie sich leer und werden beim ersten Schreiben gelöscht. */
 const SETTINGS_LOCAL = ['WEBAPP_URL', 'NEW_COPY_URL', 'NEW_COPY_VERSION', 'TAKE_FROM', 'TAKE_RUN',
-  'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT', 'NIGHTLY_AT'];
+  'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT', 'NIGHTLY_AT', 'FILE_VERSIONS'];
 /** Standen früher in den Skript-Eigenschaften; settingGet_ liest dort weiter, bis sie im Blatt stehen. */
 const SETTINGS_FROM_PROPS = ['SCHEMA_VERSION', 'WEBAPP_URL', 'VIEW_EXTRAS'];
 /** Auslöser des Tools. Die Namen bleiben über alle Versionen gleich, sonst laufen alte Auslöser ins Leere. */
@@ -1450,6 +1450,7 @@ function onOpen() {
     .addToUi();
   // Startseite ist das Dashboard (Google öffnet sonst das zuletzt offene Blatt); ein verstecktes bleibt versteckt
   showDashboard_();
+  try { fileVersionToast_(); } catch (e) { /* nur ein Hinweis */ }
 }
 
 /** Seitenleiste (mit Import-Tab). Ui.html ist eine Vorlage: `mode` steuert, was sie zeigt, `start` den ersten Tab. */
@@ -1510,6 +1511,81 @@ function newSheetPage_() {
   return HtmlService.createHtmlOutput('<div style="font-family:Roboto,Arial,sans-serif;font-size:15px;padding:16px;line-height:1.5">' +
     'Diese Tabelle ist neu. Bitte öffne sie einmal am Computer und klicke auf Pokémon &gt; Karten erfassen. Danach funktioniert die Handy-Seite.</div>')
     .setTitle('Pokémon-Sammlung').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// Versionen der Script-Dateien (#35): Wer von Hand aktualisiert, fügt fünf Dateien ein. Bleibt eine alt oder fehlt sie,
+// passen die Teile nicht mehr zusammen. Jede Datei trägt ihre Version (Code.gs: TOOL_VERSION, sonst *_FILE_VERSION;
+// tools/release.js schreibt sie mit dem Kopf). Die .gs-Dateien liest Code.gs hier, die HTML-Dateien meldet die Seite
+// selbst (getFileVersions). Version 'alt': Datei da, aber älter als 1.1.2 (ohne Konstante); null: Datei fehlt.
+const FILE_NAMES = ['Code.gs', 'Update.gs', 'Import.gs', 'Ui.html', 'ImportUi.html'];
+
+/** Versionen der .gs-Dateien -> {'Code.gs': .., 'Update.gs': .., 'Import.gs': ..} */
+function gsFileVersions_() {
+  return {
+    'Code.gs': TOOL_VERSION,
+    'Update.gs': typeof UPDATE_FILE_VERSION !== 'undefined' ? UPDATE_FILE_VERSION : (typeof getUpdateInfo === 'function' ? 'alt' : null),
+    'Import.gs': typeof IMPORT_FILE_VERSION !== 'undefined' ? IMPORT_FILE_VERSION : (typeof importState === 'function' ? 'alt' : null)
+  };
+}
+
+/** Versionsangabe aus der Seite: Versionsnummer, 'alt' oder null */
+function fileVersionOf_(v) {
+  if (v === 'alt') return 'alt';
+  return typeof v === 'string' && /^\d+\.\d+\.\d+[0-9A-Za-z.-]*$/.test(v) && v.length <= 30 ? v : null;
+}
+
+/** 1.1.2 vor 1.1.10, eine Vorabversion (1.2.0-beta.1) vor ihrer fertigen Version */
+function fileVerCmp_(a, b) {
+  const p = function (v) { const m = /^(\d+)\.(\d+)\.(\d+)(.*)$/.exec(v); return m ? [+m[1], +m[2], +m[3], m[4]] : null; };
+  const x = p(a), y = p(b);
+  if (!x || !y) return x ? 1 : y ? -1 : 0;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  if (x[3] === y[3]) return 0;
+  if (!x[3] || !y[3]) return x[3] ? -1 : 1;
+  return x[3] < y[3] ? -1 : 1;
+}
+
+/**
+ * Alle Dateien mit Version; ui: Versionen der HTML-Dateien aus der Seite (ohne ui nur die .gs-Dateien).
+ * -> {files: [{name, version}], newest, odd: [Namen, die nicht die neueste Version haben oder fehlen]}
+ */
+function fileVersionReport_(ui) {
+  const gs = gsFileVersions_();
+  const names = FILE_NAMES.filter(function (n) { return ui || n in gs; });
+  const files = names.map(function (n) { return { name: n, version: n in gs ? gs[n] : fileVersionOf_(ui[n]) }; });
+  let newest = '';
+  files.forEach(function (f) { if (f.version && f.version !== 'alt' && fileVerCmp_(f.version, newest) > 0) newest = f.version; });
+  const odd = files.filter(function (f) { return f.version !== newest; }).map(function (f) { return f.name; });
+  return { files: files, newest: newest, odd: odd };
+}
+
+/** 'Code.gs 1.1.2, Update.gs älter als 1.1.2, Import.gs fehlt' */
+function fileVersionText_(files) {
+  return files.map(function (f) {
+    return f.name + ' ' + (f.version === 'alt' ? 'älter als 1.1.2' : f.version || 'fehlt');
+  }).join(', ');
+}
+
+/**
+ * Für die Seitenleiste und die Handy-Seite (#35). ui = {'Ui.html': Version, 'ImportUi.html': Version|'alt'|null}.
+ * Merkt sich das Ergebnis in Tool-Einstellungen (FILE_VERSIONS), so sieht man es auch ohne Seitenleiste.
+ * -> fileVersionReport_
+ */
+function getFileVersions(ui) {
+  const rep = fileVersionReport_(ui && typeof ui === 'object' ? ui : {});
+  const text = fileVersionText_(rep.files) + (rep.odd.length ? ' – passt nicht zusammen' : '');
+  try {
+    if (!settingsAll_().copy && settingGet_('FILE_VERSIONS') !== text) settingSet_('FILE_VERSIONS', text);
+  } catch (e) { /* nur zur Info */ }
+  return rep;
+}
+
+/** Beim Öffnen der Tabelle: passen die .gs-Dateien nicht zusammen, eine Meldung unten rechts. */
+function fileVersionToast_() {
+  const rep = fileVersionReport_(null);
+  if (!rep.odd.length) return;
+  SpreadsheetApp.getActive().toast('Die Script-Dateien passen nicht zusammen: ' + fileVersionText_(rep.files) +
+    '. Bitte alle Dateien aus derselben Version einfügen (Erweiterungen > Apps Script).', 'Pokémon · Versionen', 30);
 }
 
 /** Für den Aufruf include('ImportUi') in der Vorlage Ui.html. Fehlt die Datei noch, bleibt die Stelle leer. */

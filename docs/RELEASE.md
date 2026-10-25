@@ -9,7 +9,7 @@ Die Tabellen lesen `releases/channel.json` vom Branch `main` über `raw.githubus
    - Neue Funktion: `1.0.1` → `1.1.0`
    - Vorabversion für Freiwillige: `1.1.0-beta.1`, `1.1.0-beta.2` …, danach `1.1.0`
 
-   Die Version steht außerdem oben in jeder Script- und HTML-Datei (Kopfkommentar „Pokémon-Sammlung · Version …“). Den schreibt Schritt 3 selbst; nur die Köpfe nachziehen: `node tools/release.js --stamp`.
+   Die Version steht außerdem oben in jeder Script- und HTML-Datei (Kopfkommentar „Pokémon-Sammlung · Version …“) und, außer in Code.gs, in einer Versions-Konstante (`UPDATE_FILE_VERSION`, `IMPORT_FILE_VERSION` in parts/00_shared.gs, `UI_FILE_VERSION`, `impFileVersion`). Mit den Konstanten merkt das Tool selbst, wenn eingefügte Dateien nicht zusammenpassen (#35). Beides schreibt Schritt 3 selbst; nur nachziehen: `node tools/release.js --stamp` (danach `sh build_import.sh`).
 2. `SCHEMA_VERSION` nur erhöhen, wenn sich das Format des Blatts „Daten“ ändert (mit Umstellung in `migrateSchema_`). Die Übernahme stellt alte Daten dann selbst um. Eine ältere Version kann eine Tabelle mit neuerem Datenformat nicht übernehmen.
 3. In [`CHANGELOG.md`](../CHANGELOG.md) oben einen Abschnitt `## [1.1.0]` anlegen (ohne Datum) und darunter je Neuerung einen Punkt `- …`: ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, einfacher Text ohne Markdown, ohne Punkt am Ende. Längere Punkte meldet das Werkzeug als Hinweis. Das sind die Release-Notizen. Dann den Kanal schreiben:
 

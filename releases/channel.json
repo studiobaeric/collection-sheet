@@ -14,7 +14,8 @@
         "Zuletzt hinzugefügte Karte steht unter dem Formular",
         "Antippen zeigt die neue Karte oben in der Sammlung",
         "Fehler beim Speichern: zwei neue Versuche, dann „Nochmal versuchen“",
-        "Keine doppelten Karten, wenn ein Speichern wiederholt wird"
+        "Keine doppelten Karten, wenn ein Speichern wiederholt wird",
+        "Warnung, wenn die Script-Dateien nicht dieselbe Version haben"
       ]
     },
     {

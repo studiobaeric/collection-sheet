@@ -19,6 +19,9 @@
  * (takeoverRun) und legt die alte still. Die alte bleibt als Stand davor erhalten.
  */
 
+/** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
+const UPDATE_FILE_VERSION = '1.1.2';
+
 const UPD_REPO = 'studiobaeric/collection-sheet';
 const UPD_RAW = 'https://raw.githubusercontent.com/';
 const UPD_CHANNEL_PATH = '/main/releases/channel.json';
