@@ -16,48 +16,6 @@ const ER_CACHE_MAX_BYTES = 90 * 1024;
 /** Höchstens so viele Sets werden für eine Nummer durchsucht. */
 const ER_MAX_SETS = 8;
 
-/** Vorbelegung des Blatts „Import-Begriffe“: [Begriff, Bedeutung, Wert, Wo]. */
-const ER_TERM_SEED = [
-  ['Reverse Holo', 'Variante', 'reverse', 'Name und Spalten'],
-  ['Rev Holo', 'Variante', 'reverse', 'Name und Spalten'],
-  ['Reverse', 'Variante', 'reverse', 'Name und Spalten'],
-  ['RH', 'Variante', 'reverse', 'nur Spalten'],
-  ['Rev', 'Variante', 'reverse', 'nur Spalten'],
-  ['Holo', 'Variante', 'holo', 'nur Spalten'],
-  ['Non Holo', 'Variante', 'normal', 'nur Spalten'],
-  ['Normal', 'Variante', 'normal', 'nur Spalten'],
-  ['1st Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['1. Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['Erste Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['First Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['Mint', 'Zustand', 'MT', 'Name und Spalten'],
-  ['Near Mint', 'Zustand', 'NM', 'Name und Spalten'],
-  ['Excellent', 'Zustand', 'EX', 'Name und Spalten'],
-  ['Good', 'Zustand', 'GD', 'Name und Spalten'],
-  ['Light Played', 'Zustand', 'LP', 'Name und Spalten'],
-  ['Played', 'Zustand', 'PL', 'Name und Spalten'],
-  ['Poor', 'Zustand', 'PO', 'Name und Spalten'],
-  ['MT', 'Zustand', 'MT', 'nur Spalten'],
-  ['NM', 'Zustand', 'NM', 'nur Spalten'],
-  ['EX', 'Zustand', 'EX', 'nur Spalten'],
-  ['GD', 'Zustand', 'GD', 'nur Spalten'],
-  ['LP', 'Zustand', 'LP', 'nur Spalten'],
-  ['PL', 'Zustand', 'PL', 'nur Spalten'],
-  ['PO', 'Zustand', 'PO', 'nur Spalten'],
-  ['Snowflake', 'Sonderversion', 'Snowflake', 'Name und Spalten'],
-  ['Staff', 'Sonderversion', 'Staff', 'Name und Spalten'],
-  ['Prerelease', 'Sonderversion', 'Prerelease', 'Name und Spalten'],
-  ['Deutsch', 'Sprache', 'DE', 'nur Spalten'],
-  ['Englisch', 'Sprache', 'EN', 'nur Spalten'],
-  ['Japanisch', 'Sprache', 'JP', 'nur Spalten'],
-  ['Japanese', 'Sprache', 'JP', 'nur Spalten'],
-  ['English', 'Sprache', 'EN', 'nur Spalten'],
-  ['German', 'Sprache', 'DE', 'nur Spalten'],
-  ['JP', 'Sprache', 'JP', 'nur Spalten'],
-  ['EN', 'Sprache', 'EN', 'nur Spalten'],
-  ['DE', 'Sprache', 'DE', 'nur Spalten']
-];
-
 /** Kürzel alter Sets, wenn tcgdex keins liefert (Set-ID -> Kürzel). */
 const ER_CODE_SEED = {
   ex1: 'RS', ex2: 'SS', ex3: 'DR', ex4: 'MA', ex5: 'HL', ex6: 'RG', ex7: 'TRR', ex8: 'DX', ex9: 'EM', ex10: 'UF',
@@ -191,7 +149,7 @@ function erLangCode_(x) {
 
 /** Die Vorbelegung als Zeilen (für setupImportSheets_ bzw. wenn das Blatt fehlt). */
 function erDefaultTermRows_() {
-  return ER_TERM_SEED.map(function (r) { return r.slice(); });
+  return TERMS_SEED.map(function (r) { return r.slice(); });
 }
 
 function erMeaning_(x) {
@@ -1256,21 +1214,6 @@ function erCounts_(items) {
   return c;
 }
 
-/** Geänderte Prüfungszeilen zurückschreiben: zusammenhängende Zeilen in einem Rutsch. Innerhalb der Sperre. */
-function erWriteReviewRows_(items) {
-  if (!items.length) return;
-  const sh = ss_().getSheetByName(IMP_SHEETS.review);
-  if (!sh) return;
-  const list = items.slice().sort(function (a, b) { return a.row - b.row; });
-  let k = 0;
-  while (k < list.length) {
-    let j = k;
-    while (j + 1 < list.length && list[j + 1].row === list[j].row + 1) j++;
-    sh.getRange(list[k].row, 1, j - k + 1, REVIEW_HEADERS.length).setValues(list.slice(k, j + 1).map(reviewItemToRow_));
-    k = j + 1;
-  }
-}
-
 function erNeedDraft_() {
   const draft = importDraft_();
   if (!draft || !draft.sourceId) throw new Error('Gerade ist kein Import in Arbeit. Bitte den Import neu starten.');
@@ -1329,8 +1272,7 @@ function importStartRecognition(cfg, templateName, mode) {
   importAssertNoRun_();
   cfg = cfg || draft.cfg;
   if (!cfg) throw new Error('Die Zuordnung der Spalten fehlt. Bitte die Schritte davor noch einmal durchgehen.');
-  if (typeof quNormCfg_ === 'function') cfg = quNormCfg_(cfg); // gleiche Normalform wie im Teil „Quelle“
-  if (typeof parseSourceRecords_ !== 'function') throw new Error('Die Import-Quelle kann nicht gelesen werden.');
+  cfg = quNormCfg_(cfg); // gleiche Normalform wie im Teil „Quelle“
   const records = parseSourceRecords_(cfg) || [];
   const terms = loadTerms_();
   const skipped = { summe: 0, leer: 0, nichtAngehakt: 0 };
@@ -1405,7 +1347,7 @@ function importRecognizeStep() {
       if (it.status !== REVIEW_STATUS.open) { pos++; continue; }
       if (mode === 'neu') {
         // Abdeckung nur aus demselben Tab der Datei (ein anderer Tab ist eine andere Liste)
-        if (cov === null) cov = typeof coverageFor_ === 'function' ? (coverageFor_(draft.sourceId, String(draft.tab == null ? '' : draft.tab)) || {}) : {};
+        if (cov === null) cov = coverageFor_(draft.sourceId, String(draft.tab == null ? '' : draft.tab)) || {};
         const c = cov[it.fp];
         const covered = c ? (Number(c.D) || 0) + (Number(c.Rundone) || 0) : 0;
         if (covered >= (Number(it.qty) || 0)) {
@@ -1468,7 +1410,7 @@ function importRecognizeStep() {
     const cur = importDraft_();
     if (!cur || cur.sourceId !== draft.sourceId || cur.stage !== 'erkennung' ||
         (Math.max(0, Number(cur.recognizePos) || 0)) !== startPos) return false; // ein anderer Schritt war schneller
-    erWriteReviewRows_(changed);
+    reviewWriteItems_(changed);
     cur.recognizePos = pos;
     cur.total = total;
     if (done) cur.stage = items.some(erIsReview_) ? 'pruefung' : 'vorschau';
@@ -1591,7 +1533,7 @@ function importReviewAcceptPrefilled() {
     const items = reviewRead_().filter(erIsReview_);
     const ch = items.filter(function (it) { return it.prefilled && it.decision && !it.decision.auto && !it.confirmed; });
     ch.forEach(function (it) { it.confirmed = true; });
-    erWriteReviewRows_(ch);
+    reviewWriteItems_(ch);
     return { open: erOpenCount_(items) };
   });
 }

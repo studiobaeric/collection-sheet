@@ -1,7 +1,7 @@
 'use strict';
 // RECOG-Review: erfundene tcgdex-Welt im Stil von test_import_e2e.js plus Erweiterungen, und ein Helfer,
 // der Zeilen im Aufbau von Erics Ordner-Datei durch den echten Ablauf schickt (öffnen, Tab, Erkennung).
-const H = require('../harness2');
+const H = require('./harness2');
 
 const SETS = {
   dp1: { en: 'Diamond & Pearl', de: 'Diamant & Perl', official: 130, total: 130, date: '2007-05-23' },

@@ -34,7 +34,7 @@ function db() {
 }
 
 function setup() {
-  const env = H.createEnv({ files: ['Code.gs'], db: db() });
+  const env = H.createEnv({ db: db() });
   env.ctx.setupAll_();
   return env;
 }
@@ -246,6 +246,35 @@ t.section('Karten von tcgdex zwischenspeichern');
   ok('kaputter Eintrag: lädt neu', res && res.id === 'swsh1-178', res);
 }
 
+t.section('Suchtreffer gleich im Zwischenspeicher (#36 A1)');
+{
+  const env = setup();
+  const res = env.uiCall('searchCards', { name: 'Glurak' });
+  eq('drei deutsche Treffer', res.cards.map(c => c.id), ['swsh3-025', 'swsh3-136', 'base1-4']);
+  ok('alle drei gemerkt, dazu die englischen Daten fürs Bild', ['tcg:de:swsh3-025', 'tcg:de:swsh3-136', 'tcg:de:base1-4', 'tcg:en:base1-4']
+    .every(k => env.cachePuts.some(p => p.k === k && p.ttl === 1800)), env.cachePuts.map(p => p.k));
+  const n0 = env.fetchLog.length;
+  const d = env.uiCall('getCardDetail', 'swsh3-025', 'de');
+  ok('Antippen ohne Abruf', env.fetchLog.length === n0 && d.prices.base === 1.5, env.fetchLog.slice(n0));
+  const old = env.uiCall('getCardDetail', 'base1-4', 'de');
+  ok('deutsche Karte ohne Bild: Bild und Preis auch ohne Abruf', env.fetchLog.length === n0 && /base1-4/.test(old.image), env.fetchLog.slice(n0));
+  env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
+  ok('Hinzufügen holt die Karte auch nicht', !env.fetchLog.slice(n0).some(u => /cards\/swsh3-025$/.test(u)), env.fetchLog.slice(n0));
+  // englischer Ersatz: die englischen Daten liegen bereit (die deutsche Abfrage war 404, nichts gemerkt)
+  env.uiCall('searchCards', { name: 'Mewtu' });
+  ok('englischer Treffer gemerkt, 404 nicht', env.cache.has('tcg:en:old9-007') && !env.cache.has('tcg:de:old9-007'));
+  const n1 = env.fetchLog.length;
+  env.uiCall('getCardDetail', 'old9-007', 'en');
+  eq('englische Karte antippen ohne Abruf', env.fetchLog.slice(n1), []);
+  // Zwischenspeicher wirft: Suche geht trotzdem
+  const putAll = env.ctx.CacheService.getScriptCache().putAll;
+  env.ctx.CacheService.getScriptCache().putAll = () => { throw new Error('Cache voll'); };
+  let again = null;
+  try { again = env.uiCall('searchCards', { name: 'Glurak' }); } catch (e) { again = e.message; }
+  env.ctx.CacheService.getScriptCache().putAll = putAll;
+  ok('Cache-Fehler: Suche trotzdem', again && again.cards && again.cards.length === 3, again);
+}
+
 t.section('getCollection');
 {
   const env = setup();
@@ -262,6 +291,33 @@ t.section('getCollection');
   const fg = res.groups.find(x => x.gkey === f.gkey);
   eq('freie Karte: Nummer und Sonderversion', [fg.k.num, fg.k.size, fg.k.words[2], fg.k.setId, fg.k.rank], ['7', 100, 'staff', '', null]);
   ok('reines JSON (keine Datumsobjekte)', J(res) === J(JSON.parse(J(res))) && !/"\d{4}-\d\d-\d\dT/.test(J(res.groups.map(x => x.k))));
+}
+
+t.section('Hinzufügen im Hintergrund: delta und Anfrage-ID (#33)');
+{
+  const env = setup();
+  const bad = [];
+  const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2, rid: 'r1' });
+  ok('addCard liefert delta mit der neuen Gruppe', a.delta && a.delta.groups.length === 1 && a.delta.groups[0].gkey === a.gkey && a.delta.groups[0].count === 2, a.delta);
+  checkDelta(env, 'addCard', a, bad);
+  const total = () => env.uiCall('getCollection').groups.reduce((n, g) => n + g.count, 0);
+  const again = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2, rid: 'r1' });
+  ok('gleiche Anfrage-ID: nicht doppelt gezählt', total() === 2 && again.repeat === true && again.eid === a.eid && again.count === 2 && !again.delta, again);
+  eq('gleiche Anfrage-ID: dieselbe Meldung', again.message, a.message);
+  const b = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1, rid: 'r2' });
+  ok('neue Anfrage-ID zählt', total() === 3 && b.count === 3 && !b.repeat);
+  checkDelta(env, 'addCard 2', b, bad);
+  const c = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
+  const d = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
+  ok('ohne Anfrage-ID wie bisher: jedes Mal', total() === 5 && c.count === 4 && d.count === 5);
+  const f = env.uiCall('addFreeCard', { name: 'Fantasiemon', setName: 'Ordner', number: '7', qty: 1, rid: 'f1' });
+  checkDelta(env, 'addFreeCard', f, bad);
+  const f2 = env.uiCall('addFreeCard', { name: 'Fantasiemon', setName: 'Ordner', number: '7', qty: 1, rid: 'f1' });
+  ok('freie Karte: gleiche Anfrage-ID nicht doppelt', total() === 6 && f2.repeat === true && f2.count === 1);
+  const odd = env.uiCall('addCard', { id: 'sm9-33', lang: 'de', variant: 'base', qty: 1, rid: 'a b/c' });
+  const odd2 = env.uiCall('addCard', { id: 'sm9-33', lang: 'de', variant: 'base', qty: 1, rid: 'a b/c' });
+  ok('Anfrage-ID mit Sonderzeichen', odd2.repeat === true && odd2.count === odd.count);
+  eq('delta = getCollection', bad, []);
 }
 
 t.done();

@@ -233,8 +233,13 @@ function boot(env, mode, label) {
     if (typeof s !== 'string') throw new Error('include liefert keinen Text');
     return s;
   });
-  t.ok(label + ': include(\'ImportUi\') liefert die echte ImportUi.html', J(includes) === J(['ImportUi']) &&
-    ev.html.indexOf(IMPORTUI_RAW) >= 0 && ev.html.indexOf('<?') < 0, includes);
+  if (mode === 'sidebar') {
+    t.ok(label + ': include(\'ImportUi\') liefert die echte ImportUi.html', J(includes) === J(['ImportUi']) &&
+      ev.html.indexOf(IMPORTUI_RAW) >= 0 && ev.html.indexOf('<?') < 0, includes);
+  } else {
+    // die Handy-Seite hat keinen Import-Teil (#36 A3)
+    t.ok(label + ': ohne ImportUi.html', J(includes) === J([]) && ev.html.indexOf('id="paneImport"') < 0 && ev.html.indexOf('<?') < 0, includes);
+  }
 
   const pending = [];
   const errors = [];
@@ -543,7 +548,7 @@ function missingPaths(res, paths) {
   t.section('1. Seitenleiste, Import-Tab, Einstellungen');
   let E = boot(env, 'sidebar', 'Seitenleiste');
   await E.settle();
-  t.ok('Start lädt nur Set-Vorschläge, getUiConfig und getUpdateInfo', J(E.callLog.map((x) => x.fn).sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
+  t.ok('Start lädt nur Set-Vorschläge, getUiConfig, getUpdateInfo und getFileVersions', J(E.callLog.map((x) => x.fn).sort()) === J(['getFileVersions', 'getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
   t.ok('Import-Tab sichtbar', !E.$('tabImport').classList.contains('hidden'));
   t.ok('Import-Bereich noch versteckt, kein importState', E.$('paneImport').classList.contains('hidden') && E.calls('importState').length === 0);
   await E.clickSettle(E.$('tabImport'), 'Tab Import');
@@ -1034,11 +1039,11 @@ function missingPaths(res, paths) {
   t.section('13. Web-App: kein Import-Tab, keine Fehler');
   const W = boot(env, 'web', 'Web');
   await W.settle();
-  t.ok('Web: Import-Tab versteckt, Import-Bereich versteckt', W.$('tabImport').classList.contains('hidden') && W.$('paneImport').classList.contains('hidden'));
+  t.ok('Web: Import-Tab versteckt, kein Import-Bereich', W.$('tabImport').classList.contains('hidden') && !W.$('paneImport') && typeof W.win.impInit === 'undefined');
   W.win.showTab('import');
   await W.settle();
-  t.ok('Web: showTab(import) bleibt bei Hinzufügen, kein Import-Aufruf', !W.$('paneAdd').classList.contains('hidden') && W.$('paneImport').classList.contains('hidden') &&
-    W.win.impInitCalls === 0 && W.callLog.every((x) => !/^import/.test(x.fn)), W.callLog.map((x) => x.fn));
+  t.ok('Web: showTab(import) bleibt bei Hinzufügen, kein Import-Aufruf', !W.$('paneAdd').classList.contains('hidden') &&
+    W.callLog.every((x) => !/^import/.test(x.fn)), W.callLog.map((x) => x.fn));
   await W.clickSettle(W.$('tabColl'), 'Tab Sammlung');
   t.ok('Web: Sammlung zeigt Import-Zeilen', W.win.state.groups.some((g) => g.rows.some((r) => r.originLabel === ORIGIN_LABEL + '2')));
   eyes(W, 'Web: Sammlung', W.$('paneColl'));

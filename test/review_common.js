@@ -1,7 +1,6 @@
 'use strict';
-// Gemeinsame Helfer für die Review-Repros (nur erfundene Testdaten).
-const path = require('path');
-const H = require('../harness2');
+// Gemeinsame Helfer für test_review_fixes.js (nur erfundene Testdaten).
+const H = require('./harness2');
 
 const GLURAK = {
   dataLang: 'de', id: 'swsh3-025', name: 'Glurak', nameEn: 'Charizard', setId: 'swsh3', setName: 'Flammende Finsternis',

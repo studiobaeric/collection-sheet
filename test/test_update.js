@@ -973,6 +973,14 @@ t.section('Release-Werkzeug und Kanal im Repo');
   const ui = R.stampText('<!DOCTYPE html>\n<html>\n</html>\n', '1.2.0', true);
   t.ok('stampText .html: Kommentar direkt nach <!DOCTYPE html>', /^<!DOCTYPE html>\n<!-- =+\n     Pokémon-Sammlung · Version 1\.2\.0\n[^]*?-->\n<html>\n<\/html>\n$/.test(ui), ui);
   t.ok('stampText .html ohne DOCTYPE: Kommentar ganz oben', /^<!-- =+\n[^]*?-->\n<style>/.test(R.stampText('<style>\n</style>\n', '1.2.0', true)));
+  // Versions-Konstanten (#35): stampText setzt sie mit, headerDiffs meldet fehlende und falsche
+  const withConst = R.stampText("/* x */\nconst UPDATE_FILE_VERSION = '1.0.0';\nvar impFileVersion = '1.0.0';\nconst B = 'älter als 1.1.2';\n", '1.2.0', false);
+  t.ok('stampText: Versions-Konstanten bekommen die Version, anderer Text bleibt', R.constVersions(withConst).join() === '1.2.0,1.2.0' && /'älter als 1\.1\.2'/.test(withConst), withConst);
+  t.ok('Versions-Konstante in jeder Datei außer Code.gs (die hat TOOL_VERSION)', R.CONST_FILES.every(f => R.constVersions(read(f)).length === 1) &&
+    R.CONST_FILES.indexOf('src/Code.gs') < 0 && R.HEADER_FILES.filter(f => R.CONST_FILES.indexOf(f) < 0).join() === 'src/Code.gs');
+  const toolV = env.run('TOOL_VERSION');
+  const fake = f => f === 'src/Update.gs' ? read(f).replace(/^const UPDATE_FILE_VERSION = .*$/m, '') : f === 'src/Ui.html' ? read(f).replace(/UI_FILE_VERSION = '[^']*'/, "UI_FILE_VERSION = '0.0.1'") : read(f);
+  t.eq('headerDiffs: fehlende und falsche Konstante gemeldet', R.headerDiffs(toolV, fake), ['src/Update.gs: keine Versions-Konstante (…_FILE_VERSION)', 'src/Ui.html: Versions-Konstante ist 0.0.1']);
   const ch = JSON.parse(fs.readFileSync(path.join(SRC, '..', 'releases', 'channel.json'), 'utf8'));
   const clean = env.ctx.updCleanChannel_(ch);
   t.ok('Kanal: alle Einträge gültig, Repo, Anleitung', clean.releases.length === ch.releases.length && clean.repo === REPO && /#von-hand-aktualisieren$/.test(clean.guideUrl));

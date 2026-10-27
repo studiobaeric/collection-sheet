@@ -37,7 +37,7 @@ function db() {
 }
 
 function setup() {
-  const env = H.createEnv({ files: ['Code.gs'], db: db() });
+  const env = H.createEnv({ db: db() });
   env.ctx.setupAll_();
   return env;
 }
@@ -228,7 +228,7 @@ function sortEnv() {
 // ---------------------------------------------------------------------------
 t.section('Ansicht neu aufbauen und onEdit');
 {
-  const env = H.createEnv({ files: ['Code.gs'], db: db() });
+  const env = H.createEnv({ db: db() });
   env.ctx.setupAll_();
   env.ss.deleteSheet(env.sheet('Pokédex'));
   env.ss.deleteSheet(env.sheet('Seltenheiten'));

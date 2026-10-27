@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.1
+ *  Pokémon-Sammlung · Version 1.1.2
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -18,6 +18,9 @@
  * der Vorlage: updateCopy legt sie an, die neue Tabelle holt mit ihrem neuen Code alle Daten aus der alten
  * (takeoverRun) und legt die alte still. Die alte bleibt als Stand davor erhalten.
  */
+
+/** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
+const UPDATE_FILE_VERSION = '1.1.2';
 
 const UPD_REPO = 'studiobaeric/collection-sheet';
 const UPD_RAW = 'https://raw.githubusercontent.com/';
@@ -305,10 +308,8 @@ function updTakeoverHeads_() {
   const m = {};
   m[SHEETS.hist] = HIST_HEADERS; m[SHEETS.cardHist] = CARD_HIST_HEADERS; m[SHEETS.proto] = PROTO_HEADERS; m[SHEETS.rarity] = RARITY_HEADERS;
   m[SHEETS.dexIds] = DEX_IDS_HEADERS; m[SHEETS.sets] = SET_HEADERS; m[SHEETS.tr] = TR_HEADERS;
-  if (typeof IMPORTE_HEADERS !== 'undefined') {
-    m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
-    m['Import-Vorlagen'] = TEMPLATE_HEADERS; m['Import-Antworten'] = ANSWER_HEADERS;
-  }
+  m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
+  m['Import-Vorlagen'] = TEMPLATE_HEADERS; m['Import-Antworten'] = ANSWER_HEADERS;
   return m;
 }
 

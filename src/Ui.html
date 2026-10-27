@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.1
+     Pokémon-Sammlung · Version 1.1.2
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -91,6 +91,8 @@
   .updbar .grow { flex: 1; min-width: 0; }
   .updbar .btn { min-height: 40px; padding: 6px 10px; font-size: 14px; flex: none; }
   .updbar .x { border: 0; background: none; font-size: 20px; min-width: 44px; min-height: 40px; cursor: pointer; color: inherit; flex: none; }
+  .updbar.bad { background: var(--errbg); color: var(--err); }
+  .fodd { color: var(--err); font-weight: 600; }
   .ptitle { font-size: 17px; margin: 12px 0 4px; }
   ul.rel { margin: 4px 0 8px 18px; padding: 0; font-size: 14px; }
   .foot { text-align: center; font-size: 12px; color: var(--muted); padding: 18px 12px 24px; }
@@ -105,6 +107,11 @@
   .saving { color: var(--muted); font-style: italic; }
   .item .info .s.err { color: var(--err); }
   .erow.pend .einfo { opacity: .7; }
+  .item.addfail { background: var(--errbg); border-radius: 6px; padding: 8px; margin-top: 8px; border-bottom: 0; align-items: flex-start; }
+  .item.addfail .t { color: var(--err); }
+  .item.addfail .actions { margin-top: 6px; }
+  .item .info .s.done { color: var(--ok); }
+  .lasthead { margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -114,6 +121,7 @@
   <button id="tabDex" onclick="showTab('dex')">Pokédex</button>
   <button id="tabImport" class="hidden" onclick="showTab('import')">Import</button>
 </div>
+<div id="verBar" class="updbar bad hidden"></div>
 <div id="updBar" class="updbar hidden"></div>
 
 <!-- Hinzufügen -->
@@ -137,6 +145,7 @@
   </form>
   <div id="addMsg"></div>
   <div id="addResults"></div>
+  <div id="addLast"></div>
 </div>
 
 <!-- Sammlung -->
@@ -192,6 +201,7 @@
   <button class="btn" type="button" id="updBack" onclick="showTab(lastTab)">← Zurück</button>
   <h2 class="ptitle">Updates</h2>
   <div id="updInfo"></div>
+  <div id="updFiles"></div>
   <div id="updMsg"></div>
   <label class="check"><input type="checkbox" id="updPre" onchange="updSetPre()"> Vorabversionen bekommen (zum Ausprobieren, können noch Fehler haben)</label>
   <div id="takeBox" class="box hidden">
@@ -209,6 +219,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
+var UI_FILE_VERSION = '1.1.2'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -225,7 +236,7 @@ var LANGS = [
 ];
 var UI_CONFIG = { versions: [], extras: [], viewExtras: [] };
 var state = { lastQuery: null, lastRes: null, current: null, lastEid: null, lastKey: null, groups: [], open: {} };
-var searchGen = 0, collGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
+var searchGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -238,7 +249,7 @@ function call(fn) {
   return new Promise(function (resolve, reject) {
     var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
     if (typeof r[fn] !== 'function') {
-      reject(new Error('Die Funktion „' + fn + '“ fehlt im Skript. Ist die Skriptdatei „Import“ im Apps-Script-Editor angelegt und gespeichert?'));
+      reject(new Error('Die Funktion „' + fn + '“ fehlt im Skript. Unter Updates steht, welche Script-Datei fehlt oder zu alt ist.'));
       return;
     }
     r[fn].apply(r, args);
@@ -498,48 +509,169 @@ function backToSearch() {
 
 function addCurrent() {
   var c = state.current;
-  if (!c || $('cAdd').disabled) return;
+  if (!c || !$('cAdd') || $('cAdd').disabled) return;
   var op = readOwnPrice('cOwnPrice', 'addMsg');
   if (!op.ok) return;
   setMsg('addMsg', '');
+  var inputName = state.lastQuery ? state.lastQuery.name : '';
+  var v = chosenVariant();
   var req = {
-    id: c.id, lang: c.lang, variant: chosenVariant(), condition: $('cCond').value,
-    qty: qtyOf($('cQty').value), inputName: state.lastQuery ? state.lastQuery.name : '',
+    id: c.id, lang: c.lang, variant: v, condition: $('cCond').value,
+    qty: qtyOf($('cQty').value), inputName: inputName,
     cardLang: $('cLang').value || 'DE', version: $('cVersion').value.trim(), ownPrice: op.value
   };
-  $('cAdd').disabled = true;
-  var gen = searchGen;
-  call('addCard', req).then(function (res) { rememberVersion(req.version); addDone(res, gen); }).catch(function (e) {
-    if ($('cAdd')) $('cAdd').disabled = false;
-    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  var name = c.lang === 'en' && inputName ? inputName : c.name;
+  startAdd('addCard', req, {
+    name: name, number: c.localId, image: c.image,
+    sub: [c.setName, c.localId + (c.setSize ? '/' + c.setSize : ''), v === 'base' ? c.baseLabel : VARIANT_LABELS[v]]
   });
 }
 
-/** Erfolg nach addCard / addFreeCard. gen: searchGen beim Absenden. */
-function addDone(res, gen) {
-  markStale(); // die Sammlung lädt beim nächsten Öffnen neu
-  state.lastEid = res.eid || null;
-  state.lastKey = res.key || null;
-  setMsg('addMsg', esc(res.message) + (state.lastEid ? '<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>' : ''), 'ok');
-  if (gen !== searchGen) return; // inzwischen neu gesucht: deren Ergebnis stehen lassen
+// Hinzufügen im Hintergrund (#33): Das leere Formular steht sofort wieder da, die Karte speichert über die Warteschlange
+// der Sammlung (nacheinander, nie gleichzeitig mit einer Änderung dort). Jede Karte hat eine Anfrage-ID (rid), so rechnet
+// der Server eine Wiederholung nie doppelt ein. Unter dem Formular steht die zuletzt hinzugefügte Karte, darüber jede,
+// die nicht gespeichert werden konnte, bis sie gespeichert oder verworfen ist.
+var adds = [], addSeq = 0;
+var ADD_RETRY_MS = [1500, 4000]; // zwei Wiederholungen, dann rote Zeile
+
+function newRid() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) + '-' + (++addSeq); }
+function addById(n) { for (var k = 0; k < adds.length; k++) if (adds[k].n === n) return adds[k]; return null; }
+function addPending(a) { return a.status === 'wait' || a.status === 'saving'; }
+
+/** Karte abschicken und sofort das leere Formular zeigen. show: {name, number, image, sub: [..]} für die Anzeige */
+function startAdd(fn, req, show) {
+  req.rid = newRid();
+  var item = { n: addSeq, fn: fn, req: req, name: show.name, number: show.number || '', image: show.image || '',
+    sub: show.sub.filter(function (x) { return x != null && String(x) !== ''; }).join(' · '), status: 'wait', err: '', res: null };
+  adds.push(item);
+  ++searchGen; // späte Antworten zur alten Karte nicht mehr anzeigen
   $('addResults').innerHTML = '';
   $('searchForm').reset();
   state.lastQuery = null;
   state.lastRes = null;
+  state.current = null;
   $('fName').focus();
+  queueAdd(item);
+}
+
+function queueAdd(item) {
+  item.status = 'wait';
+  item.err = '';
+  enqueue({
+    send: function () { item.status = 'saving'; drawAdds(); return tryAdd(item, 0); },
+    done: function (res) { addSaved(item, res); },
+    fail: function (e) { item.status = 'err'; item.err = errText(e); drawAdds(); }
+  });
+  drawAdds();
+}
+
+function tryAdd(item, n) {
+  var send = item.fn === 'addFreeCard' ? call('addFreeCard', item.req) : call('addCard', item.req);
+  return send.catch(function (e) {
+    if (n >= ADD_RETRY_MS.length) throw e;
+    return new Promise(function (ok) { setTimeout(ok, ADD_RETRY_MS[n]); }).then(function () { return tryAdd(item, n + 1); });
+  });
+}
+
+function addSaved(item, res) {
+  item.status = 'ok';
+  item.res = res || {};
+  rememberVersion(item.req.version);
+  var g = res && res.delta ? (res.delta.groups || []).filter(function (x) { return x.gkey === res.gkey; })[0] : null;
+  if (g) { item.name = g.name || item.name; item.number = g.localId || item.number; }
+  if (res && res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } // im Tab Sammlung ohne Neuladen
+  else markStale();
+  drawAdds();
+}
+
+/** Die zuletzt hinzugefügte Karte (die nicht fehlgeschlagen ist) */
+function lastAdd() {
+  for (var k = adds.length - 1; k >= 0; k--) if (adds[k].status !== 'err') return adds[k];
+  return null;
+}
+
+function drawAdds() {
+  var last = lastAdd(), lastOk = null;
+  adds.forEach(function (a) { if (a.status === 'ok') lastOk = a; });
+  adds = adds.filter(function (a) { return a.status !== 'ok' || a === lastOk; }); // gespeicherte vergessen, bis auf die neueste
+  state.lastEid = last && last.status === 'ok' ? last.res.eid || null : null;
+  state.lastKey = last && last.status === 'ok' ? last.res.key || null : null;
+  var html = '';
+  adds.forEach(function (a) {
+    if (a.status !== 'err') return;
+    html += '<div class="item addfail">' + imgTag(cardImg(a.image, 'low')) + '<div class="info"><div class="t">' + esc(a.name) + '</div>' +
+      '<div class="s">' + esc(a.sub) + '</div><div class="s err">Nicht gespeichert: ' + esc(a.err) + '</div>' +
+      '<div class="actions"><button class="btn" onclick="retryAdd(' + a.n + ')">Nochmal versuchen</button>' +
+      '<button class="btn" onclick="dropAdd(' + a.n + ')">Verwerfen</button></div></div></div>';
+  });
+  var pending = adds.filter(addPending).length;
+  if (last) {
+    var ok = last.status === 'ok', r = last.res || {};
+    var status = ok
+      ? '<div class="s done">' + esc(r.message || 'Gespeichert, jetzt ' + r.count + ' Stück.') + '</div>'
+      : '<div class="s saving">speichert …</div>';
+    html += '<div class="notes lasthead">Zuletzt hinzugefügt' + (ok ? ' (antippen zeigt die Karte in der Sammlung)' : '') + '</div>' +
+      '<div class="item">' + imgTag(cardImg(last.image, 'low')) +
+      '<div class="info' + (ok ? ' tap" role="button" tabindex="0" onclick="openAdded(' + last.n + ')" onkeydown="addedKey(event,' + last.n + ')"' : '"') + '>' +
+      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div>' +
+      (ok && r.eid ? '<div class="ctl"><button class="btn" onclick="againPlusOne(this)"' + (last.plus ? ' disabled' : '') + '>' +
+        (last.plus ? 'Speichere …' : 'Nochmal +1') + '</button></div>' : '') + '</div>';
+  }
+  if (pending > 1) html += '<div class="notes">Noch ' + pending + ' Karten werden gespeichert …</div>';
+  if (pending) html += '<div class="hint">' + (MODE === 'sidebar' ? 'Seitenleiste' : 'Seite') + ' bitte offen lassen, bis alles gespeichert ist.</div>';
+  $('addLast').innerHTML = html;
+}
+
+function retryAdd(n) {
+  var a = addById(n);
+  if (!a || a.status !== 'err') return;
+  adds.splice(adds.indexOf(a), 1);
+  adds.push(a); // gilt wieder als zuletzt hinzugefügt
+  queueAdd(a); // dieselbe rid: war sie doch gespeichert, kommt sie nicht doppelt
+}
+
+function dropAdd(n) {
+  var a = addById(n);
+  if (!a || a.status !== 'err') return;
+  adds.splice(adds.indexOf(a), 1);
+  drawAdds();
+}
+
+/** Die gespeicherte Karte im Tab Sammlung zeigen: Suche mit Name und Nummer, die Karte ganz oben und aufgeklappt. */
+function openAdded(n) {
+  var a = addById(n);
+  if (!a || a.status !== 'ok' || !a.res.gkey) return;
+  $('colQuery').value = a.name + (/\d/.test(a.number) ? ' ' + a.number : '');
+  $('colSet').value = '';
+  collSort.dex = null;
+  coll.focus = a.res.gkey;
+  state.open[a.res.gkey] = true;
+  if (coll.all && !coll.stale) coll.resort = true; // collShow sucht dann neu
+  showTab('coll');
+}
+function addedKey(ev, n) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  ev.preventDefault();
+  openAdded(n);
 }
 
 function againPlusOne(btn) {
-  var eid = state.lastEid;
-  if (!eid || (btn && btn.disabled)) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Speichere …'; }
-  call('adjustEntry', eid, 1).then(function (res) {
-    markStale();
-    if (eid !== state.lastEid) return; // inzwischen andere Karte hinzugefügt
-    setMsg('addMsg', 'Noch eine dazu, jetzt ' + esc(res.count) + ' Stück.<br><button class="btn" onclick="againPlusOne(this)">Nochmal +1</button>', 'ok');
-  }).catch(function (e) {
-    if (eid !== state.lastEid) return;
-    setMsg('addMsg', esc(errText(e)), 'err');
+  var a = lastAdd();
+  if (!a || a.status !== 'ok' || !a.res.eid || a.plus) return;
+  var eid = a.res.eid;
+  a.plus = true;
+  drawAdds();
+  enqueue({
+    send: function () { return call('adjustEntry', eid, 1); },
+    done: function (res) {
+      a.plus = false;
+      if (res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } else markStale();
+      if (res.eid) a.res.eid = res.eid;
+      a.res.count = res.count;
+      a.res.message = 'Noch eine dazu, jetzt ' + res.count + ' Stück.';
+      drawAdds();
+    },
+    fail: function (e) { a.plus = false; drawAdds(); setMsg('addMsg', esc(errText(e)), 'err'); }
   });
 }
 
@@ -576,11 +708,9 @@ function saveFree(ev) {
     variant: $('frVariant').value || 'normal', condition: $('frCond').value, qty: qtyOf($('frQty').value),
     cardLang: $('frLang').value || 'DE', version: $('frVersion').value.trim(), ownPrice: op.value
   };
-  $('frSave').disabled = true;
-  var gen = searchGen;
-  call('addFreeCard', req).then(function (res) { rememberVersion(req.version); addDone(res, gen); }).catch(function (e) {
-    if ($('frSave')) $('frSave').disabled = false;
-    setMsg('addMsg', esc(errText(e)) + ' – nichts gespeichert.', 'err');
+  startAdd('addFreeCard', req, {
+    name: name, number: req.number,
+    sub: ['freie Karte', req.setName, req.number, VARIANT_LABELS[req.variant] || req.variant]
   });
 }
 
@@ -592,7 +722,7 @@ function saveFree(ev) {
 // vom Server; was angezeigt wird, ist base plus die noch laufenden Änderungen (predict). Alle Änderungen laufen
 // nacheinander über eine Warteschlange, Bearbeiten zeigt das Ergebnis sofort mit „speichert …“.
 
-var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, opsDone: 0 };
+var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, opsDone: 0, focus: null };
 var queue = [], queueBusy = false;
 var collTimer = null;
 var CHG_DAYS = 30; // Preisveränderung über 30 Tage, wie im Blatt Sammlung
@@ -745,8 +875,16 @@ function refilter() {
   var nr = collSort.dex ? collSort.dex.nr : 0;
   var list = coll.all.filter(function (g) { return collMatch(g, words, stx, nr); });
   list.sort(function (a, b) { return collCmp(a, b, collSort.sort, collSort.desc); });
+  var top = coll.focus ? coll.byKey[coll.focus] : null;
+  if (top) { // eben hinzugefügt und angetippt: ganz oben und aufgeklappt
+    coll.focus = null;
+    if (list.indexOf(top) >= 0) list.splice(list.indexOf(top), 1);
+    list.unshift(top);
+    state.open[top.gkey] = true;
+  }
   state.groups = list;
   renderCollection();
+  if (top) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }
 }
 
 function groupHtml(g, i) {
@@ -1636,6 +1774,91 @@ function updOutdatedText() {
 }
 function updFoot() { $('updVer').textContent = UPD && UPD.installed ? 'Version ' + UPD.installed + ' · ' : ''; }
 
+// ---------- Versionen der Script-Dateien (#35) ----------
+// Wer von Hand aktualisiert, fügt fünf Dateien ein. Die .gs-Dateien meldet getFileVersions, die HTML-Dateien diese
+// Seite selbst (UI_FILE_VERSION, impFileVersion aus ImportUi.html). Die Handy-Seite hat keinen Import-Teil (#36 A3),
+// dort liest getFileVersions ImportUi.html selbst. Fehlt getFileVersions, ist Code.gs älter als 1.1.2.
+// Version 'alt': Datei da, aber älter als 1.1.2; null: Datei fehlt.
+
+var FILEV = null; // {files: [{name, version}], newest, odd: [Namen]}
+var verBarClosed = false;
+
+/** Versionen der HTML-Dateien. ImportUi.html steht am Ende der Seite, deshalb erst nach dem Laden fragen. */
+function uiFileVersions() {
+  var v = { 'Ui.html': UI_FILE_VERSION };
+  if (MODE === 'sidebar') v['ImportUi.html'] = typeof impFileVersion !== 'undefined' ? impFileVersion : (typeof impInit === 'function' ? 'alt' : null);
+  return v;
+}
+
+/** wie fileVerCmp_ in Code.gs: 1.1.2 vor 1.1.10, Vorabversion vor der fertigen */
+function verCmp(a, b) {
+  var p = function (v) { var m = /^(\d+)\.(\d+)\.(\d+)(.*)$/.exec(v || ''); return m ? [+m[1], +m[2], +m[3], m[4]] : null; };
+  var x = p(a), y = p(b);
+  if (!x || !y) return x ? 1 : y ? -1 : 0;
+  for (var i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  if (x[3] === y[3]) return 0;
+  if (!x[3] || !y[3]) return x[3] ? -1 : 1;
+  return x[3] < y[3] ? -1 : 1;
+}
+
+/** files -> {files, newest, odd}: odd sind alle, die nicht die neueste Version haben oder fehlen */
+function fileReport(files) {
+  var newest = '';
+  files.forEach(function (f) { if (f.version && f.version !== 'alt' && verCmp(f.version, newest) > 0) newest = f.version; });
+  return { files: files, newest: newest, odd: files.filter(function (f) { return f.version !== newest; }).map(function (f) { return f.name; }) };
+}
+function fileVerLabel(v) { return v === 'alt' ? 'älter als 1.1.2' : v || 'fehlt'; }
+
+function fileCheck() {
+  var ui = uiFileVersions();
+  var asFiles = function (o) { return Object.keys(o).map(function (k) { return { name: k, version: o[k] }; }); };
+  if (typeof google.script.run.getFileVersions !== 'function') { // Code.gs ist älter als diese Seite
+    FILEV = fileReport([{ name: 'Code.gs', version: 'alt' }].concat(asFiles(ui)));
+    verShow();
+    return;
+  }
+  call('getFileVersions', ui).then(function (res) {
+    FILEV = fileReport(((res && res.files) || []).length ? res.files : asFiles(ui));
+    verShow();
+  }).catch(function () { /* ohne Prüfung weiter */ });
+}
+
+function verShow() { verBar(); verBox(); }
+
+/** Rote Leiste unter den Tabs, solange die Dateien nicht zusammenpassen */
+function verBar() {
+  var r = FILEV, html = '';
+  if (r && r.odd.length && !verBarClosed) {
+    var odd = r.files.filter(function (f) { return r.odd.indexOf(f.name) >= 0; });
+    html = '<span class="grow">Script-Dateien passen nicht zusammen: ' +
+      odd.map(function (f) { return esc(f.name) + ' ' + esc(fileVerLabel(f.version)); }).join(', ') +
+      (r.newest ? ', die anderen ' + esc(r.newest) : '') + '.</span>' +
+      '<button class="btn" type="button" onclick="showTab(\'upd\')">Details</button>' +
+      '<button class="x" type="button" title="Ausblenden" aria-label="Ausblenden" onclick="verCloseBar()">×</button>';
+  }
+  $('verBar').innerHTML = html;
+  $('verBar').classList.toggle('hidden', !html);
+}
+function verCloseBar() { verBarClosed = true; verBar(); }
+
+/** Im Bereich Updates: alle Dateien mit Version, abweichende rot, und was zu tun ist */
+function verBox() {
+  var r = FILEV;
+  if (!r) { $('updFiles').innerHTML = ''; return; }
+  var list = r.files.map(function (f) {
+    var t = esc(f.name) + ' ' + esc(fileVerLabel(f.version));
+    return r.odd.indexOf(f.name) >= 0 ? '<span class="fodd">' + t + '</span>' : t;
+  }).join(' · ');
+  var h = '<div class="notes">Dateien: ' + list + '</div>';
+  if (r.odd.length) {
+    h += '<div class="msg err">Die Script-Dateien passen nicht zusammen. Am Computer unter Erweiterungen > Apps Script die rot markierten Dateien ' +
+      'durch die aus Version ' + esc(r.newest) + ' ersetzen und speichern. ' +
+      (MODE === 'web' ? 'Danach die Web-App neu bereitstellen (Bereitstellen > Bereitstellungen verwalten, Stift, Version „Neue Version“).'
+        : 'Danach die Seitenleiste schließen und über Pokémon > Karten erfassen neu öffnen.') + '</div>';
+  }
+  $('updFiles').innerHTML = h;
+}
+
 /** Gelbe Leiste von Google in jeder neuen Kopie: erklären, was sie meint (die IMAGE-Formeln der Kartenbilder). */
 var UPD_IMAGE_HINT = 'Zeigt Google oben eine gelbe Leiste „Einige Formeln erfordern das Versenden und Empfangen von Daten externer Nutzer“: ' +
   'auf Zugriff erlauben klicken. Gemeint sind die Kartenbilder, die Tabelle lädt sie von tcgdex.net. Dabei geht nur die Bildadresse der Karte an tcgdex, ' +
@@ -1835,12 +2058,13 @@ call('getSetSuggestions').then(function (names) {
 loadUiConfig();
 $('takeImgHint').textContent = UPD_IMAGE_HINT;
 updLoad(START === 'upd'); // Menü „Nach Updates suchen“: frisch von GitHub
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fileCheck); else fileCheck();
 if (START === 'upd') showTab('upd');
 else if (START === 'takeover') updOpenTakeover();
 // Knopf „Importieren“: der Bereich Import steht erst nach diesem Skript im Dokument (include am Ende)
 else if (START === 'import') document.addEventListener('DOMContentLoaded', function () { showTab($('paneImport') ? 'import' : 'add'); });
 </script>
-<?!= include('ImportUi') ?>
+<?!= mode === 'sidebar' ? include('ImportUi') : '' ?>
 <div class="foot"><span id="updVer"></span><button type="button" class="lnk" onclick="showTab('upd')">Updates</button></div>
 </body>
 </html>

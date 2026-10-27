@@ -170,7 +170,7 @@ Object.keys(imp.fns).forEach((n) => {
   }
 });
 // 5b. Schreibzugriffe auf Blätter außerhalb einer Sperre (transitiv über private Helfer, Sperr-Rümpfe ausgenommen).
-// Erlaubt: setReleaseDate_ (Code.gs schreibt den Set-Cache „Sets“ absichtlich ohne Sperre, siehe CORE_API.md).
+// Erlaubt: setReleaseDate_ (Code.gs schreibt den Set-Cache „Sets“ absichtlich ohne Sperre, er ist nur ein Zwischenspeicher).
 const WRITE_RE = /\.(setValues|setValue|clearContent|clearContents|clear|insertRowsAfter|insertRowsBefore|deleteRows?|deleteColumns?|insertColumnsAfter|insertColumnsBefore|setNumberFormats?|appendRow|hideSheet|showSheet|insertSheet|deleteSheet|setDataValidation|setFormulas?|setFrozenRows)\(/g;
 const OUTSIDE_OK = { setReleaseDate_: true, withLock_: true };
 function outsideLocks(body) {

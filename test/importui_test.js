@@ -13,7 +13,7 @@ const UI_RAW = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
 const IMP_RAW = fs.readFileSync(path.join(SRC, 'ImportUi.html'), 'utf8');
 const LT_Q = '<' + '?';
 const MODE_LET = LT_Q + "!= mode ?>";
-const INCLUDE_LET = LT_Q + "!= include('ImportUi') ?>";
+const INCLUDE_LET = LT_Q + "!= mode === 'sidebar' ? include('ImportUi') : '' ?>";
 const START_LET = LT_Q + '!= typeof start === "string" ? start : "" ?>';
 
 let pass = 0, failCount = 0;
@@ -239,7 +239,8 @@ function makeServer() {
 // Seite starten
 // ---------------------------------------------------------------------------
 function render(mode) {
-  return UI_RAW.replace(MODE_LET, mode).replace(START_LET, '').replace(INCLUDE_LET, IMP_RAW);
+  // wie HtmlService: den Import-Teil gibt es nur in der Seitenleiste (#36 A3)
+  return UI_RAW.replace(MODE_LET, mode).replace(START_LET, '').replace(INCLUDE_LET, mode === 'sidebar' ? IMP_RAW : '');
 }
 
 function boot(mode, opts) {
@@ -306,7 +307,10 @@ function boot(mode, opts) {
       const pane = doc.getElementById('paneImport');
       return !win.__xss && !pane.querySelector('img[src="x"]') && !pane.querySelector('script') && !pane.querySelector('#xssb');
     },
-    async startup() { await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo', { value: null }); },
+    async startup() {
+      await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo', { value: null });
+      await flush(); await E.respond('getFileVersions', { value: null });
+    },
     async openImport() { E.click(E.$('tabImport')); await E.respond('importState'); },
     step() { const m = (E.main().querySelector('.imp-sub') || {}).textContent || ''; const r = m.match(/Schritt (\d) von 8/); return r ? Number(r[1]) : 0; },
     radioVal(name) { const r = [...doc.querySelectorAll('input[name="' + name + '"]')].find(x => x.checked); return r ? r.value : null; }
@@ -500,10 +504,9 @@ async function toStep3(E) {
     ok('Web: nur Start-Aufrufe aus Ui.html', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
     await E.startup();
     ok('Web: Import-Tab versteckt', E.$('tabImport').classList.contains('hidden'));
-    ok('Web: paneImport vorhanden und versteckt', !!E.$('paneImport') && E.$('paneImport').classList.contains('hidden'));
+    ok('Web: ohne Import-Teil (#36 A3)', !E.$('paneImport') && typeof E.win.impInit === 'undefined' && typeof E.win.impInitCalls === 'undefined');
     E.win.showTab('import');
-    ok('Web: showTab(import) bleibt bei Hinzufügen, kein impInit', !E.$('paneAdd').classList.contains('hidden') &&
-      E.$('paneImport').classList.contains('hidden') && E.win.impInitCalls === 0 && E.pending.length === 0, E.names());
+    ok('Web: showTab(import) bleibt bei Hinzufügen', !E.$('paneAdd').classList.contains('hidden') && E.pending.length === 0, E.names());
     ok('Web: keine Skriptfehler', E.errors.length === 0, E.errors);
   }
 

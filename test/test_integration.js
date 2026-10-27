@@ -10,8 +10,7 @@
  * - Nach jedem Schritt: Blätter Daten, Gruppen, Import-Protokoll prüfen und die Liste im UI
  *   mit einer frischen getCollection-Antwort vergleichen (auch die Such- und Sortierwerte k).
  *
- * Aufruf: node test_integration.js   (IMPORT=1 lädt zusätzlich src/Import.gs, falls vorhanden;
- *   IMPORTUI=1 bindet das echte src/ImportUi.html statt des Platzhalters ein)
+ * Aufruf: node test_integration.js   (IMPORTUI=1 bindet das echte src/ImportUi.html statt des Platzhalters ein)
  */
 const fs = require('fs');
 const path = require('path');
@@ -21,14 +20,15 @@ const H = require('./harness2');
 
 const t = H.runner('test_integration');
 const J = x => JSON.stringify(x);
+const noRid = o => { const c = Object.assign({}, o); delete c.rid; return c; };
 const SRC = path.join(__dirname, '..', 'src');
-const FILES = ['Code.gs'].concat(process.env.IMPORT && fs.existsSync(path.join(SRC, 'Import.gs')) ? ['Import.gs'] : [])
-  .concat(fs.existsSync(path.join(SRC, 'Update.gs')) ? ['Update.gs'] : []);
+const FILES = ['Code.gs', 'Import.gs', 'Update.gs']; // ohne Import.gs oder Update.gs läuft das Tool nicht (#36 B2)
 const REAL_IMPORTUI = !!process.env.IMPORTUI;
 const TODAY = H.formatDate(new Date(), '', 'yyyy-MM-dd');
 const TODAY_DMY = H.formatDate(new Date(), '', 'dd.MM.yyyy');
 const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-STUB</div>' +
-  '<script>var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
+  '<script>var impFileVersion = \'' + /var UI_FILE_VERSION = '([^']*)'/.exec(fs.readFileSync(path.join(__dirname, '..', 'src', 'Ui.html'), 'utf8'))[1] +
+  '\'; var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
 // ---------------------------------------------------------------------------
 // Vorlage auswerten wie HtmlService (nur druckende Scriptlets kommen vor)
@@ -93,7 +93,8 @@ function boot(env, mode) {
   const ev = evaluateTemplate(env, tpl, includeImpl);
   t.ok(mode + ': genau drei Scriptlets ausgewertet (mode, start, include)', ev.scriptlets.length === 3, ev.scriptlets);
   t.ok(mode + ': START ist leer', /var START = '';/.test(ev.html));
-  t.ok(mode + ': include(ImportUi) aufgerufen', J(includeCalls) === J(['ImportUi']), includeCalls);
+  // die Handy-Seite hat keinen Import-Teil (#36 A3)
+  t.ok(mode + ': include(ImportUi) ' + (mode === 'sidebar' ? 'aufgerufen' : 'nicht aufgerufen'), J(includeCalls) === J(mode === 'sidebar' ? ['ImportUi'] : []), includeCalls);
   t.ok(mode + ': kein "<?" mehr im fertigen HTML', ev.html.indexOf('<?') < 0);
 
   const pending = [];
@@ -318,11 +319,12 @@ function seedImport(env) {
     t.ok('Code.gs kompiliert', !err, err);
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
     ['sidebar', 'web'].forEach(mode => {
-      const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '').replace(/<\?!=\s*include\('ImportUi'\)\s*\?>/g, IMPORT_STUB);
+      const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '')
+        .replace(/<\?!= mode === 'sidebar' \? include\('ImportUi'\) : '' \?>/g, mode === 'sidebar' ? IMPORT_STUB : '');
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
       let bad = [];
       scripts.forEach((s, i) => { try { new vm.Script(s, { filename: 'Ui.html#' + i }); } catch (e) { bad.push(i + ': ' + e.message); } });
-      t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= 2 && bad.length === 0, bad);
+      t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= (mode === 'sidebar' ? 2 : 1) && bad.length === 0, bad);
     });
     t.ok('Ui.html: "<?" nur in den drei Scriptlets', (raw.match(/<\?/g) || []).length === 3);
     t.ok('Ui.html: kein Gedankenstrich (—)', raw.indexOf('—') < 0);
@@ -336,7 +338,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
@@ -392,15 +394,15 @@ function seedImport(env) {
   await E.clickSettle($('cAdd'));
   let addRes = E.lastCall('addCard');
   t.ok('addCard ok', addRes && !addRes.error && addRes.res && /^E[0-9a-f]{10}$/.test(addRes.res.eid), addRes);
-  t.ok('Meldung: Glurak, Normal, NM, 2 Stück', /Glurak, Normal, NM hinzugefügt, jetzt 2 Stück\./.test($('addMsg').textContent), $('addMsg').textContent);
+  t.ok('Meldung: Glurak, Normal, NM, 2 Stück', /Glurak, Normal, NM hinzugefügt, jetzt 2 Stück\./.test($('addLast').textContent), $('addLast').textContent);
   let D = dataRows(env);
   const handA = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 2 &&
     handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA);
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
   checkSheets(env, 'nach addCard');
-  await E.clickSettle(E.btn($('addMsg'), 'Nochmal +1'));
-  t.ok('Nochmal +1 -> 3 Stück', /jetzt 3 Stück/.test($('addMsg').textContent), $('addMsg').textContent);
+  await E.clickSettle(E.btn($('addLast'), 'Nochmal +1'));
+  t.ok('Nochmal +1 -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
   t.ok('Daten: 3 Stück', dataRows(env).find(r => r.eid === handA.eid).count === 3);
   t.ok('Nochmal +1 nutzt adjustEntry', J(E.lastCall('adjustEntry').args) === J([handA.eid, 1]));
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
@@ -416,8 +418,9 @@ function seedImport(env) {
   $('cOwnPrice').value = '2,50';
   await E.clickSettle($('cAdd'));
   addRes = E.lastCall('addCard');
-  t.eq('addCard-Anfrage', addRes.args[0], { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'LP', qty: 1, inputName: 'Glurak', cardLang: 'EN', version: 'Staff', ownPrice: 2.5 });
-  t.ok('Meldung nennt Version, Sprache, eigenen Preis', /Glurak · Staff, Normal, LP, Englisch hinzugefügt, jetzt 1 Stück\. Eigener Preis: 2,50 €\./.test($('addMsg').textContent), $('addMsg').textContent);
+  t.ok('addCard mit Anfrage-ID', typeof addRes.args[0].rid === 'string');
+  t.eq('addCard-Anfrage', noRid(addRes.args[0]), { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'LP', qty: 1, inputName: 'Glurak', cardLang: 'EN', version: 'Staff', ownPrice: 2.5 });
+  t.ok('Meldung nennt Version, Sprache, eigenen Preis', /Glurak · Staff, Normal, LP, Englisch hinzugefügt, jetzt 1 Stück\. Eigener Preis: 2,50 €\./.test($('addLast').textContent), $('addLast').textContent);
   D = dataRows(env);
   const staff = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Sprache EN, Version Staff, eigener Preis mit Datum', staff && staff.lang === 'EN' && staff.version === 'Staff' && staff.ownPrice === 2.5 &&
@@ -448,8 +451,8 @@ function seedImport(env) {
   $('frOwnPrice').value = '1,50';
   await E.clickSettle($('frSave'));
   const freeRes = E.lastCall('addFreeCard');
-  t.eq('addFreeCard-Anfrage', freeRes.args[0], { name: 'Unbekannt', setName: 'Grundset', number: '4/102', variant: 'normal', condition: '', qty: 1, cardLang: 'DE', version: '', ownPrice: 1.5 });
-  t.ok('addFreeCard ok', freeRes.res && freeRes.res.gkey === 'frei:unbekannt~grundset~4|normal|' && /hinzugefügt/.test($('addMsg').textContent), [freeRes.res, $('addMsg').textContent]);
+  t.eq('addFreeCard-Anfrage', noRid(freeRes.args[0]), { name: 'Unbekannt', setName: 'Grundset', number: '4/102', variant: 'normal', condition: '', qty: 1, cardLang: 'DE', version: '', ownPrice: 1.5 });
+  t.ok('addFreeCard ok', freeRes.res && freeRes.res.gkey === 'frei:unbekannt~grundset~4|normal|' && /hinzugefügt/.test($('addLast').textContent), [freeRes.res, $('addLast').textContent]);
   D = dataRows(env);
   const free = D.find(r => r.eid === freeRes.res.eid);
   t.ok('Daten: freie Karte', free && free.id === '' && free.source === 'frei' && free.localId === '4' && free.setSize === 102 && free.normNum === '4' &&
@@ -748,7 +751,7 @@ function seedImport(env) {
   $('frQty').value = '2';
   await E.clickSettle($('frSave'));
   const free2 = E.lastCall('addFreeCard').res;
-  t.ok('zweite freie Karte', free2 && free2.key === 'frei:mewtu spezial~altes set~7|reverse||GD|JP' && /Japanisch/.test($('addMsg').textContent), [free2, $('addMsg').textContent]);
+  t.ok('zweite freie Karte', free2 && free2.key === 'frei:mewtu spezial~altes set~7|reverse||GD|JP' && /Japanisch/.test($('addLast').textContent), [free2, $('addLast').textContent]);
   await E.clickSettle($('tabColl'));
   fkey = free2.gkey;
   fi2 = E.gIdx(fkey);
@@ -865,7 +868,8 @@ function seedImport(env) {
   await W.settle();
   t.ok('Web: Import-Tab versteckt', W.$('tabImport').classList.contains('hidden'));
   W.win.showTab('import');
-  t.ok('Web: showTab(import) bleibt bei Hinzufügen', W.win.impInitCalls === 0 && !W.$('paneAdd').classList.contains('hidden'));
+  t.ok('Web: ohne Import-Teil (#36 A3)', !W.$('paneImport') && typeof W.win.impInit === 'undefined');
+  t.ok('Web: showTab(import) bleibt bei Hinzufügen', !W.$('paneAdd').classList.contains('hidden') && W.errors.length === 0, W.errors);
   await W.clickSettle(W.$('tabColl'));
   const wi = W.gIdx(GK);
   t.ok('Web: Sammlung lädt dieselben Gruppen', W.win.state.groups.length === E.win.state.groups.length && wi >= 0);

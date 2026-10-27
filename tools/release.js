@@ -32,6 +32,9 @@ const SHEET_URL = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]{20,}/;
 const HEADER_FILES = ['src/Code.gs', 'src/Import.gs', 'parts/00_shared.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
 const HEADER_RE = /Pokémon-Sammlung · Version (\S+)/;
 const HEADER_LINES = 8; // der Kopf muss in den ersten Zeilen stehen
+/** Versions-Konstante, mit der das Tool selbst prüft, ob alle Dateien zusammenpassen (#35); Code.gs hat TOOL_VERSION */
+const CONST_RE = /\b((?:[A-Z]+_FILE_VERSION|impFileVersion) = ')([^']*)(')/g; // ImportUi.html: alle Namen dort beginnen mit imp
+const CONST_FILES = ['src/Import.gs', 'parts/00_shared.gs', 'src/Update.gs', 'src/Ui.html', 'src/ImportUi.html'];
 /** Release-Notizen sind kurze Stichpunkte (Eric, 23.10.2026); längere Punkte meldet das Werkzeug als Hinweis */
 const NOTE_MAX = 70;
 const longNotes = notes => cleanNotes(notes).filter(n => n.length > NOTE_MAX)
@@ -116,10 +119,14 @@ function headerVersion(text) {
 
 /** text mit version im Kopf: ersetzt die Version im vorhandenen Kopf, sonst kommt der Kopf an den Anfang (bei HTML nach <!DOCTYPE>) */
 function stampText(text, version, html) {
+  text = text.replace(CONST_RE, (all, a, v, b) => a + version + b);
   if (headerVersion(text) !== null) return text.replace(HEADER_RE, 'Pokémon-Sammlung · Version ' + version);
   const m = html && text.match(/^<!DOCTYPE[^>]*>\r?\n/i);
   return m ? m[0] + header(version, true) + text.slice(m[0].length) : header(version, html) + text;
 }
+
+/** Werte der Versions-Konstanten in text */
+const constVersions = text => [...String(text).matchAll(CONST_RE)].map(m => m[2]);
 
 const isHtml = f => /\.html$/.test(f);
 
@@ -127,8 +134,13 @@ const isHtml = f => /\.html$/.test(f);
 function headerDiffs(version, read) {
   read = read || readRepo;
   return HEADER_FILES.map(f => {
-    const v = headerVersion(read(f));
-    return v === version ? null : f + ': ' + (v === null ? 'kein Kopf mit der Version' : 'Version ' + v);
+    const text = read(f), v = headerVersion(text);
+    if (v !== version) return f + ': ' + (v === null ? 'kein Kopf mit der Version' : 'Version ' + v);
+    if (CONST_FILES.indexOf(f) < 0) return null;
+    const c = constVersions(text);
+    if (!c.length) return f + ': keine Versions-Konstante (…_FILE_VERSION)';
+    const bad = c.filter(x => x !== version);
+    return bad.length ? f + ': Versions-Konstante ist ' + bad[0] : null;
   }).filter(Boolean);
 }
 
@@ -365,6 +377,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  FILES, HEADER_FILES, buildEntry, changelogDiffs, changelogSection, check, cleanNotes, cmp, header, headerDiffs, headerVersion,
+  CONST_FILES, FILES, HEADER_FILES, buildEntry, constVersions, changelogDiffs, changelogSection, check, cleanNotes, cmp, header, headerDiffs, headerVersion,
   nextChannel, parseArgs, parseChangelog, releaseNotes, setChangelogDate, stampText, syncChannel
 };

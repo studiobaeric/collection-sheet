@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.1
+ *  Pokémon-Sammlung · Version 1.1.2
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -12,6 +12,9 @@
 /* =========================================================================
  * 0. Gemeinsame Konstanten und Zustände des Imports
  * ========================================================================= */
+
+/** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
+const IMPORT_FILE_VERSION = '1.1.2';
 
 const IMP_SHEETS = {
   imports: 'Importe',
@@ -26,6 +29,47 @@ const IMP_SHEETS = {
 const IMPORTE_HEADERS = ['Nr', 'Datum', 'Quelle', 'Quelle-ID', 'Tab', 'Vorlage', 'Modus', 'Status', 'Neu', 'Mehr',
   'Weniger', 'Übersprungen', 'Prüfliste offen', 'Wertänderung (EUR)', 'Zurückgenommen am', 'Bericht'];
 const TERMS_HEADERS = ['Begriff', 'Bedeutung', 'Wert', 'Wo'];
+/** Vorbelegung des Blatts „Import-Begriffe“ (setupImportSheets_, oder wenn das Blatt fehlt): [Begriff, Bedeutung, Wert, Wo]. */
+const TERMS_SEED = [
+  ['Reverse Holo', 'Variante', 'reverse', 'Name und Spalten'],
+  ['Rev Holo', 'Variante', 'reverse', 'Name und Spalten'],
+  ['Reverse', 'Variante', 'reverse', 'Name und Spalten'],
+  ['RH', 'Variante', 'reverse', 'nur Spalten'],
+  ['Rev', 'Variante', 'reverse', 'nur Spalten'],
+  ['Holo', 'Variante', 'holo', 'nur Spalten'],
+  ['Non Holo', 'Variante', 'normal', 'nur Spalten'],
+  ['Normal', 'Variante', 'normal', 'nur Spalten'],
+  ['1st Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
+  ['1. Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
+  ['Erste Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
+  ['First Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
+  ['Mint', 'Zustand', 'MT', 'Name und Spalten'],
+  ['Near Mint', 'Zustand', 'NM', 'Name und Spalten'],
+  ['Excellent', 'Zustand', 'EX', 'Name und Spalten'],
+  ['Good', 'Zustand', 'GD', 'Name und Spalten'],
+  ['Light Played', 'Zustand', 'LP', 'Name und Spalten'],
+  ['Played', 'Zustand', 'PL', 'Name und Spalten'],
+  ['Poor', 'Zustand', 'PO', 'Name und Spalten'],
+  ['MT', 'Zustand', 'MT', 'nur Spalten'],
+  ['NM', 'Zustand', 'NM', 'nur Spalten'],
+  ['EX', 'Zustand', 'EX', 'nur Spalten'],
+  ['GD', 'Zustand', 'GD', 'nur Spalten'],
+  ['LP', 'Zustand', 'LP', 'nur Spalten'],
+  ['PL', 'Zustand', 'PL', 'nur Spalten'],
+  ['PO', 'Zustand', 'PO', 'nur Spalten'],
+  ['Snowflake', 'Sonderversion', 'Snowflake', 'Name und Spalten'],
+  ['Staff', 'Sonderversion', 'Staff', 'Name und Spalten'],
+  ['Prerelease', 'Sonderversion', 'Prerelease', 'Name und Spalten'],
+  ['Deutsch', 'Sprache', 'DE', 'nur Spalten'],
+  ['Englisch', 'Sprache', 'EN', 'nur Spalten'],
+  ['Japanisch', 'Sprache', 'JP', 'nur Spalten'],
+  ['Japanese', 'Sprache', 'JP', 'nur Spalten'],
+  ['English', 'Sprache', 'EN', 'nur Spalten'],
+  ['German', 'Sprache', 'DE', 'nur Spalten'],
+  ['JP', 'Sprache', 'JP', 'nur Spalten'],
+  ['EN', 'Sprache', 'EN', 'nur Spalten'],
+  ['DE', 'Sprache', 'DE', 'nur Spalten']
+];
 const CMSETS_HEADERS = ['Cardmarket-Name', 'Kürzel', 'tcgdex-Sets', 'Herkunft'];
 const TEMPLATE_HEADERS = ['Name', 'Konfiguration', 'Kopfzeilen', 'Zuletzt benutzt'];
 const REVIEW_HEADERS = ['Quellzeile', 'Quellzeilen', 'Werte', 'Menge', 'Status', 'Grund', 'Kandidaten', 'Entscheidung',
@@ -185,13 +229,19 @@ function reviewWriteAll_(items) {
   sh.getRange(2, 1, items.length, REVIEW_HEADERS.length).setValues(items.map(reviewItemToRow_));
 }
 
-/** Einzelne Zeilen (mit .row aus reviewRead_) zurückschreiben. */
+/** Geänderte Zeilen (mit .row aus reviewRead_) zurückschreiben: zusammenhängende Zeilen in einem Rutsch. Innerhalb der Sperre. */
 function reviewWriteItems_(items) {
+  if (!items.length) return;
   const sh = ss_().getSheetByName(IMP_SHEETS.review);
   if (!sh) return;
-  items.forEach(function (it) {
-    sh.getRange(it.row, 1, 1, REVIEW_HEADERS.length).setValues([reviewItemToRow_(it)]);
-  });
+  const list = items.slice().sort(function (a, b) { return a.row - b.row; });
+  let k = 0;
+  while (k < list.length) {
+    let j = k;
+    while (j + 1 < list.length && list[j + 1].row === list[j].row + 1) j++;
+    sh.getRange(list[k].row, 1, j - k + 1, REVIEW_HEADERS.length).setValues(list.slice(k, j + 1).map(reviewItemToRow_));
+    k = j + 1;
+  }
 }
 
 /**

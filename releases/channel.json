@@ -4,6 +4,24 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.1.2",
+      "tag": "v1.1.2",
+      "date": "2026-10-27",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Hinzufügen: leeres Formular sofort, Karte speichert im Hintergrund",
+        "Zuletzt hinzugefügte Karte steht unter dem Formular",
+        "Antippen zeigt die neue Karte oben in der Sammlung",
+        "Fehler beim Speichern: zwei neue Versuche, dann „Nochmal versuchen“",
+        "Keine doppelten Karten, wenn ein Speichern wiederholt wird",
+        "Warnung, wenn die Script-Dateien nicht dieselbe Version haben",
+        "Fehlt eine Script-Datei, nennt das Tool sie gleich beim Start",
+        "Treffer antippen geht schneller, die Karte ist schon geladen",
+        "Handy-Seite lädt schneller, ohne das Import-Werkzeug"
+      ]
+    },
+    {
       "version": "1.1.1",
       "tag": "v1.1.1",
       "date": "2026-10-25",
