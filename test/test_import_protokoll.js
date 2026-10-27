@@ -86,7 +86,8 @@ function unchecked(fp) {
 // ---------------------------------------------------------------------------
 
 function mkEnv() {
-  const env = H.createEnv({ files: ['Code.gs', '../parts/00_shared.gs', '../parts/30_protokoll.gs'] });
+  // „Quelle“ legt die Import-Blätter an (setupImportSheets_, quSetupImporte_)
+  const env = H.createEnv({ files: ['Code.gs', '../parts/00_shared.gs', '../parts/10_quelle.gs', '../parts/30_protokoll.gs'] });
   env.ctx.setupAll_();
   env.ui.alerts.length = 0;
   return env;

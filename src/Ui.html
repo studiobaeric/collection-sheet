@@ -236,7 +236,7 @@ var LANGS = [
 ];
 var UI_CONFIG = { versions: [], extras: [], viewExtras: [] };
 var state = { lastQuery: null, lastRes: null, current: null, lastEid: null, lastKey: null, groups: [], open: {} };
-var searchGen = 0, collGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
+var searchGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -249,7 +249,7 @@ function call(fn) {
   return new Promise(function (resolve, reject) {
     var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
     if (typeof r[fn] !== 'function') {
-      reject(new Error('Die Funktion „' + fn + '“ fehlt im Skript. Ist die Skriptdatei „Import“ im Apps-Script-Editor angelegt und gespeichert?'));
+      reject(new Error('Die Funktion „' + fn + '“ fehlt im Skript. Unter Updates steht, welche Script-Datei fehlt oder zu alt ist.'));
       return;
     }
     r[fn].apply(r, args);
@@ -1776,18 +1776,18 @@ function updFoot() { $('updVer').textContent = UPD && UPD.installed ? 'Version '
 
 // ---------- Versionen der Script-Dateien (#35) ----------
 // Wer von Hand aktualisiert, fügt fünf Dateien ein. Die .gs-Dateien meldet getFileVersions, die HTML-Dateien diese
-// Seite selbst (UI_FILE_VERSION, impFileVersion aus ImportUi.html). Fehlt getFileVersions, ist Code.gs älter
-// als 1.1.2. Version 'alt': Datei da, aber älter als 1.1.2; null: Datei fehlt.
+// Seite selbst (UI_FILE_VERSION, impFileVersion aus ImportUi.html). Die Handy-Seite hat keinen Import-Teil (#36 A3),
+// dort liest getFileVersions ImportUi.html selbst. Fehlt getFileVersions, ist Code.gs älter als 1.1.2.
+// Version 'alt': Datei da, aber älter als 1.1.2; null: Datei fehlt.
 
 var FILEV = null; // {files: [{name, version}], newest, odd: [Namen]}
 var verBarClosed = false;
 
 /** Versionen der HTML-Dateien. ImportUi.html steht am Ende der Seite, deshalb erst nach dem Laden fragen. */
 function uiFileVersions() {
-  return {
-    'Ui.html': UI_FILE_VERSION,
-    'ImportUi.html': typeof impFileVersion !== 'undefined' ? impFileVersion : (typeof impInit === 'function' ? 'alt' : null)
-  };
+  var v = { 'Ui.html': UI_FILE_VERSION };
+  if (MODE === 'sidebar') v['ImportUi.html'] = typeof impFileVersion !== 'undefined' ? impFileVersion : (typeof impInit === 'function' ? 'alt' : null);
+  return v;
 }
 
 /** wie fileVerCmp_ in Code.gs: 1.1.2 vor 1.1.10, Vorabversion vor der fertigen */
@@ -2064,7 +2064,7 @@ else if (START === 'takeover') updOpenTakeover();
 // Knopf „Importieren“: der Bereich Import steht erst nach diesem Skript im Dokument (include am Ende)
 else if (START === 'import') document.addEventListener('DOMContentLoaded', function () { showTab($('paneImport') ? 'import' : 'add'); });
 </script>
-<?!= include('ImportUi') ?>
+<?!= mode === 'sidebar' ? include('ImportUi') : '' ?>
 <div class="foot"><span id="updVer"></span><button type="button" class="lnk" onclick="showTab('upd')">Updates</button></div>
 </body>
 </html>

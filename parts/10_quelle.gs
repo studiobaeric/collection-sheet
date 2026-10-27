@@ -29,48 +29,6 @@ const QU_EXACT_ONLY = { karte: true, card: true, edition: true };
 /** Synonyme, die nur als ganzes Wort zählen ("Kaufdatum" ist kein Preisdatum). */
 const QU_NO_SUBSTRING = { datum: true };
 
-/** Vorbelegung "Import-Begriffe": [Begriff, Bedeutung, Wert, Wo]. */
-const QU_TERMS_SEED = [
-  ['Reverse Holo', 'Variante', 'reverse', 'Name und Spalten'],
-  ['Rev Holo', 'Variante', 'reverse', 'Name und Spalten'],
-  ['Reverse', 'Variante', 'reverse', 'Name und Spalten'],
-  ['RH', 'Variante', 'reverse', 'nur Spalten'],
-  ['Rev', 'Variante', 'reverse', 'nur Spalten'],
-  ['Holo', 'Variante', 'holo', 'nur Spalten'],
-  ['Non Holo', 'Variante', 'normal', 'nur Spalten'],
-  ['Normal', 'Variante', 'normal', 'nur Spalten'],
-  ['1st Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['1. Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['Erste Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['First Edition', 'Variante', 'firstEdition', 'Name und Spalten'],
-  ['Mint', 'Zustand', 'MT', 'Name und Spalten'],
-  ['Near Mint', 'Zustand', 'NM', 'Name und Spalten'],
-  ['Excellent', 'Zustand', 'EX', 'Name und Spalten'],
-  ['Good', 'Zustand', 'GD', 'Name und Spalten'],
-  ['Light Played', 'Zustand', 'LP', 'Name und Spalten'],
-  ['Played', 'Zustand', 'PL', 'Name und Spalten'],
-  ['Poor', 'Zustand', 'PO', 'Name und Spalten'],
-  ['MT', 'Zustand', 'MT', 'nur Spalten'],
-  ['NM', 'Zustand', 'NM', 'nur Spalten'],
-  ['EX', 'Zustand', 'EX', 'nur Spalten'],
-  ['GD', 'Zustand', 'GD', 'nur Spalten'],
-  ['LP', 'Zustand', 'LP', 'nur Spalten'],
-  ['PL', 'Zustand', 'PL', 'nur Spalten'],
-  ['PO', 'Zustand', 'PO', 'nur Spalten'],
-  ['Snowflake', 'Sonderversion', 'Snowflake', 'Name und Spalten'],
-  ['Staff', 'Sonderversion', 'Staff', 'Name und Spalten'],
-  ['Prerelease', 'Sonderversion', 'Prerelease', 'Name und Spalten'],
-  ['Deutsch', 'Sprache', 'DE', 'nur Spalten'],
-  ['Englisch', 'Sprache', 'EN', 'nur Spalten'],
-  ['Japanisch', 'Sprache', 'JP', 'nur Spalten'],
-  ['Japanese', 'Sprache', 'JP', 'nur Spalten'],
-  ['English', 'Sprache', 'EN', 'nur Spalten'],
-  ['German', 'Sprache', 'DE', 'nur Spalten'],
-  ['JP', 'Sprache', 'JP', 'nur Spalten'],
-  ['EN', 'Sprache', 'EN', 'nur Spalten'],
-  ['DE', 'Sprache', 'DE', 'nur Spalten']
-];
-
 const QU_TERM_MEANINGS = ['Variante', 'Zustand', 'Sonderversion', 'Sprache', 'Ignorieren'];
 const QU_TERM_SCOPES = ['Name und Spalten', 'nur Spalten'];
 const QU_SAMPLE_ROWS = 25;
@@ -170,7 +128,7 @@ function quSetupTerms_(ss) {
   const hasTerms = last >= 2 && sh.getRange(2, 1, last - 1, 1).getValues().some(function (r) { return String(r[0]).trim() !== ''; });
   if (!hasTerms) {
     if (last >= 2) sh.getRange(2, 1, last - 1, TERMS_HEADERS.length).clearContent();
-    const rows = QU_TERMS_SEED.map(function (r) { return r.slice(); });
+    const rows = TERMS_SEED.map(function (r) { return r.slice(); });
     if (sh.getMaxRows() < rows.length + 1) sh.insertRowsAfter(sh.getMaxRows(), rows.length + 1 - sh.getMaxRows());
     const range = sh.getRange(2, 1, rows.length, TERMS_HEADERS.length);
     range.setNumberFormat('@');
@@ -276,9 +234,7 @@ function importState() {
   let draft = null;
   try { draft = quDraftForUi_(importDraft_()); } catch (e) { draft = null; }
   let imports = [];
-  if (typeof importList === 'function') {
-    try { imports = importList() || []; } catch (e) { imports = []; }
-  }
+  try { imports = importList() || []; } catch (e) { imports = []; }
   let busy = null;
   try {
     const run = importRunState_();

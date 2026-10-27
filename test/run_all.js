@@ -1,6 +1,5 @@
 'use strict';
-// Startet alle Test-Suiten nacheinander (Aufruf: npm test). Die Skripte unter test/review/ sind
-// Nachstellungen aus Code-Reviews und laufen nicht mit, einige sind absichtlich rot (siehe docs/FIXLOG.md).
+// Startet alle Test-Suiten nacheinander (Aufruf: npm test). Läuft auch auf GitHub (.github/workflows/test.yml).
 const { spawnSync } = require('child_process');
 const path = require('path');
 

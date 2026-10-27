@@ -308,10 +308,8 @@ function updTakeoverHeads_() {
   const m = {};
   m[SHEETS.hist] = HIST_HEADERS; m[SHEETS.cardHist] = CARD_HIST_HEADERS; m[SHEETS.proto] = PROTO_HEADERS; m[SHEETS.rarity] = RARITY_HEADERS;
   m[SHEETS.dexIds] = DEX_IDS_HEADERS; m[SHEETS.sets] = SET_HEADERS; m[SHEETS.tr] = TR_HEADERS;
-  if (typeof IMPORTE_HEADERS !== 'undefined') {
-    m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
-    m['Import-Vorlagen'] = TEMPLATE_HEADERS; m['Import-Antworten'] = ANSWER_HEADERS;
-  }
+  m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
+  m['Import-Vorlagen'] = TEMPLATE_HEADERS; m['Import-Antworten'] = ANSWER_HEADERS;
   return m;
 }
 

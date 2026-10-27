@@ -8,7 +8,7 @@ const { JSDOM, VirtualConsole } = require('jsdom');
 const SRC = path.join(__dirname, '..', 'src', 'Ui.html');
 const RAW = fs.readFileSync(SRC, 'utf8');
 const MODE_LET = "<?!= mode ?>";
-const INCLUDE_LET = "<?!= include('ImportUi') ?>";
+const INCLUDE_LET = "<?!= mode === 'sidebar' ? include('ImportUi') : '' ?>";
 const START_LET = '<?!= typeof start === "string" ? start : "" ?>';
 
 let pass = 0, failCount = 0;
@@ -231,10 +231,13 @@ function makeServer() {
     collectionEmpty: false, takenFrom: '', pendingTake: ''
   };
   S.getUpdateInfo = () => S.updInfo;
-  // wie getFileVersions in Code.gs: die .gs-Dateien vom Server, die HTML-Dateien von der Seite
+  // wie getFileVersions in Code.gs: die .gs-Dateien vom Server, die HTML-Dateien von der Seite (ImportUi.html liest der
+  // Server selbst, wenn die Seite sie nicht meldet: Handy-Seite ohne Import-Teil)
   S.gsVersions = { 'Code.gs': UI_VERSION, 'Update.gs': UI_VERSION, 'Import.gs': UI_VERSION };
+  S.importUiVersion = UI_VERSION;
   S.getFileVersions = ui => ({ files: Object.keys(S.gsVersions).map(n => ({ name: n, version: S.gsVersions[n] }))
-    .concat(Object.keys(ui || {}).map(n => ({ name: n, version: ui[n] }))) });
+    .concat(Object.keys(ui || {}).map(n => ({ name: n, version: ui[n] })))
+    .concat(ui && 'ImportUi.html' in ui ? [] : [{ name: 'ImportUi.html', version: S.importUiVersion }]) });
   S.setPrereleases = on => Object.assign(S.updInfo, { prereleases: !!on });
   S.updateCopy = () => ({ state: 'copied', version: '1.1.0', url: 'https://docs.google.com/spreadsheets/d/NEUNEU/edit', name: 'Pokémon-Sammlung (neu, Version 1.1.0)',
     message: 'Die neue Tabelle mit Version 1.1.0 liegt im selben Ordner wie diese.' });
@@ -269,7 +272,9 @@ const UI_VERSION = /var UI_FILE_VERSION = '([^']*)'/.exec(RAW)[1];
 const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-PANE</div><script>var impFileVersion = \'' + UI_VERSION + '\'; var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
 function render(mode, include, start) {
-  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(INCLUDE_LET, include == null ? IMPORT_STUB : include);
+  // wie HtmlService: den Import-Teil gibt es nur in der Seitenleiste (#36 A3)
+  const imp = mode === 'sidebar' ? (include == null ? IMPORT_STUB : include) : '';
+  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(INCLUDE_LET, imp);
 }
 
 function boot(mode, opts) {
@@ -356,7 +361,7 @@ function boot(mode, opts) {
     ok('genau drei Scriptlets in Ui.html', idxs.length === 3, idxs);
     ok('Scriptlet 1 ist MODE', RAW.substr(idxs[0], MODE_LET.length) === MODE_LET && /var MODE = '<\?!= mode \?>';/.test(RAW));
     ok('Scriptlet 2 ist START (fehlt start, bleibt es leer)', RAW.substr(idxs[1], START_LET.length) === START_LET && RAW.indexOf("var START = '" + START_LET + "';") >= 0);
-    ok('Scriptlet 3 ist include(ImportUi)', RAW.substr(idxs[2], INCLUDE_LET.length) === INCLUDE_LET);
+    ok('Scriptlet 3 ist include(ImportUi), nur in der Seitenleiste', RAW.substr(idxs[2], INCLUDE_LET.length) === INCLUDE_LET);
     const incAt = RAW.indexOf(INCLUDE_LET);
     ok('include steht nach dem Skript am Ende von body', incAt > RAW.lastIndexOf('</script>') && incAt < RAW.indexOf('</body>'));
     ok('kein Gedankenstrich (—) in Ui.html', RAW.indexOf('—') < 0);
@@ -411,7 +416,7 @@ function boot(mode, opts) {
     ok('start=import ohne ImportUi: Hinzufügen', !E2.$('paneAdd').classList.contains('hidden') && E2.$('tabAdd').classList.contains('active') && E2.errors.length === 0, E2.errors);
     const E3 = boot('web', { start: 'import' });
     await E3.startup();
-    ok('start=import in der Web-App: Hinzufügen', !E3.$('paneAdd').classList.contains('hidden') && E3.$('paneImport').classList.contains('hidden') && E3.errors.length === 0, E3.errors);
+    ok('start=import in der Web-App: Hinzufügen', !E3.$('paneAdd').classList.contains('hidden') && !E3.$('paneImport') && E3.errors.length === 0, E3.errors);
   }
 
   // ---- getUiConfig schlägt fehl: eingebaute Liste bleibt ----
@@ -428,8 +433,9 @@ function boot(mode, opts) {
     const { $ } = E;
     await E.startup();
     ok('Web: Import-Tab versteckt', $('tabImport').classList.contains('hidden'));
+    ok('Web: ohne Import-Teil (#36 A3)', !$('paneImport') && typeof E.win.impInit === 'undefined' && typeof E.win.impFileVersion === 'undefined');
     E.win.showTab('import');
-    ok('Web: showTab(import) bleibt bei Hinzufügen, kein impInit', E.win.impInitCalls === 0 && !$('paneAdd').classList.contains('hidden') && $('paneImport').classList.contains('hidden'));
+    ok('Web: showTab(import) bleibt bei Hinzufügen', !$('paneAdd').classList.contains('hidden') && E.errors.length === 0, E.errors);
     await E.openColl();
     const i = E.gi('Glurak');
     E.expand(i);
@@ -577,10 +583,16 @@ function boot(mode, opts) {
     // Handy-Seite, Code.gs älter als die anderen
     E = boot('web', { server: S => { S.gsVersions['Code.gs'] = '1.1.1'; } });
     await start3(E);
+    ok('Handy-Seite meldet nur Ui.html (ohne Import-Teil)', J(E.calls('getFileVersions')[0].args) === J([{ 'Ui.html': UI_VERSION }]), E.calls('getFileVersions').map(c => c.args));
     await E.respond('getFileVersions');
     ok('Handy-Seite: Code.gs 1.1.1 in der Leiste', /Code\.gs 1\.1\.1, die anderen /.test(E.$('verBar').textContent), E.$('verBar').textContent);
     E.win.showTab('upd');
     ok('Handy-Seite: Anleitung mit neu bereitstellen', /Web-App neu bereitstellen/.test(E.$('updFiles').textContent), E.$('updFiles').textContent);
+    ok('Handy-Seite: alle fünf Dateien unter Updates', /Code\.gs 1\.1\.1 · Update\.gs [\d.]+ · Import\.gs [\d.]+ · Ui\.html [\d.]+ · ImportUi\.html [\d.]+/.test(E.$('updFiles').textContent), E.$('updFiles').textContent);
+    E = boot('web', { server: S => { S.importUiVersion = 'alt'; } });
+    await start3(E);
+    await E.respond('getFileVersions');
+    ok('Handy-Seite: ImportUi.html alt (liest der Server)', /ImportUi\.html älter als 1\.1\.2/.test(E.$('verBar').textContent), E.$('verBar').textContent);
 
     // Code.gs von vor 1.1.2: getFileVersions fehlt
     E = boot('sidebar', { missing: ['getFileVersions'] });

@@ -10,9 +10,9 @@ const ok = t.ok, eq = t.eq;
 const TODAY = H.formatDate(new Date(), '', 'yyyy-MM-dd');
 const TODAY_DMY = H.formatDate(new Date(), '', 'dd.MM.yyyy');
 
-/** Frische Umgebung nur mit Code.gs (Import.gs baut ein anderer Agent). */
+/** Frische Umgebung mit allen .gs-Dateien (ohne Import.gs oder Update.gs läuft das Tool nicht, #36 B2). */
 function fresh(opts) {
-  return H.createEnv(Object.assign({ files: ['Code.gs'] }, opts || {}));
+  return H.createEnv(opts || {});
 }
 
 function setup(opts) {
@@ -44,7 +44,7 @@ function addImportRow(env, card, opts) {
 function eidOfRow(row, env) { return row[env.run('COL.eid')]; }
 
 function importeSheet(env, rows) {
-  const sh = env.ss.insertSheet('Importe');
+  const sh = env.ss.getSheetByName('Importe') || env.ss.insertSheet('Importe');
   const head = ['Nr', 'Datum', 'Quelle', 'Quelle-ID', 'Tab', 'Vorlage', 'Modus', 'Status', 'Neu', 'Mehr', 'Weniger',
     'Übersprungen', 'Prüfliste offen', 'Wertänderung (EUR)', 'Zurückgenommen am', 'Bericht'];
   sh.getRange(1, 1, 1, head.length).setValues([head]);

@@ -761,7 +761,9 @@ t.section('17. Checkliste (abhaken, später abwählen) und Raster (Ordnerseiten)
   const ec = e.ctx;
   ec.setupAll_();
   e.uiCall('importSetsVorbelegen');
-  t.eq('beide Begriffs-Vorbelegungen gleich', JSON.stringify(e.run('ER_TERM_SEED')), JSON.stringify(e.run('QU_TERMS_SEED')));
+  // eine Vorbelegung für das Blatt und für den Fall ohne Blatt (#36 C1)
+  t.eq('Blatt Import-Begriffe = TERMS_SEED = Vorbelegung ohne Blatt', [JSON.stringify(e.sheet('Import-Begriffe').getDataRange().getValues().slice(1)), JSON.stringify(ec.erDefaultTermRows_())],
+    [JSON.stringify(e.run('TERMS_SEED')), JSON.stringify(e.run('TERMS_SEED'))]);
   const HG = 'HeartGold & SoulSilver';
   const list = (marks) => [['Nr', 'Name', 'Set', 'Vorhanden']].concat([['5', 'Gengar'], ['59', 'Endivie'], ['61', 'Feurigel'], ['78', 'Pikachu'], ['81', 'Karnimani']]
     .map((r, i) => [r[0], r[1], HG, marks[i]]));

@@ -466,7 +466,7 @@ t.section('Eigenes Blatt „Dashboard“ aus der Zeit vor 1.1.0');
 // ---------------------------------------------------------------------------
 t.section('Code ohne Update.gs');
 {
-  const env = H.createEnv({ files: ['Code.gs'] });
+  const env = H.createEnv({ files: ['Code.gs', 'Import.gs'] });
   env.ctx.setupAll_();
   ok('Dashboard auch ohne Update.gs, ohne Hinweis auf Versionen', buttons(env).length === 11 && cell(env, 'O2') === 'Version ' + env.run('TOOL_VERSION'));
 }

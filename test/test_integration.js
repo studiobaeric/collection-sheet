@@ -10,8 +10,7 @@
  * - Nach jedem Schritt: Blätter Daten, Gruppen, Import-Protokoll prüfen und die Liste im UI
  *   mit einer frischen getCollection-Antwort vergleichen (auch die Such- und Sortierwerte k).
  *
- * Aufruf: node test_integration.js   (IMPORT=1 lädt zusätzlich src/Import.gs, falls vorhanden;
- *   IMPORTUI=1 bindet das echte src/ImportUi.html statt des Platzhalters ein)
+ * Aufruf: node test_integration.js   (IMPORTUI=1 bindet das echte src/ImportUi.html statt des Platzhalters ein)
  */
 const fs = require('fs');
 const path = require('path');
@@ -23,8 +22,7 @@ const t = H.runner('test_integration');
 const J = x => JSON.stringify(x);
 const noRid = o => { const c = Object.assign({}, o); delete c.rid; return c; };
 const SRC = path.join(__dirname, '..', 'src');
-const FILES = ['Code.gs'].concat(process.env.IMPORT && fs.existsSync(path.join(SRC, 'Import.gs')) ? ['Import.gs'] : [])
-  .concat(fs.existsSync(path.join(SRC, 'Update.gs')) ? ['Update.gs'] : []);
+const FILES = ['Code.gs', 'Import.gs', 'Update.gs']; // ohne Import.gs oder Update.gs läuft das Tool nicht (#36 B2)
 const REAL_IMPORTUI = !!process.env.IMPORTUI;
 const TODAY = H.formatDate(new Date(), '', 'yyyy-MM-dd');
 const TODAY_DMY = H.formatDate(new Date(), '', 'dd.MM.yyyy');
@@ -95,7 +93,8 @@ function boot(env, mode) {
   const ev = evaluateTemplate(env, tpl, includeImpl);
   t.ok(mode + ': genau drei Scriptlets ausgewertet (mode, start, include)', ev.scriptlets.length === 3, ev.scriptlets);
   t.ok(mode + ': START ist leer', /var START = '';/.test(ev.html));
-  t.ok(mode + ': include(ImportUi) aufgerufen', J(includeCalls) === J(['ImportUi']), includeCalls);
+  // die Handy-Seite hat keinen Import-Teil (#36 A3)
+  t.ok(mode + ': include(ImportUi) ' + (mode === 'sidebar' ? 'aufgerufen' : 'nicht aufgerufen'), J(includeCalls) === J(mode === 'sidebar' ? ['ImportUi'] : []), includeCalls);
   t.ok(mode + ': kein "<?" mehr im fertigen HTML', ev.html.indexOf('<?') < 0);
 
   const pending = [];
@@ -320,11 +319,12 @@ function seedImport(env) {
     t.ok('Code.gs kompiliert', !err, err);
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
     ['sidebar', 'web'].forEach(mode => {
-      const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '').replace(/<\?!=\s*include\('ImportUi'\)\s*\?>/g, IMPORT_STUB);
+      const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '')
+        .replace(/<\?!= mode === 'sidebar' \? include\('ImportUi'\) : '' \?>/g, mode === 'sidebar' ? IMPORT_STUB : '');
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
       let bad = [];
       scripts.forEach((s, i) => { try { new vm.Script(s, { filename: 'Ui.html#' + i }); } catch (e) { bad.push(i + ': ' + e.message); } });
-      t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= 2 && bad.length === 0, bad);
+      t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= (mode === 'sidebar' ? 2 : 1) && bad.length === 0, bad);
     });
     t.ok('Ui.html: "<?" nur in den drei Scriptlets', (raw.match(/<\?/g) || []).length === 3);
     t.ok('Ui.html: kein Gedankenstrich (—)', raw.indexOf('—') < 0);
@@ -868,7 +868,8 @@ function seedImport(env) {
   await W.settle();
   t.ok('Web: Import-Tab versteckt', W.$('tabImport').classList.contains('hidden'));
   W.win.showTab('import');
-  t.ok('Web: showTab(import) bleibt bei Hinzufügen', W.win.impInitCalls === 0 && !W.$('paneAdd').classList.contains('hidden'));
+  t.ok('Web: ohne Import-Teil (#36 A3)', !W.$('paneImport') && typeof W.win.impInit === 'undefined');
+  t.ok('Web: showTab(import) bleibt bei Hinzufügen', !W.$('paneAdd').classList.contains('hidden') && W.errors.length === 0, W.errors);
   await W.clickSettle(W.$('tabColl'));
   const wi = W.gIdx(GK);
   t.ok('Web: Sammlung lädt dieselben Gruppen', W.win.state.groups.length === E.win.state.groups.length && wi >= 0);

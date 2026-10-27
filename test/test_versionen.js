@@ -55,7 +55,28 @@ t.section('Eine HTML-Datei alt oder fehlend');
   rep = env.ctx.getFileVersions({ 'Ui.html': '9.0.0', 'ImportUi.html': '9.0.0' });
   eq('Seite neuer als der Code: die .gs-Dateien fallen auf', [rep.newest, rep.odd], ['9.0.0', ['Code.gs', 'Update.gs', 'Import.gs']]);
   rep = env.ctx.getFileVersions(null);
-  ok('ohne Angaben der Seite: HTML-Dateien fehlen', rep.odd.join() === 'Ui.html,ImportUi.html');
+  ok('ohne Angaben der Seite: Ui.html fehlt, ImportUi.html liest der Server', rep.odd.join() === 'Ui.html' && rep.files[4].version === V, rep);
+}
+
+t.section('Handy-Seite ohne Import-Teil (#36 A3)');
+{
+  const env = setup();
+  let rep = env.ctx.getFileVersions({ 'Ui.html': V });
+  ok('ImportUi.html liest der Server aus der Datei', rep.files[4].name === 'ImportUi.html' && rep.files[4].version === V && rep.odd.length === 0, rep);
+  // Datei von vor 1.1.2 (ohne impFileVersion), mit anderer Version, fehlt
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pkm-ver-'));
+  ['Code.gs', 'Import.gs', 'Update.gs', 'Ui.html'].forEach(f => fs.copyFileSync(path.join(SRC, f), path.join(dir, f)));
+  const imp = fs.readFileSync(path.join(SRC, 'ImportUi.html'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'ImportUi.html'), imp.replace(/^var impFileVersion = .*$/m, ''));
+  let e2 = setup({ srcDir: dir });
+  eq('ohne Konstante: alt', e2.ctx.getFileVersions({ 'Ui.html': V }).files[4].version, 'alt');
+  fs.writeFileSync(path.join(dir, 'ImportUi.html'), imp.replace(/^var impFileVersion = '[^']*'/m, "var impFileVersion = '1.1.1'"));
+  rep = e2.ctx.getFileVersions({ 'Ui.html': V });
+  eq('ältere Version: auffällig', [rep.files[4].version, rep.odd], ['1.1.1', ['ImportUi.html']]);
+  fs.unlinkSync(path.join(dir, 'ImportUi.html'));
+  eq('fehlt: null', e2.ctx.getFileVersions({ 'Ui.html': V }).files[4].version, null);
+  fs.rmSync(dir, { recursive: true, force: true });
+  eq('Seitenleiste meldet ImportUi.html selbst', env.ctx.getFileVersions({ 'Ui.html': V, 'ImportUi.html': '1.1.1' }).files[4].version, '1.1.1');
 }
 
 t.section('.gs-Dateien alt oder fehlend');
@@ -72,12 +93,24 @@ t.section('.gs-Dateien alt oder fehlend');
   ok('beim Öffnen: Meldung mit der alten Datei', /Update\.gs älter als 1\.1\.2/.test(msg) && /Code\.gs /.test(msg) && /Erweiterungen > Apps Script/.test(msg), env.ss.toasts);
   ok('Meldung bleibt 30 Sekunden', env.ss.toastLog.some(x => /passen nicht/.test(x.msg) && x.timeout === 30));
   fs.rmSync(dir, { recursive: true, force: true });
-  // Import.gs fehlt
-  env = setup({ files: ['Code.gs', 'Update.gs'] });
+  // Import.gs fehlt: ohne sie lässt sich nichts einrichten, Seitenleiste und Handy-Seite sagen nur das (#36 B2)
+  env = H.createEnv({ files: ['Code.gs', 'Update.gs'] });
   eq('Import.gs fehlt', env.ctx.gsFileVersions_()['Import.gs'], null);
   env.ss.toasts.length = 0;
   env.ctx.onOpen();
   ok('beim Öffnen: Import.gs fehlt', env.ss.toasts.some(m => /Import\.gs fehlt/.test(m)), env.ss.toasts);
+  env.ctx.kartenErfassen();
+  ok('Karten erfassen: nur der Hinweis, keine Seitenleiste', env.ui.sidebars.length === 0 &&
+    env.ui.alerts.some(a => a === 'Die Script-Datei Import.gs fehlt. Bitte am Computer unter Erweiterungen > Apps Script alle Dateien aus Version ' + V + ' einfügen und speichern.'), env.ui.alerts);
+  ok('nichts eingerichtet', !env.ss.getSheetByName('Daten'));
+  const page = env.ctx.doGet();
+  ok('Handy-Seite: nur der Hinweis', /Die Script-Datei Import\.gs fehlt\./.test(page.getContent()) && !page.template && page.title === 'Pokémon-Sammlung', page.getContent());
+  env = H.createEnv({ files: ['Code.gs'] });
+  env.ctx.kartenErfassen();
+  ok('beide fehlen: ein Hinweis für beide', env.ui.alerts.some(a => /^Die Script-Dateien Update\.gs und Import\.gs fehlen\. /.test(a)), env.ui.alerts);
+  // alle da: kein Hinweis
+  env = setup();
+  eq('alle da: kein Hinweis', env.ctx.missingFilesText_(), '');
 }
 
 t.section('Vergleich der Versionen');

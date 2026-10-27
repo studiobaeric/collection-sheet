@@ -2,8 +2,8 @@
 // Regressionstests für die Korrekturen aus dem Review (DATA-*, RECOG-*, GAS-*, MIGR-*).
 // Nur erfundene Testdaten, alles über harness2 (keine echten Google- oder tcgdex-Aufrufe).
 const H = require('./harness2');
-const C = require('./review/common');
-const W = require('./review/recog_world');
+const C = require('./review_common');
+const W = require('./review_world');
 
 const t = H.runner('review-fixes');
 
@@ -638,7 +638,7 @@ safe(() => {
 /* ---------- RECOG-2: Name der Zeile muss zu Set + Nummer bzw. Link passen ---------- */
 t.section('RECOG-2 Namensprüfung bei Set + Nummer und Link');
 safe(() => {
-  // wie review/recog_series_settext.js: Quapsel hgss1-82, Kramurx ex12-62 (Set ohne deutsche Daten)
+  // Quapsel hgss1-82, Kramurx ex12-62 (Set ohne deutsche Daten)
   const env = W.newEnv({
     extraCards: [
       ['hgss1-82', 'Quapsel', 'Poliwag', { normal: true, reverse: true }, { trend: 0.1, holo: 0.3 }],

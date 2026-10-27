@@ -1,0 +1,42 @@
+# Test-Lauf (#36 D4): bei jedem Push auf einen Versions-Branch oder main und bei jedem PR nach main.
+# Prüft, dass alle Test-Suiten grün sind (npm test), dass src/Import.gs zu parts/*.gs passt (build_import.sh) und dass
+# Kanal, CHANGELOG.md und die Köpfe der Dateien zur Version passen (tools/release.js --check).
+name: Tests
+
+on:
+  push:
+    branches: ['version/**', 'main']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Abhängigkeiten
+        run: npm ci
+      - name: Import.gs aus parts/ bauen (muss unverändert bleiben)
+        run: |
+          sh build_import.sh
+          git diff --exit-code -- src/Import.gs || {
+            echo "::error file=src/Import.gs::src/Import.gs passt nicht zu parts/*.gs. Bitte sh build_import.sh ausführen und src/Import.gs mit einchecken."
+            exit 1
+          }
+      - name: Alle Test-Suiten
+        run: npm test
+      - name: Kanal, CHANGELOG.md und Dateiköpfe
+        run: node tools/release.js --check

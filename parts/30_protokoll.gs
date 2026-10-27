@@ -128,13 +128,7 @@ function prImportsSheet_() {
 function prEnsureImportsSheet_() {
   const ss = ss_();
   let sh = ss.getSheetByName(IMP_SHEETS.imports);
-  if (!sh || sh.getLastRow() < 1 || String(sh.getRange(1, 1).getValue()).trim() !== IMPORTE_HEADERS[0]) {
-    if (typeof quSetupImporte_ === 'function') sh = quSetupImporte_(ss);
-    else {
-      sh = getOrCreateSheet_(ss, IMP_SHEETS.imports);
-      writeHeaders_(sh, IMPORTE_HEADERS);
-    }
-  }
+  if (!sh || sh.getLastRow() < 1 || String(sh.getRange(1, 1).getValue()).trim() !== IMPORTE_HEADERS[0]) sh = quSetupImporte_(ss);
   return sh;
 }
 

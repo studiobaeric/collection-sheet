@@ -1,5 +1,5 @@
 const H = require('./harness2');
-const env = H.createEnv({ files: ['Code.gs', '../parts/00_shared.gs'] });
+const env = H.createEnv({ files: ['Code.gs', 'Import.gs'] });
 const c = env.ctx;
 c.setupAll_();
 c.answersUpsert_('SRC1', [{fp: 'aaa', decision: {type: 'karte', id: 'x1', lang: 'de'}, card: {id: 'x1'}}, {fp: 'bbb', decision: {type: 'skip'}}]);

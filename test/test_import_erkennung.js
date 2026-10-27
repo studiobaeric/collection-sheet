@@ -184,6 +184,9 @@ function makeEnv(opts) {
   if (typeof c.coverageFor_ !== 'function') {
     c.coverageFor_ = function (sourceId) { env.coverageCalls++; return env.coverage[sourceId] || {}; };
   }
+  // Attrappen aus Teil „Quelle“, nur wenn er fehlt: Import-Blätter (Import-Begriffe kommt unten), Normalform der Zuordnung
+  if (typeof c.setupImportSheets_ !== 'function') c.setupImportSheets_ = function () {};
+  if (typeof c.quNormCfg_ !== 'function') c.quNormCfg_ = function (cfg) { return cfg; };
   // Abrufe innerhalb der Sperre zählen
   env.fetchInLock = [];
   const fa = c.UrlFetchApp.fetchAll, f1 = c.UrlFetchApp.fetch;

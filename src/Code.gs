@@ -1354,7 +1354,7 @@ function takenOverPage_(web) {
   let more = '';
   if (web) {
     let app = '', closed = false;
-    try { app = typeof updReadSettings_ === 'function' ? updReadSettings_(SpreadsheetApp.openByUrl(url)).map.WEBAPP_URL || '' : ''; } catch (e) { closed = true; }
+    try { app = updReadSettings_(SpreadsheetApp.openByUrl(url)).map.WEBAPP_URL || ''; } catch (e) { closed = true; }
     more = /^https:\/\/script\.google\.com\//.test(app)
       ? '<br><br><a target="_top" href="' + htmlEsc_(app) + '">Zur neuen Handy-Seite</a> (bitte als Lesezeichen speichern)'
       : closed
@@ -1393,7 +1393,7 @@ function upgradeIfNeeded_(onlyUpgrade) {
 
 /** Läuft in der Tabelle schon neuerer Code als dieser (z. B. eine Web-App, die noch nicht neu bereitgestellt ist)? */
 function codeIsNewer_(version) {
-  return !!version && typeof updCompare_ === 'function' && updCompare_(version, TOOL_VERSION) > 0;
+  return !!version && updCompare_(version, TOOL_VERSION) > 0;
 }
 
 /**
@@ -1418,8 +1418,8 @@ function toolSheetNames_() {
   const out = [];
   const add = function (n) { if (n && out.indexOf(n) < 0) out.push(n); };
   Object.keys(SHEETS).forEach(function (k) { if (k !== 'takenOver') add(SHEETS[k]); });
-  if (typeof IMP_SHEETS !== 'undefined') Object.keys(IMP_SHEETS).forEach(function (k) { add(IMP_SHEETS[k]); });
-  ['Import-Begriffe', 'Import-Sets', 'Import-Vorlagen', 'Import-Antworten', 'Diagnose'].forEach(add);
+  Object.keys(IMP_SHEETS).forEach(function (k) { add(IMP_SHEETS[k]); });
+  add('Diagnose');
   return out;
 }
 
@@ -1456,6 +1456,8 @@ function onOpen() {
 /** Seitenleiste (mit Import-Tab). Ui.html ist eine Vorlage: `mode` steuert, was sie zeigt, `start` den ersten Tab. */
 function kartenErfassen(start) {
   const ui = SpreadsheetApp.getUi();
+  const gone = missingFilesText_();
+  if (gone) { alert_(gone); return; }
   if (takenOverBy_()) { ui.showSidebar(takenOverPage_()); return; }
   if (isFreshCopy_()) {
     // frische Kopie der Vorlage: einmal alles einrichten, auch die Auslöser
@@ -1472,7 +1474,7 @@ function kartenErfassen(start) {
   t.mode = 'sidebar';
   t.start = ['upd', 'takeover', 'import'].indexOf(start) >= 0 ? start : ''; // Menü und Knöpfe rufen ohne Argument auf
   // von „Neue Version holen“ angelegt und noch leer (oder eine Übernahme brach ab): gleich die Übernahme zeigen
-  if ((!t.start || t.start === 'import') && typeof updPendingTake_ === 'function') {
+  if (!t.start || t.start === 'import') {
     try { if (updPendingTake_()) t.start = 'takeover'; } catch (e) { /* normaler Start */ }
   }
   ui.showSidebar(t.evaluate().setTitle('Pokémon-Karten'));
@@ -1494,6 +1496,8 @@ function importAnzeigen() {
 }
 
 function doGet() {
+  const gone = missingFilesText_();
+  if (gone) return infoPage_(gone);
   if (takenOverBy_()) return takenOverPage_(true).addMetaTag('viewport', 'width=device-width, initial-scale=1');
   // Einrichten (mit Auslösern) nur über die Seitenleiste, sonst fehlt der nächtliche Preislauf
   if (isFreshCopy_()) return newSheetPage_();
@@ -1508,9 +1512,13 @@ function doGet() {
 }
 
 function newSheetPage_() {
+  return infoPage_('Diese Tabelle ist neu. Bitte öffne sie einmal am Computer und klicke auf Pokémon > Karten erfassen. Danach funktioniert die Handy-Seite.');
+}
+
+/** Handy-Seite mit nur einem Hinweis (Text, wird escaped) */
+function infoPage_(text) {
   return HtmlService.createHtmlOutput('<div style="font-family:Roboto,Arial,sans-serif;font-size:15px;padding:16px;line-height:1.5">' +
-    'Diese Tabelle ist neu. Bitte öffne sie einmal am Computer und klicke auf Pokémon &gt; Karten erfassen. Danach funktioniert die Handy-Seite.</div>')
-    .setTitle('Pokémon-Sammlung').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    htmlEsc_(text) + '</div>').setTitle('Pokémon-Sammlung').addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 // Versionen der Script-Dateien (#35): Wer von Hand aktualisiert, fügt fünf Dateien ein. Bleibt eine alt oder fehlt sie,
@@ -1526,6 +1534,18 @@ function gsFileVersions_() {
     'Update.gs': typeof UPDATE_FILE_VERSION !== 'undefined' ? UPDATE_FILE_VERSION : (typeof getUpdateInfo === 'function' ? 'alt' : null),
     'Import.gs': typeof IMPORT_FILE_VERSION !== 'undefined' ? IMPORT_FILE_VERSION : (typeof importState === 'function' ? 'alt' : null)
   };
+}
+
+/**
+ * Fehlt eine .gs-Datei ganz, läuft das Tool nicht: Statt vieler Abfragen „gibt es Import.gs?“ im Code prüfen Seitenleiste
+ * und Handy-Seite das einmal beim Start (#36 B2). -> Hinweis für den Nutzer oder ''
+ */
+function missingFilesText_() {
+  const gs = gsFileVersions_();
+  const gone = Object.keys(gs).filter(function (n) { return gs[n] === null; });
+  if (!gone.length) return '';
+  return (gone.length === 1 ? 'Die Script-Datei ' + gone[0] + ' fehlt.' : 'Die Script-Dateien ' + gone.join(' und ') + ' fehlen.') +
+    ' Bitte am Computer unter Erweiterungen > Apps Script alle Dateien aus Version ' + TOOL_VERSION + ' einfügen und speichern.';
 }
 
 /** Versionsangabe aus der Seite: Versionsnummer, 'alt' oder null */
@@ -1546,17 +1566,29 @@ function fileVerCmp_(a, b) {
 }
 
 /**
- * Alle Dateien mit Version; ui: Versionen der HTML-Dateien aus der Seite (ohne ui nur die .gs-Dateien).
+ * Alle Dateien mit Version; ui: Versionen der HTML-Dateien aus der Seite (ohne ui nur die .gs-Dateien). Fehlt
+ * ImportUi.html in ui (die Handy-Seite hat den Import-Teil nicht, #36 A3), liest der Server die Datei selbst.
  * -> {files: [{name, version}], newest, odd: [Namen, die nicht die neueste Version haben oder fehlen]}
  */
 function fileVersionReport_(ui) {
   const gs = gsFileVersions_();
   const names = FILE_NAMES.filter(function (n) { return ui || n in gs; });
-  const files = names.map(function (n) { return { name: n, version: n in gs ? gs[n] : fileVersionOf_(ui[n]) }; });
+  const files = names.map(function (n) {
+    const v = n in gs ? gs[n] : n === 'ImportUi.html' && !(n in ui) ? importUiFileVersion_() : fileVersionOf_(ui[n]);
+    return { name: n, version: v };
+  });
   let newest = '';
   files.forEach(function (f) { if (f.version && f.version !== 'alt' && fileVerCmp_(f.version, newest) > 0) newest = f.version; });
   const odd = files.filter(function (f) { return f.version !== newest; }).map(function (f) { return f.name; });
   return { files: files, newest: newest, odd: odd };
+}
+
+/** Version von ImportUi.html aus der Datei selbst: Versionsnummer, 'alt' (ohne impFileVersion) oder null (fehlt) */
+function importUiFileVersion_() {
+  const text = include('ImportUi');
+  if (!text) return null;
+  const m = /\bimpFileVersion\s*=\s*'([^']*)'/.exec(text); // so geschrieben, dass tools/release.js hier nichts stempelt
+  return m ? fileVersionOf_(m[1]) : 'alt';
 }
 
 /** 'Code.gs 1.1.2, Update.gs älter als 1.1.2, Import.gs fehlt' */
@@ -1757,7 +1789,7 @@ function setupSheets_(ss, keepControls, step) {
   setupCardHistSheet_(ss);
   setupRaritySheet_(ss);
   setupPokedexDataSheet_(ss);
-  if (typeof setupImportSheets_ === 'function') setupImportSheets_(ss);
+  setupImportSheets_(ss);
   step('Sammlung aufbauen');
   withLock_(function () { rebuildGroups_(); });
   setupViewSheet_(ss, !!keepControls);
@@ -1798,12 +1830,9 @@ function repairSetup_() {
 /** Blätter, die die Einrichtung immer anlegt und die hier fehlen (API-Check, Pokédex-Nummern, Kartenverlauf und Diagnose entstehen bei Bedarf). */
 function missingToolSheets_() {
   const later = [SHEETS.check, SHEETS.dexIds, SHEETS.settings, SHEETS.cardHist, 'Diagnose'];
-  const noImport = typeof setupImportSheets_ !== 'function';
   const have = {};
   ss_().getSheets().forEach(function (sh) { have[sh.getName()] = true; });
-  return toolSheetNames_().filter(function (n) {
-    return !have[n] && later.indexOf(n) < 0 && !(noImport && /^Import/.test(n));
-  });
+  return toolSheetNames_().filter(function (n) { return !have[n] && later.indexOf(n) < 0; });
 }
 
 /**
@@ -2426,24 +2455,32 @@ function fetchJson_(url, attempts) {
 
 /**
  * Eine Karte von tcgdex, eine halbe Stunde zwischengespeichert (#31): getCardDetail holt sie beim Antippen,
- * addCard gleich danach noch einmal, das spart einen Abruf. 404 -> null (wird nicht gemerkt).
+ * addCard gleich danach noch einmal, das spart einen Abruf. Die Suche legt ihre Treffer schon hinein (#36 A1),
+ * dann kommt das Antippen ganz ohne Abruf aus. 404 -> null (wird nicht gemerkt).
  */
 function fetchCard_(lang, id, attempts) {
-  const key = 'tcg:' + lang + ':' + id;
-  let cache = null;
   try {
-    cache = CacheService.getScriptCache();
-    const hit = cache.get(key);
+    const hit = CacheService.getScriptCache().get(cardCacheKey_(lang, id));
     if (hit) return JSON.parse(hit);
-  } catch (e) { cache = null; }
+  } catch (e) { /* ohne Zwischenspeicher weiter */ }
   const card = fetchJson_(apiUrl_(lang, 'cards/' + encodeURIComponent(id)), attempts);
-  if (card && cache) {
-    try {
-      const text = JSON.stringify(card);
-      if (text.length < 90000) cache.put(key, text, CARD_CACHE_SECS); // Grenze pro Eintrag: 100 KB
-    } catch (e) { /* ohne Zwischenspeicher weiter */ }
-  }
+  if (card) cacheCards_([{ lang: lang, id: id, data: card }]);
   return card;
+}
+
+function cardCacheKey_(lang, id) { return 'tcg:' + lang + ':' + id; }
+
+/** Karten [{lang, id, data}] in einem Aufruf zwischenspeichern; ohne data oder zu groß (Grenze 100 KB) nicht. */
+function cacheCards_(list) {
+  try {
+    const put = {};
+    list.forEach(function (x) {
+      if (!x.data) return;
+      const text = JSON.stringify(x.data);
+      if (text.length < 90000) put[cardCacheKey_(x.lang, x.id)] = text;
+    });
+    if (Object.keys(put).length) CacheService.getScriptCache().putAll(put, CARD_CACHE_SECS);
+  } catch (e) { /* ohne Zwischenspeicher weiter */ }
 }
 
 /** Paralleler GET. Liefert pro URL {ok, data} oder {ok:false, notFound|error}. */
@@ -2530,6 +2567,8 @@ function fillMissingImages_(cards) {
   if (!missing.length) return;
   const res = fetchAllJson_(missing.map(function (c) { return apiUrl_('en', 'cards/' + encodeURIComponent(c.id)); }));
   missing.forEach(function (c, i) { if (res[i].ok && res[i].data.image) c.image = res[i].data.image; });
+  // beim Antippen braucht cardmarketWithFallback_ dieselben englischen Daten
+  cacheCards_(missing.map(function (c, i) { return { lang: 'en', id: c.id, data: res[i].ok ? res[i].data : null }; }));
 }
 
 // ---------------------------------------------------------------------------
@@ -2626,11 +2665,18 @@ function finishCandidates_(lang, cands, notes, inputName, enNote) {
   }
   const details = fetchAllJson_(cands.map(function (c) { return apiUrl_(lang, 'cards/' + encodeURIComponent(c.id)); }));
   const langs = cands.map(function () { return lang; });
+  // Treffer zwischenspeichern: Antippen (getCardDetail) und Hinzufügen brauchen dieselben Daten (#36 A1)
+  const toCache = details.map(function (d, i) { return { lang: lang, id: cands[i].id, data: d.ok ? d.data : null }; });
   if (lang === 'en' && cands.length) {
     // IDs sind in de und en gleich: gibt es die Karte auf Deutsch, ist sie kein Ersatz
     const de = fetchAllJson_(cands.map(function (c) { return apiUrl_('de', 'cards/' + encodeURIComponent(c.id)); }));
-    de.forEach(function (d, i) { if (d.ok) { details[i] = d; langs[i] = 'de'; } });
+    de.forEach(function (d, i) {
+      if (!d.ok) return;
+      details[i] = d; langs[i] = 'de';
+      toCache.push({ lang: 'de', id: cands[i].id, data: d.data });
+    });
   }
+  cacheCards_(toCache);
   const sets = loadSets_();
   const cards = cands.map(function (c, i) {
     if (details[i].ok) return summarizeCard_(details[i].data, langs[i]);
@@ -3661,11 +3707,9 @@ function naechtlicherPreislauf() {
   // Lebenszeichen für triggersMissing_: Dieser Auslöser läuft, auch wenn der Preislauf danach scheitert
   try { settingSet_('NIGHTLY_AT', Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm')); } catch (e) { /* weiter */ }
   startPriceRun_();
-  if (typeof checkForUpdate_ === 'function') {
-    try { checkForUpdate_(); } catch (e) { /* ohne Netz oder GitHub weiter */ }
-    // eine neue Version gleich im Dashboard zeigen (der Preislauf hat es vor der Prüfung geschrieben)
-    try { refreshDashboard_(readData_(sheet_(SHEETS.data))); } catch (e) { /* beim nächsten Neuaufbau */ }
-  }
+  try { checkForUpdate_(); } catch (e) { /* ohne Netz oder GitHub weiter */ }
+  // eine neue Version gleich im Dashboard zeigen (der Preislauf hat es vor der Prüfung geschrieben)
+  try { refreshDashboard_(readData_(sheet_(SHEETS.data))); } catch (e) { /* beim nächsten Neuaufbau */ }
 }
 
 function startPriceRun_() {
@@ -5323,7 +5367,6 @@ function dashEur_(n) {
 
 /** Hinweis auf eine neue Version aus dem Zwischenspeicher der Update-Prüfung (ohne Abruf), sonst ''. */
 function dashUpdateText_() {
-  if (typeof updNewer_ !== 'function' || typeof UPD_CACHE_KEY === 'undefined') return '';
   try {
     const hit = CacheService.getScriptCache().get(UPD_CACHE_KEY);
     if (!hit) return '';
