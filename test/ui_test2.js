@@ -394,6 +394,25 @@ function boot(mode, opts) {
     ok('keine Skriptfehler (Sidebar)', E.errors.length === 0, E.errors);
   }
 
+  // ---- Sammlung beim Start vorladen (#39 V3) ----
+  for (const mode of ['sidebar', 'web']) {
+    const E = boot(mode);
+    const { $ } = E;
+    ok('Start lädt die Sammlung im Hintergrund (' + mode + ')', E.calls('getCollection').length === 1, E.pending.map(p => p.fn));
+    await E.startup();
+    await E.respond('getCollection');
+    ok('Tab Sammlung noch zu, Liste schon da (' + mode + ')', $('paneColl').classList.contains('hidden') && E.win.coll.all.length > 0);
+    if (mode === 'sidebar') E.click($('tabImport'));
+    E.click($('tabColl'));
+    ok('Tab Sammlung ohne Warten, auch nach dem Import-Tab (' + mode + ')', E.calls('getCollection').length === 0 && !E.win.coll.stale &&
+      E.win.state.groups.length > 0 && $('gh0') && !/Lade/.test($('collResults').textContent));
+    ok('keine Skriptfehler (Vorladen ' + mode + ')', E.errors.length === 0, E.errors);
+  }
+  {
+    const E = boot('sidebar', { start: 'takeover' });
+    ok('Übernahme: kein Vorladen', E.calls('getCollection').length === 0, E.pending.map(p => p.fn));
+  }
+
   // ---- Sidebar ohne ImportUi (impInit fehlt) ----
   {
     const E = boot('sidebar', { include: '' });
@@ -526,7 +545,9 @@ function boot(mode, opts) {
     const { $, S } = E;
     const tag = loaded ? ' (Sammlung schon geladen)' : ' (Sammlung noch nicht geladen)';
     await E.startup();
+    // Vorladen beim Start (#39 V3): hier einmal fehlgeschlagen, dann ist die Sammlung noch nicht geladen
     if (loaded) { await E.openColl(); E.type($('colQuery'), 'Evoli'); E.win.__advance(200); E.click($('tabAdd')); }
+    else await E.respond('getCollection', { error: 'Zeitüberschreitung' });
     S.searchCardsImpl = q => ({ stage: 'de', notes: [], cards: [{ id: 'swsh3-025', lang: 'de', name: 'Glurak', setName: 'Flammende Finsternis', localId: '025' }] });
     E.type($('fName'), 'Glurak');
     E.click(E.btn($('searchForm'), 'Suchen'));
@@ -1459,7 +1480,8 @@ function boot(mode, opts) {
     await E.respond('getUpdateInfo');
     ok('Leiste weg nach der Übernahme', $('updBar').classList.contains('hidden'));
     E.click(E.btn($('takeMsg'), 'Zur Sammlung'));
-    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('getCollection').length === 1);
+    // das Vorladen vom Start (#39 V3) gilt nach der Übernahme nicht mehr: ein zweiter Aufruf
+    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('getCollection').length === 2);
     E.click(E.btn($('takeBox'), 'Prüfen'));
     await E.respond('takeoverPreview', { error: 'In dieser Tabelle sind schon Karten.' });
     ok('Vorschau-Fehler', $('takeMsg').querySelector('.msg.err') && /schon Karten/.test($('takeMsg').textContent));

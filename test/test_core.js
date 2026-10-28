@@ -395,6 +395,14 @@ t.section('setGroupOwnPrice / Gruppen');
   // Name mit Sonderversion, leere Gruppe, freie Karte
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
   ok('Gruppen name with version', groupBy(env, 'swsh3-025|normal|Snowflake')['Name'] === 'Glurak · Snowflake');
+  {
+    // Hilfsspalten für die Ansichtsformel (#39 V2)
+    const gv = groupBy(env, 'swsh3-025|normal|Snowflake');
+    const num = gv['Preis (EUR)'] === '' ? 0 : gv['Preis (EUR)'] * gv['Anzahl'];
+    ok('Gruppen helper columns', gv['Suchtext'] === ['Glurak · Snowflake', gv['Name englisch'], gv['Illustrator']].join('\n') &&
+      gv['Wert (EUR)'] === num && gv['Name Anzeige'] === 'Glurak · Snowflake' && gv['Nummer Anzeige'] === gv['Nummer'] + (gv['Setgröße'] === '' ? '' : '/' + gv['Setgröße']) &&
+      gv['Variante Anzeige'] === 'Normal' && (gv['Preis Anzeige'] === gv['Preis (EUR)'] || (gv['Preis (EUR)'] === '' && gv['Preis Anzeige'] === 'kein Preis')), gv);
+  }
   const b = env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('adjustEntry', b.eid, -1);
   g = groupBy(env, b.gkey);
@@ -409,15 +417,15 @@ t.section('setGroupOwnPrice / Gruppen');
   const ve = env.uiCall('setViewExtras', ['Fach', 'Gibtsnicht', 'Fach']);
   eq('setViewExtras keeps existing names only', ve, { viewExtras: ['Fach'] });
   g = groupBy(env, a.gkey);
-  ok('Gruppen extra column values joined', env.values('Gruppen')[0][26] === 'Fach' && (g['Fach'] === 'A1 / B2' || g['Fach'] === 'B2 / A1'), g['Fach']);
+  ok('Gruppen extra column values joined', env.values('Gruppen')[0][env.run('GROUP_HEADERS').length] === 'Fach' && (g['Fach'] === 'A1 / B2' || g['Fach'] === 'B2 / A1'), g['Fach']);
   const view = env.values('Sammlung');
   ok('view header has extra', view[4][16] === 'Fach', view[4]);
   const f = env.sheet('Sammlung').formulas['6,1'];
-  ok('view formula reads Gruppen with extra', /Gruppen!A2:AA,/.test(f) && /CHOOSECOLS\(srt, 27\)\s*\)\), "Keine/.test(f) && !/Daten!/.test(f), f.slice(0, 120));
+  ok('view formula reads Gruppen with extra', /Gruppen!A2:AG,/.test(f) && /CHOOSECOLS\(srt, 33\)\s*\)\)\), "Keine/.test(f) && !/Daten!/.test(f), f.slice(0, 120));
   env.sheet('Sammlung').getRange('B4').setValue('glurak');
   env.uiCall('setViewExtras', []);
   ok('view controls kept on layout change', env.sheet('Sammlung').getRange('B4').getValue() === 'glurak');
-  ok('extra removed from view', env.values('Gruppen')[0].length === 26 && env.values('Sammlung')[4][15] === 'Preisstand' && env.values('Sammlung')[4][16] === '', env.values('Sammlung')[4]);
+  ok('extra removed from view', env.values('Gruppen')[0].length === env.run('GROUP_HEADERS').length && env.values('Sammlung')[4][15] === 'Preisstand' && env.values('Sammlung')[4][16] === '', env.values('Sammlung')[4]);
   ok('no nested locks', env.lock.nested === 0, env.lock);
 }
 
@@ -427,13 +435,21 @@ t.section('viewFormula_ / Ansicht');
   const env = setup();
   const c = env.ctx;
   const f0 = c.viewFormula_(0), f2 = c.viewFormula_(2);
-  ok('formula 0 extras', /FILTER\(Gruppen!A2:Z, Gruppen!A2:A<>""\)/.test(f0) && /HSTACK\(flt, zsort, msort, vals\), 27, TRUE, 28, TRUE, 5, TRUE/.test(f0) && /CHOOSECOLS\(srt, 29\)/.test(f0), f0);
-  ok('formula 2 extras', /Gruppen!A2:AB,/.test(f2) && /, 29, TRUE, 30, TRUE,/.test(f2) && /CHOOSECOLS\(srt, 31\)/.test(f2) && /CHOOSECOLS\(srt, 27\), CHOOSECOLS\(srt, 28\)/.test(f2), f2);
-  ok('Zuletzt hinzugefügt uses column 21', /CHOOSECOLS\(flt, 21\)/.test(f0));
-  ok('Exemplare column 13, price 15', /CHOOSECOLS\(srt, 13\),\s+CHOOSECOLS\(srt, 14\),\s+MAP\(CHOOSECOLS\(srt, 15\)/.test(f0));
+  const G = env.run('GCOL');
+  ok('GCOL matches GROUP_HEADERS', env.run('GROUP_HEADERS').every((h, i) => G[h] === i + 1) && G['Anzahl'] === 14 && G['Suchtext'] === 27);
+  ok('formula 0 extras', /FILTER\(Gruppen!A2:AF, Gruppen!A2:A<>""\)/.test(f0) && /HSTACK\(flt, zsort, msort\), 33, TRUE, 34, TRUE, 5, TRUE, 3, TRUE, 23, TRUE, 7, TRUE, 12, TRUE, 9, TRUE\)/.test(f0), f0);
+  ok('formula 2 extras', /Gruppen!A2:AH,/.test(f2) && /, 35, TRUE, 36, TRUE,/.test(f2) && /CHOOSECOLS\(srt, 16\), CHOOSECOLS\(srt, 33\), CHOOSECOLS\(srt, 34\) \)\)\)/.test(f2), f2);
+  ok('no LAMBDA, BYROW, MAP or REDUCE (#39 V2)', !/LAMBDA|BYROW|MAP\(|REDUCE/.test(f0) && /^=IFERROR\(ARRAYFORMULA\(LET\(/.test(f0) && /MMULT\(SIGN\(hit\)/.test(f0));
+  ok('Zuletzt hinzugefügt uses column 21', /tm, CHOOSECOLS\(flt, 21\)/.test(f0));
+  // Ausgabe: Spalten der Ansicht in der Reihenfolge von VIEW_HEADERS (Bild zuerst, aus der Bild-URL)
+  const outCols = (f0.match(/IMAGE\(url&"\/low\.png"\), IF\(H4=TRUE, "–", ""\)\),\s+(.*?) \)\)\)/) || [])[1] || '';
+  const want = ['Name Anzeige', 'Setname', 'Nummer Anzeige', 'Variante Anzeige', 'Exemplare', 'Anzahl', 'Preis Anzeige', 'Wert (EUR)',
+    'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand'];
+  eq('view columns by name', (outCols.match(/CHOOSECOLS\(srt, \d+\)/g) || []).map(x => +x.replace(/\D/g, '')), want.map(h => G[h]));
+  ok('url from Bild-URL, search in Suchtext, number and set size', /url, CHOOSECOLS\(srt, 17\)/.test(f0) && /SEARCH\(wd, CHOOSECOLS\(dat, 27\)\)/.test(f0) &&
+    /TO_TEXT\(CHOOSECOLS\(dat, 7\)\)=wnr/.test(f0) && /TO_TEXT\(CHOOSECOLS\(dat, 8\)\)=wsz/.test(f0) && /CHOOSECOLS\(dat, 4\)=C4/.test(f0) && /wert, CHOOSECOLS\(flt, 28\)/.test(f0));
   ok('no <? in formula', f0.indexOf('<?') < 0);
   eq('VIEW_HEADERS', env.run('VIEW_HEADERS'), ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)', '± 30 Tage (EUR)', '± 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand']);
-  ok('change columns after Wert, artist in the search', /CHOOSECOLS\(srt, 29\),\s+CHOOSECOLS\(srt, 24\), CHOOSECOLS\(srt, 25\), CHOOSECOLS\(srt, 26\),/.test(f0) && /SEARCH\(wd, INDEX\(rw, 1, 20\)\)/.test(f0));
   ok('Daten probe now Gruppen', env.run('FORMULA_PROBES').some(p => /Gruppen!A1:Z/.test(p[0])) && !env.run('FORMULA_PROBES').some(p => /Daten!/.test(p[0])));
   const z = env.sheet('Sammlung').formulas['2,26'];
   ok('set list from Gruppen!D2:D', /Gruppen!D2:D/.test(z), z);
@@ -441,7 +457,7 @@ t.section('viewFormula_ / Ansicht');
   env.setFormulaDisplay((sheet, a1, formula) => (/,/.test(formula.replace(/"[^"]*"/g, '')) ? '#ERROR!' : ''));
   c.ansichtNeuAufbauen();
   const a6 = env.sheet('Sammlung').formulas['6,1'];
-  ok('setFormulaLocal_ falls back to semicolons', /Gruppen!A2:Z; Gruppen!A2:A<>""/.test(a6), a6.slice(0, 80));
+  ok('setFormulaLocal_ falls back to semicolons', /Gruppen!A2:AF; Gruppen!A2:A<>""/.test(a6), a6.slice(0, 80));
   ok('ansichtNeuAufbauen message', /Ansicht neu aufgebaut/.test(env.ui.alerts[env.ui.alerts.length - 1]));
 }
 

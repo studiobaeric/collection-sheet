@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.2
+ *  Pokémon-Sammlung · Version 1.1.3
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -35,7 +35,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.1.2';
+const TOOL_VERSION = '1.1.3';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -82,14 +82,19 @@ const TEXT_COLS = [COL.key, COL.id, COL.setId, COL.setName, COL.setDate, COL.loc
 const SCHEMA_VERSION = '2';
 const ORIGIN_HAND = 'Hand';
 
-// Gruppen: eine Zeile pro Karte + Variante + Sonderversion. Die Ansichtsformel hängt an diesen Positionen.
+// Gruppen: eine Zeile pro Karte + Variante + Sonderversion. Die Ansichtsformel liest die Spalten über GCOL.
+// Die letzten Spalten (ab Suchtext) sind Hilfsspalten nur für die Ansichtsformel (#39 V2): Sie rechnet damit
+// über ganze Spalten statt Zeile für Zeile.
 const GROUP_HEADERS = [
   'Gruppenschlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer',
   'Nummer normalisiert', 'Setgröße', 'Name', 'Name englisch', 'Quelle', 'Variante', 'Exemplare',
   'Anzahl', 'Preis (EUR)', 'Preisstand', 'Bild-URL', 'Seltenheit', 'Kartentyp', 'Illustrator',
   'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar',
-  'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit'
+  'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit',
+  'Suchtext', 'Wert (EUR)', 'Name Anzeige', 'Nummer Anzeige', 'Variante Anzeige', 'Preis Anzeige'
 ];
+// Spaltennummer (1-basiert) im Blatt Gruppen nach Name, z. B. GCOL['Anzahl'] (#36 C4)
+const GCOL = GROUP_HEADERS.reduce(function (m, h, i) { m[h] = i + 1; return m; }, {});
 
 const PROTO_HEADERS = ['Log-ID', 'Import-Nr', 'Typ', 'Eintrag-ID', 'Quellzeile', 'Menge', 'Daten', 'Status', 'Zeitpunkt', 'Quelle-ID'];
 const PROTO_FORMATS = ['@', '0', '@', '@', '@', '0', '@', '@', 'dd.mm.yyyy hh:mm', '@'];
@@ -1672,7 +1677,8 @@ function onEdit(e) {
     if (name === SHEETS.data) { rebuildAfterEdit_(); return; }
     if (name === SHEETS.dex) { if (e.range.getRow() === 4) applyDexRowHeights_(sh); return; }
     if (name !== SHEETS.view || e.range.getRow() !== 4) return;
-    applyRowHeights_(sh);
+    // nur der Bilder-Schalter (H4) ändert die Zeilenhöhen; Suche, Set, Sortierung und 0er zeigen starten kein Skript (#39 V1)
+    if (e.range.getColumn() <= 8 && e.range.getLastColumn() >= 8) applyRowHeights_(sh);
   } catch (err) { /* nie den Edit stören */ }
 }
 
@@ -1704,19 +1710,18 @@ function rebuildAfterEdit_() {
   }
 }
 
+/**
+ * Zeilenhöhen der Sammlung: mit Bildern alle Zeilen ab 6 hoch (90 px), sonst normal. Hängt nur am Bilder-Schalter,
+ * nicht an den Treffern, und wartet deshalb nicht auf die Formel (#39 V1, #36 A7). Unter den Treffern stehen mit
+ * Bildern leere, hohe Zeilen.
+ */
 function applyRowHeights_(sh) {
   sh = sh || ss_().getSheetByName(SHEETS.view);
   if (!sh) return;
   const show = sh.getRange('H4').getValue() === true;
   const max = sh.getMaxRows();
   if (max < 6) return;
-  if (!show) { sh.setRowHeights(6, max - 5, 21); return; }
-  SpreadsheetApp.flush(); // erst rechnen lassen, dann die gefüllten Zeilen zählen (nur mit Bildern nötig)
-  const names = sh.getRange(6, 2, max - 5, 1).getValues();
-  let last = 5;
-  for (let i = names.length - 1; i >= 0; i--) { if (names[i][0] !== '') { last = i + 6; break; } }
-  if (last >= 6) sh.setRowHeights(6, last - 5, 90);
-  if (max > last) sh.setRowHeights(last + 1, max - last, 21);
+  sh.setRowHeights(6, max - 5, show ? 90 : 21);
 }
 
 // ---------------------------------------------------------------------------
@@ -1908,7 +1913,11 @@ const FORMULA_PROBES = [
   ['=REGEXREPLACE("TG05","^([A-Z]*)0+([0-9])","$1$2")', 'TG5'],
   ['=SUM(SORT(SEQUENCE(3),1,FALSE))', '6'],
   ['=ROWS(FILTER(Gruppen!A1:Z,Gruppen!A1:A<>""))', '>=1'],
-  ['=IF(G4=TRUE,1,0)', '0']
+  ['=IF(G4=TRUE,1,0)', '0'],
+  // Bausteine der Ansichtsformel ohne LAMBDA (#39 V2): Spalte × Zeile ergibt eine Matrix, MMULT zählt, IMAGE über eine Spalte
+  ['=SUM(ARRAYFORMULA(SEQUENCE(3)*SEQUENCE(1,2)))', '18'],
+  ['=SUM(MMULT(ARRAYFORMULA(SIGN(ISNUMBER(SEARCH(SPLIT("a b"," "),TRANSPOSE(SPLIT("ab a c"," ")))))),SEQUENCE(2,1,1,0)))', '3'],
+  ['=ROWS(ARRAYFORMULA(IMAGE(TRANSPOSE(SPLIT("https://assets.tcgdex.net/de/swsh/swsh3/136/low.png https://assets.tcgdex.net/de/swsh/swsh3/136/low.png"," ")))))', '2']
 ];
 
 /** Schreibt die fehlerhafte Formel und einen Funktionstest ins Blatt „Diagnose". */
@@ -2056,14 +2065,17 @@ function setViewExtras(names) {
 
 function groupFormatRow_(width) {
   const f = new Array(width).fill('@');
-  f[7] = '0';            // Setgröße
-  f[13] = '0';           // Anzahl
-  f[14] = EUR_FORMAT;    // Preis
-  f[20] = DATE_TIME_FORMAT;
-  f[21] = DATE_TIME_FORMAT;
-  f[22] = '0';           // Nummer sortierbar
-  f[23] = SIGNED_EUR_FORMAT; // Veränderung 30 Tage
-  f[24] = SIGNED_PCT_FORMAT;
+  const set = function (name, fmt) { f[GCOL[name] - 1] = fmt; };
+  set('Setgröße', '0');
+  set('Anzahl', '0');
+  set('Preis (EUR)', EUR_FORMAT);
+  set('Hinzugefügt am', DATE_TIME_FORMAT);
+  set('Zuletzt geändert', DATE_TIME_FORMAT);
+  set('Nummer sortierbar', '0');
+  set('Veränderung 30 Tage (EUR)', SIGNED_EUR_FORMAT);
+  set('Veränderung 30 Tage (%)', SIGNED_PCT_FORMAT);
+  set('Wert (EUR)', EUR_FORMAT);
+  set('Preis Anzeige', EUR_FORMAT);
   return f;
 }
 
@@ -2099,6 +2111,16 @@ function groupSheetRow_(gkey, rows, dHeaders, extras, refs) {
   ];
   const ch = gp.manual ? null : (groupChanges_(rows, refs) || {})[VIEW_CHANGE_DAYS];
   out.push(ch ? ch.eur : '', ch && ch.pct != null ? ch.pct / 100 : '', ch && ch.since ? dmyText_(ch.since) : '');
+  // Hilfsspalten für die Ansichtsformel (#39 V2)
+  const name = out[GCOL['Name'] - 1], nr = out[GCOL['Nummer'] - 1], price = out[GCOL['Preis (EUR)'] - 1];
+  out.push(
+    [name, out[GCOL['Name englisch'] - 1], out[GCOL['Illustrator'] - 1]].join('\n'),
+    typeof price === 'number' ? price * count : 0,
+    String(p[COL.source] || '') === 'en-Ersatz' ? name + ' (EN)' : name,
+    setSize === '' ? nr : nr + '/' + setSize,
+    VARIANT_LABELS[String(p[COL.variant] || '')] || VARIANT_LABELS.normal,
+    typeof price === 'number' ? price : 'kein Preis'
+  );
   extras.forEach(function (name) {
     const c = dHeaders.indexOf(name, NCOL);
     const vals = [];
@@ -2197,7 +2219,7 @@ function refreshGroups_(st, keys) {
   if (sh.getLastColumn() !== width) return null;
   const last = sh.getLastRow();
   if (last < 1) return null;
-  const COUNT = 13; // Spalte Anzahl im Blatt Gruppen
+  const COUNT = GCOL['Anzahl'] - 1; // Spalte Anzahl im Blatt Gruppen (0-basiert)
   const top = sh.getRange(1, 1, last, COUNT + 1).getValues();
   const head = sh.getRange(1, 1, 1, width).getValues()[0].map(function (x) { return String(x); });
   if (head.join('\u0001') !== headers.join('\u0001')) return null;
@@ -2341,50 +2363,53 @@ function setupViewSheet_(ss, keepControls) {
 
 /**
  * Die eine Formel der Sammlungsansicht: liest das Blatt Gruppen, filtert, sortiert und gibt die Tabelle aus.
- * nExtras = Anzahl der gezeigten Zusatzspalten (Gruppen-Spalten 27 …).
+ * nExtras = Anzahl der gezeigten Zusatzspalten (Gruppen-Spalten nach GROUP_HEADERS).
+ * Ohne LAMBDA (#39 V2): Alle Schritte rechnen über ganze Spalten. Mehrere Suchwörter ergeben eine Matrix
+ * Einträge × Wörter, MMULT zählt je Eintrag die passenden Wörter. Anzeige, Wert und Suchtext kommen fertig aus
+ * den Hilfsspalten von Gruppen (groupSheetRow_).
  */
 function viewFormula_(nExtras) {
   const n = Math.max(0, Math.floor(Number(nExtras) || 0));
   const w = GROUP_HEADERS.length + n;
-  const zc = w + 1, mc = w + 2, vc = w + 3;
+  const zc = w + 1, mc = w + 2;
+  const gc = function (name) {
+    if (!GCOL[name]) throw new Error('Spalte fehlt in GROUP_HEADERS: ' + name);
+    return GCOL[name];
+  };
+  const col = function (arr, name) { return 'CHOOSECOLS(' + arr + ', ' + gc(name) + ')'; };
   const extraCols = [];
   for (let i = 0; i < n; i++) extraCols.push('CHOOSECOLS(srt, ' + (GROUP_HEADERS.length + 1 + i) + ')');
+  const sortBy = ['Set-Erscheinungsdatum', 'Set-ID', 'Nummer sortierbar', 'Nummer normalisiert', 'Variante', 'Name']
+    .map(function (h) { return gc(h) + ', TRUE'; }).join(', ');
+  const show = ['Name Anzeige', 'Setname', 'Nummer Anzeige', 'Variante Anzeige', 'Exemplare', 'Anzahl', 'Preis Anzeige',
+    'Wert (EUR)', 'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit',
+    'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand'].map(function (h) { return col('srt', h); });
   return [
-    '=IFERROR(LET(',
+    '=IFERROR(ARRAYFORMULA(LET(',
     'dat, FILTER(Gruppen!A2:' + colLetter_(w) + ', Gruppen!A2:A<>""),',
     'qry, TRIM(B4),',
     'wrds, IF(qry="", "", SPLIT("§"&REGEXREPLACE(qry, "\\s+", " §"), " ")),',
-    'nrm, LAMBDA(xx, REGEXREPLACE(UPPER(TO_TEXT(xx)), "^([A-Z]*)0+([0-9])", "$1$2")),',
-    'okay, BYROW(dat, LAMBDA(rw, AND(',
-    '  OR(C4="", C4="Alle", INDEX(rw, 1, 4)=C4),',
-    '  OR(G4=TRUE, INDEX(rw, 1, 14)>0),',
-    '  REDUCE(TRUE, wrds, LAMBDA(acc, wraw, LET(wd, MID(wraw, 2, 200), szw, IFERROR(REGEXEXTRACT(wd, "/(.*)$"), ""), AND(acc, IF(wd="", TRUE,',
-    '    IF(REGEXMATCH(wd, "[0-9]"),',
-    '      IF(REGEXMATCH(wd, "/"),',
-    '        AND(TO_TEXT(INDEX(rw, 1, 7))=nrm(REGEXEXTRACT(wd, "^[^/]*")), IF(REGEXMATCH(szw, "^0*[1-9]"), TO_TEXT(INDEX(rw, 1, 8))=REGEXEXTRACT(REGEXREPLACE(szw, "^0+", ""), "^[0-9]+"), TRUE)),',
-    '        TO_TEXT(INDEX(rw, 1, 7))=nrm(wd)),',
-    '      OR(ISNUMBER(SEARCH(wd, INDEX(rw, 1, 9))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 10))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 20))))))))))',
-    '))),',
-    'flt, FILTER(dat, okay),',
-    'cnt, CHOOSECOLS(flt, 14),',
-    'vals, MAP(CHOOSECOLS(flt, 15), cnt, LAMBDA(pr, cn, IF(ISNUMBER(pr), pr*cn, 0))),',
-    'zsort, MAP(cnt, LAMBDA(cn, IF(cn>0, 0, 1))),',
-    'msort, MAP(CHOOSECOLS(flt, 9), vals, CHOOSECOLS(flt, 21), CHOOSECOLS(flt, 5), LAMBDA(nm, vl, tm, sd,',
-    '  IF(E4="Name", LOWER(nm), IF(E4="Wert", -vl, IF(E4="Zuletzt hinzugefügt", -N(tm), TO_TEXT(sd)))))),',
-    'srt, SORT(HSTACK(flt, zsort, msort, vals), ' + zc + ', TRUE, ' + mc + ', TRUE, 5, TRUE, 3, TRUE, 23, TRUE, 7, TRUE, 12, TRUE, 9, TRUE),',
+    'wd, MID(wrds, 2, 200),',
+    'isnr, REGEXMATCH(wd, "[0-9]"),',
+    'wnr, REGEXREPLACE(UPPER(IFERROR(REGEXEXTRACT(wd, "^[^/]*"), "")), "^([A-Z]*)0+([0-9])", "$1$2"),',
+    'szw, IFERROR(REGEXEXTRACT(wd, "/(.*)$"), ""),',
+    'szon, REGEXMATCH(wd, "/")*REGEXMATCH(szw, "^0*[1-9]"),',
+    'wsz, IFERROR(REGEXEXTRACT(REGEXREPLACE(szw, "^0+", ""), "^[0-9]+"), ""),',
+    'hit, (wd="") + isnr*(TO_TEXT(' + col('dat', 'Nummer normalisiert') + ')=wnr)*(1-szon+szon*(TO_TEXT(' + col('dat', 'Setgröße') + ')=wsz))' +
+      ' + (1-isnr)*ISNUMBER(SEARCH(wd, ' + col('dat', 'Suchtext') + ')),',
+    'okay, ((C4="")+(C4="Alle")+(' + col('dat', 'Setname') + '=C4))*((G4=TRUE)+(' + col('dat', 'Anzahl') + '>0))' +
+      '*(MMULT(SIGN(hit), SEQUENCE(COLUMNS(wrds), 1, 1, 0))=COLUMNS(wrds)),',
+    'flt, FILTER(dat, okay>0),',
+    'wert, ' + col('flt', 'Wert (EUR)') + ',',
+    'tm, ' + col('flt', 'Hinzugefügt am') + ',',
+    'zsort, 1-(' + col('flt', 'Anzahl') + '>0),',
+    'msort, IF(E4="Name", LOWER(' + col('flt', 'Name') + '), IF(E4="Wert", -wert, IF(E4="Zuletzt hinzugefügt", IF(ISNUMBER(tm), -tm, 0), 0*wert))),',
+    'srt, SORT(HSTACK(flt, zsort, msort), ' + zc + ', TRUE, ' + mc + ', TRUE, ' + sortBy + '),',
+    'url, ' + col('srt', 'Bild-URL') + ',',
     'HSTACK(',
-    '  MAP(CHOOSECOLS(srt, 17), LAMBDA(ul, IF(H4=TRUE, IF(ul="", "–", IMAGE(ul&"/low.png")), ""))),',
-    '  MAP(CHOOSECOLS(srt, 9), CHOOSECOLS(srt, 11), LAMBDA(nm, src, IF(src="en-Ersatz", nm&" (EN)", nm))),',
-    '  CHOOSECOLS(srt, 4),',
-    '  MAP(CHOOSECOLS(srt, 6), CHOOSECOLS(srt, 8), LAMBDA(nr, sz, IF(sz="", nr, nr&"/"&sz))),',
-    '  MAP(CHOOSECOLS(srt, 12), LAMBDA(vr, IF(vr="reverse", "Reverse Holo", IF(vr="holo", "Holo", IF(vr="firstEdition", "1. Edition", "Normal"))))),',
-    '  CHOOSECOLS(srt, 13),',
-    '  CHOOSECOLS(srt, 14),',
-    '  MAP(CHOOSECOLS(srt, 15), LAMBDA(pr, IF(ISNUMBER(pr), pr, "kein Preis"))),',
-    '  CHOOSECOLS(srt, ' + vc + '),',
-    '  CHOOSECOLS(srt, 24), CHOOSECOLS(srt, 25), CHOOSECOLS(srt, 26),',
-    '  CHOOSECOLS(srt, 18), CHOOSECOLS(srt, 19), CHOOSECOLS(srt, 20), CHOOSECOLS(srt, 16)' + (n ? ', ' + extraCols.join(', ') : ''),
-    ')), "Keine Einträge gefunden")'
+    '  IF((H4=TRUE)*(url<>""), IMAGE(url&"/low.png"), IF(H4=TRUE, "–", "")),',
+    '  ' + show.concat(extraCols).join(', '),
+    '))), "Keine Einträge gefunden")'
   ].join(' ');
 }
 

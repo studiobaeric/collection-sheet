@@ -204,7 +204,7 @@ t.section('Was geschrieben wird');
   eq('danach stimmt alles', diff(a, snap(env)), []);
 }
 
-t.section('Zeilenhöhen nur bei neuer Zeile, flush nur mit Bildern');
+t.section('Zeilenhöhen ohne flush, nur am Bilder-Schalter (#39 V1)');
 {
   const env = setup();
   env.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
@@ -215,8 +215,24 @@ t.section('Zeilenhöhen nur bei neuer Zeile, flush nur mit Bildern');
   eq('gleiche Karte noch einmal: nur der flush der Sperre', flushes(add('swsh3-025')), 1);
   eq('neue Karte ohne Bilder: auch nur der', flushes(add('sm9-33')), 1);
   view.getRange('H4').setValue(true);
-  eq('neue Karte mit Bildern: dazu der flush für die Zeilenhöhen', flushes(add('sv1-1')), 2);
+  eq('neue Karte mit Bildern: auch nur der flush der Sperre', flushes(add('sv1-1')), 1);
   eq('gleiche Karte mit Bildern: nur der flush der Sperre', flushes(add('sv1-1')), 1);
+  // Bilder an: alle Zeilen ab 6 hoch, ohne auf die Formel zu warten
+  const f1 = env.flushes;
+  env.ctx.onEdit({ range: view.getRange('H4') });
+  const hs = Object.keys(view.rowHeights).filter(r => +r >= 6).map(r => view.rowHeights[r]);
+  ok('H4 an: alle Zeilen ab 6 auf 90 px, kein flush', hs.length === view.getMaxRows() - 5 && hs.every(h => h === 90) && env.flushes === f1, [hs.length, env.flushes - f1]);
+  view.getRange('H4').setValue(false);
+  env.ctx.onEdit({ range: view.getRange('H4') });
+  ok('H4 aus: wieder 21 px', Object.keys(view.rowHeights).filter(r => +r >= 6).every(r => view.rowHeights[r] === 21));
+  // Suche, Set, Sortierung und 0er zeigen starten kein Skript für die Zeilenhöhen
+  let calls = 0;
+  const orig = env.ctx.applyRowHeights_;
+  env.ctx.applyRowHeights_ = function () { calls++; };
+  ['B4', 'C4', 'E4', 'G4'].forEach(a1 => env.ctx.onEdit({ range: view.getRange(a1) }));
+  env.ctx.onEdit({ range: view.getRange('B4:H4') });
+  env.ctx.applyRowHeights_ = orig;
+  eq('nur ein Bereich mit H4 ruft applyRowHeights_', calls, 1);
 }
 
 t.section('Karten von tcgdex zwischenspeichern');

@@ -1,5 +1,5 @@
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.2
+     Pokémon-Sammlung · Version 1.1.3
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <style>
@@ -56,13 +56,14 @@
 // langOptions, CONDITIONS, CONDITION_LABELS, VARIANT_LABELS, PLACEHOLDER, loadUiConfig.
 // =========================================================================
 
-var impFileVersion = '1.1.2'; // Version dieser Datei, Ui.html vergleicht sie (#35); tools/release.js schreibt sie
+var impFileVersion = '1.1.3'; // Version dieser Datei, Ui.html vergleicht sie (#35); tools/release.js schreibt sie
 var impInitCalls = 0;   // wie oft der Import-Tab geöffnet wurde
 var impGen = 0;         // Ansicht-Generation: nur Antworten zur aktuellen Ansicht zählen
 var impPrevGen = 0;     // Vorschau der ersten zehn Zeilen (Schritt 7)
 var impSetGen = 0;      // Einstellungen: Zusatzspalten laden
 var impSearchGen = 0;   // Prüfliste: Neu suchen
 var impBusy = false;    // Doppelklick-Schutz: eine schreibende Anfrage zur Zeit
+var impChangesColl = ['importCommit', 'importUndo', 'importResume', 'setViewExtras']; // ändern die Sammlung (impAsk)
 var impS = {
   screen: '', st: null, wiz: null, erk: null, rv: null, rvSeen: false, pv: null, ud: null,
   set: { open: false, cfg: null, sel: {}, loading: false, err: '' }
@@ -208,12 +209,17 @@ function impAsk(fn, args, spin, onOk, onErr, where) {
     var id = where && $(where) ? where : 'impAct';
     if ($(id)) $(id).innerHTML = '';
   };
+  // Nur diese Aufrufe ändern die Sammlung: Tab Sammlung lädt danach neu (#39 V3), auch nach einem Fehler mittendrin
+  var changes = impChangesColl.indexOf(fn) >= 0;
+  if (changes && typeof markStale === 'function') markStale();
   call.apply(null, [fn].concat(args || [])).then(function (res) {
+    if (changes && typeof markStale === 'function') markStale();
     if (gen !== impGen) return;
     impSetBusy(false);
     clear();
     onOk(res);
   }, function (e) {
+    if (changes && typeof markStale === 'function') markStale();
     if (gen !== impGen) return;
     impSetBusy(false);
     clear();
