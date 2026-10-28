@@ -233,6 +233,9 @@ t.section('searchCollection');
   addImportRow(env, glurakCard(), { nr: 7, fp: 'fpB', cond: 'EX', count: 1 });
   env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
+  ok('Set-Daten neuer Sets erst beim Einsortieren (#41)', env.data().every(r => r.setDate === '' || r.origin !== 'Hand'), env.data().map(r => [r.id, r.setDate]));
+  env.sortIn();
+  ok('nach dem Einsortieren: alle Set-Daten da', env.data().every(r => /^\d{4}-\d\d-\d\d$/.test(r.setDate)), env.data().map(r => [r.id, r.setDate]));
   let res = env.uiCall('searchCollection', '', '');
   ok('groups total', res.total === 3 && res.groups.length === 3, res.total);
   eq('sort by set date (base1 first)', res.groups.map(g => g.gkey), ['base1-4|holo|', 'swsh3-025|normal|', 'swsh3-025|normal|Snowflake']);
@@ -313,6 +316,8 @@ t.section('adjustEntry / revertAdjust');
   // Rückgängig des +1, das die Zeile angelegt hat: Zeile ist wieder 0 -> gelöscht
   r = env.uiCall('revertAdjust', tokCreate);
   ok('revert of creating +1 deletes Hand row at 0', r.count === 0 && !env.data().some(x => x.eid === hand.eid) && env.data().length === 1, [r, env.data().length]);
+  ok('Gruppen noch beim alten Stand, nur Daten gespeichert (#41)', groupBy(env, 'swsh3-025|normal|')['Anzahl'] === 2, groupBy(env, 'swsh3-025|normal|')['Anzahl']);
+  env.sortIn();
   ok('Gruppen updated after revert', groupBy(env, 'swsh3-025|normal|')['Anzahl'] === 0);
   t.throws('unknown eid', () => env.uiCall('adjustEntry', 'Exxxxxxxxxx', 1), /nicht gefunden/);
   ok('no nested locks', env.lock.nested === 0, env.lock);
@@ -356,6 +361,7 @@ t.section('editEntry');
   ok('unknown extra creates column', c.extraNames_().indexOf('Neue Spalte') >= 0 && env.data().find(x => x.eid === a.eid).extras['Neue Spalte'] === 'x');
   // Sonderversion wechselt die Gruppe
   r = env.uiCall('editEntry', a.eid, { version: 'Snowflake' });
+  env.sortIn();
   ok('version moves to other group', r.gkey === 'swsh3-025|normal|Snowflake' && groupBy(env, 'swsh3-025|normal|Snowflake')['Anzahl'] === 3, r);
   r = env.uiCall('editEntry', a.eid, {});
   ok('no change -> ok', r.ok && r.eid === a.eid);
@@ -377,6 +383,7 @@ t.section('setGroupOwnPrice / Gruppen');
   let r = env.uiCall('setGroupOwnPrice', a.gkey, 4.2);
   ok('set own price', r.gkey === a.gkey && r.price === 4.2 && r.priceManual === true, r);
   ok('own price on all rows', env.data().every(x => x.ownPrice === 4.2 && x.ownPriceDate === TODAY));
+  env.sortIn();
   g = groupBy(env, a.gkey);
   ok('Gruppen effective price + manuell date', g['Preis (EUR)'] === 4.2 && g['Preisstand'] === 'manuell ' + TODAY_DMY, g['Preisstand']);
   const s = env.uiCall('searchCollection', '', '').groups[0];
@@ -394,6 +401,7 @@ t.section('setGroupOwnPrice / Gruppen');
   t.throws('unknown group', () => env.uiCall('setGroupOwnPrice', 'x|normal|', 2), /nicht gefunden/);
   // Name mit Sonderversion, leere Gruppe, freie Karte
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
+  env.sortIn();
   ok('Gruppen name with version', groupBy(env, 'swsh3-025|normal|Snowflake')['Name'] === 'Glurak · Snowflake');
   {
     // Hilfsspalten für die Ansichtsformel (#39 V2)
@@ -405,6 +413,7 @@ t.section('setGroupOwnPrice / Gruppen');
   }
   const b = env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('adjustEntry', b.eid, -1);
+  env.sortIn();
   g = groupBy(env, b.gkey);
   ok('empty group: Exemplare empty, Anzahl 0', g['Exemplare'] === '' && g['Anzahl'] === 0, g);
   // Zusatzspalten in der Ansicht
@@ -480,6 +489,7 @@ t.section('linkFreeGroup');
   const li = d.find(x => x.eid === eidOfRow(imp, env));
   ok('import row linked, keeps origin/fp/cond/ownPrice', li.id === 'swsh3-025' && li.origin === 'Import 3' && li.fp === 'fz' && li.cond === 'LP' && li.ownPrice === 9 &&
     li.source === 'de' && li.name === 'Glurak' && li.setName === 'Flammende Finsternis' && li.localId === '025' && li.img && li.price === 1.5 && li.key === 'swsh3-025|normal||LP|DE', li);
+  env.sortIn();
   ok('one group now', env.groups().length === 1 && env.groups()[0]['Anzahl'] === 4);
   // englische Daten: freier Name bleibt
   const f2 = env.uiCall('addFreeCard', { name: 'Mewtu Spezial', number: '7' });
@@ -612,12 +622,16 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   ok('getCardBySetNumber', bs.id === 'swsh3-136');
   r = env.uiCall('searchCards', { name: 'Mewtu' });
   ok('en fallback via translation', r.stage === 'en' && r.cards[0].id === 'old9-007', r);
-  // Set-Datum nachtragen beim Preislauf
+  // Set-Datum: ein Set ohne Datum im Blatt Sets holt erst das Einsortieren (#41), danach trägt addCard es nach
+  env.fetchLog.length = 0;
   const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
+  ok('addCard: Datum eines neuen Sets fehlt noch, kein Set-Abruf', env.data()[0].setDate === '' && !env.fetchLog.some(u => /\/sets\//.test(u)), [env.data()[0].setDate, env.fetchLog]);
+  env.sortIn();
+  ok('Einsortieren holt das Set-Datum', env.data()[0].setDate === '2020-08-14' && env.fetchLog.some(u => /\/sets\/swsh3$/.test(u)), env.data()[0].setDate);
   const sh = env.sheet('Daten');
   sh.getRange(2, 5).setValue('');
   env.uiCall('addCard', { id: 'swsh3-136', lang: 'de', variant: 'base', qty: 1 });
-  ok('addCard backfills set date', env.data()[0].setDate === '2020-08-14', env.data()[0].setDate);
+  ok('addCard backfills set date', env.data()[0].setDate === '2020-08-14' && env.data()[1].setDate === '2020-08-14', env.data().map(x => x.setDate));
   sh.getRange(2, 5).setValue('');
   env.ctx.preiseJetztAktualisieren();
   ok('price run backfills set date', env.data().every(x => x.setDate === '2020-08-14'));
@@ -625,8 +639,8 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
-  ok('menu mit Dashboard, ohne Einrichtung', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7 &&
-    env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung'), env.ui.menus[0].items);
+  ok('menu mit Einsortieren und Dashboard, ohne Einrichtung', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 8 &&
+    env.ui.menus[0].items[1][1] === 'einsortieren' && env.ui.menus[0].items[2][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung'), env.ui.menus[0].items);
   ok('getSetSuggestions', env.uiCall('getSetSuggestions').indexOf('Darkness Ablaze') >= 0);
   ok('Hand row count', a.count === 1);
 }
@@ -636,6 +650,7 @@ t.section('Direkte Änderungen im Blatt Daten');
 {
   const env = setup();
   const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
+  env.sortIn();
   ok('Gruppen Nummer stays text', groupBy(env, a.gkey)['Nummer'] === '025' && groupBy(env, a.gkey)['Nummer normalisiert'] === '25');
   const sh = env.sheet('Daten');
   const COL = env.run('COL');

@@ -806,7 +806,7 @@ t.section('Übernahme: eigene Blätter mit Namen des Tools');
 // ---------------------------------------------------------------------------
 t.section('Übernahme: eigenes Blatt „Dashboard“ aus Versionen vor 1.1.0');
 {
-  const dashOk = env => env.sheet('Dashboard').getRange('C2').getValue() === 'Pokémon-Sammlung' && env.sheet('Dashboard').getImages().length === 11;
+  const dashOk = env => env.sheet('Dashboard').getRange('C2').getValue() === 'Pokémon-Sammlung' && env.sheet('Dashboard').getImages().length === env.run('DASH_BUTTONS').length;
   // vor 1.0 (ohne TOOL_SHEETS)
   const old = H.createEnv({ srcDir: path.join(__dirname, '..', 'backup'), files: ['Code.gs'] });
   old.ss.id = OLD_ID;

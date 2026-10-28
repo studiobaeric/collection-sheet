@@ -613,6 +613,7 @@ function takeoverRun(url) {
       throw started ? updTakeError_(e) : e;
     }
   })();
+  dropSetsCache_(); // das Blatt Sets kommt jetzt aus der alten Tabelle
 
   let note, shared;
   try {

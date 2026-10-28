@@ -9,6 +9,12 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 
 ## [1.1.3] – 2026-10-28
 
+- Nächste Suche wartet nicht mehr auf das Speichern der vorigen Karte
+- Hinzufügen und Ändern speichern erst nur ins Blatt Daten
+- Knopf „Einsortieren“ aktualisiert Sammlung, Pokédex und Dashboard
+- Roter Hinweis, solange Änderungen noch nicht einsortiert sind
+- Einsortieren auch im Menü, im Dashboard und nachts von selbst
+- Suche merkt sich Sets und Trefferlisten, Wiederholen geht schneller
 - Suche im Blatt Sammlung rechnet schneller, auch bei großen Sammlungen
 - Suchen im Blatt startet kein Skript mehr, die Zeilen springen nicht
 - Mit Bildern sind alle Zeilen der Sammlung gleich hoch

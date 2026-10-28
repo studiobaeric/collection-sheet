@@ -147,7 +147,10 @@ t.section('Blatt Sammlung');
     ['Preis (EUR)', 'Wert (EUR)', '± 30 Tage (EUR)', '± 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand']);
   eq('Formate: Euro und Prozent mit Vorzeichen', [view.getRange('J6').getNumberFormat(), view.getRange('K6').getNumberFormat()],
     [env.run('SIGNED_EUR_FORMAT'), env.run('SIGNED_PCT_FORMAT')]);
-  ok('drei Regeln: grau bei 0 Exemplaren, grün, rot', view.getConditionalFormatRules().length === 3);
+  const rules = view.getConditionalFormatRules();
+  ok('vier Regeln: grau bei 0 Exemplaren, grün, rot, Hinweis „noch nicht einsortiert“ (#41)', rules.length === 4 &&
+    rules[3].arg('whenFormulaSatisfied') === '=LEFT($A$2)="⚠"' && rules[3].arg('setFontColor') === '#a50e0e' && rules[3].arg('setBackground') === '#fce8e6',
+    rules.map(r => r.arg('whenFormulaSatisfied')));
   ok('Suche im Blatt: Hinweis nennt den Künstler', /Künstler/.test(view.getRange('B3').getValue()), view.getRange('B3').getValue());
   const f = view.getRange('A6').getFormula();
   const G = env.run('GCOL');

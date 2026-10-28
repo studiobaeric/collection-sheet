@@ -763,9 +763,15 @@ t.section('Erkennungsstufen');
     ['Glurak', '78', 'Flammende Finsternis', '', '', '', '', '']], 'SRC9');
   env.uiCall('importStartRecognition', listCfg(), '', 'alle');
   env.fetchLog.length = 0;
+  env.cache.clear(); // ohne die Namenslisten der Suche (#38 S3)
   recognizeAll(env);
   t.eq('Namenssuche Glurak (de) einmal', env.fetchLog.filter(u => /\/de\/cards\?name=Glurak/.test(u)).length, 1);
   t.ok('Namenssuche Glurak (en) höchstens einmal', env.fetchLog.filter(u => /\/en\/cards\?name=Glurak/.test(u)).length <= 1);
+  // noch einmal: die Namensliste kommt aus dem Zwischenspeicher (#38 S3)
+  env.uiCall('importStartRecognition', listCfg(), '', 'alle');
+  env.fetchLog.length = 0;
+  recognizeAll(env);
+  t.eq('Namenssuche Glurak danach aus dem Zwischenspeicher', env.fetchLog.filter(u => /\/cards\?name=Glurak/.test(u)).length, 0);
 }
 
 // ---------------------------------------------------------------------------

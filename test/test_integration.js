@@ -200,7 +200,10 @@ function dataRows(env) {
 
 function checkSheets(env, label) {
   const COL = env.run('COL');
+  // Änderungen speichern nur in Daten (#41): erst einsortieren, dann muss Gruppen der Neuberechnung aus Daten entsprechen
+  env.sortIn();
   const raw = env.run('readData_(sheet_(SHEETS.data))').filter(r => env.ctx.isDataRow_(r));
+  t.ok(label + ': eingesortiert, nichts mehr offen', env.ctx.pendingCount_(raw) === 0, env.ctx.pendingCount_(raw));
   const eids = raw.map(r => String(r[COL.eid]));
   t.ok(label + ': Eintrag-IDs eindeutig und gesetzt', eids.every(e => /^E[0-9a-f]{10}$/.test(e)) && new Set(eids).size === eids.length, eids);
   const badKey = raw.filter(r => String(r[COL.key]) !== env.ctx.entryKey_(r));
@@ -338,7 +341,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'einsortieren', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
@@ -367,7 +370,7 @@ function seedImport(env) {
   t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:AF,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,einsortieren,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();
@@ -398,8 +401,18 @@ function seedImport(env) {
   let D = dataRows(env);
   const handA = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 2 &&
-    handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA);
+    handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '', handA); // Set-Datum holt das Einsortieren
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
+  // Einsortieren (#41): nur Daten gespeichert, die Leiste nennt die Zahl, ihr Knopf sortiert ein
+  t.ok('Gruppen noch leer (nur Daten gespeichert)', env.groups().length === 0, env.groups().length);
+  t.ok('Leiste: 1 Änderung noch nicht einsortiert, mit Knopf', !$('sortBar').classList.contains('hidden') && $('sortBar').classList.contains('bad') &&
+    /1 Änderung ist noch nicht einsortiert/.test($('sortBar').textContent) && !!E.btn($('sortBar'), 'Einsortieren'), $('sortBar').textContent);
+  await E.clickSettle(E.btn($('sortBar'), 'Einsortieren'));
+  t.eq('Knopf ruft einsortieren({ui: true})', E.lastCall('einsortieren').args, [{ ui: true }]);
+  t.ok('Leiste grün mit Meldung, Gruppen und Set-Datum da', $('sortBar').classList.contains('good') && /1 Änderung einsortiert/.test($('sortBar').textContent) &&
+    env.groups().length === 1 && dataRows(env)[0].setDate === '2020-08-14', [$('sortBar').textContent, env.groups().length, dataRows(env)[0].setDate]);
+  E.click(E.btn($('sortBar'), '×'));
+  t.ok('Meldung lässt sich schließen', $('sortBar').classList.contains('hidden'));
   checkSheets(env, 'nach addCard');
   t.ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1'));
   // dieselbe Karte noch einmal über das Formular: zählt in dieselbe Zeile
@@ -409,9 +422,10 @@ function seedImport(env) {
   await E.clickSettle($('cAdd'));
   t.ok('noch einmal hinzugefügt -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
   t.ok('Daten: 3 Stück in derselben Zeile', dataRows(env).find(r => r.eid === handA.eid).count === 3 && E.lastCall('addCard').res.eid === handA.eid);
+  t.ok('Leiste wieder rot: 1 Änderung', /1 Änderung ist noch nicht einsortiert/.test($('sortBar').textContent) && E.lastCall('addCard').res.pending === 1, $('sortBar').textContent);
+  checkSheets(env, 'nach dem zweiten Hinzufügen');
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
   t.ok('Gruppen: 3× DE NM, Preis 1,5, Preisstand Trend', G && G['Exemplare'] === '3× DE NM' && G['Anzahl'] === 3 && G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
-  checkSheets(env, 'nach dem zweiten Hinzufügen');
 
   // ---- 2. Karte mit Sprache, Sonderversion, eigenem Preis ----
   t.section('Hinzufügen: Sprache, Sonderversion, eigener Preis');
@@ -430,11 +444,11 @@ function seedImport(env) {
   t.ok('Daten: Sprache EN, Version Staff, eigener Preis mit Datum', staff && staff.lang === 'EN' && staff.version === 'Staff' && staff.ownPrice === 2.5 &&
     staff.ownPriceDate === TODAY && staff.key === 'swsh3-025|normal|Staff|LP|EN' && staff.origin === 'Hand', staff);
   t.ok('Version im Vorschlag (datalist)', /value="Staff"/.test($('versionList').innerHTML));
+  checkSheets(env, 'nach addCard mit Version');
   G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|Staff');
   t.ok('Gruppen: eigene Gruppe „Glurak · Staff“, manuell', G && G['Name'] === 'Glurak · Staff' && G['Exemplare'] === '1× EN LP' && G['Preis (EUR)'] === 2.5 &&
     G['Preisstand'] === 'manuell ' + TODAY_DMY, G);
   t.ok('Grundgruppe unverändert (kein eigener Preis)', env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|')['Preis (EUR)'] === 1.5);
-  checkSheets(env, 'nach addCard mit Version');
 
   // ---- 3. Grundset-Glurak von Hand (Ziel der späteren Verknüpfung) ----
   E.type($('fName'), 'Glurak'); E.type($('fNumber'), '4');
@@ -461,9 +475,9 @@ function seedImport(env) {
   const free = D.find(r => r.eid === freeRes.res.eid);
   t.ok('Daten: freie Karte', free && free.id === '' && free.source === 'frei' && free.localId === '4' && free.setSize === 102 && free.normNum === '4' &&
     free.img === '' && free.price === '' && free.ownPrice === 1.5 && free.key === 'frei:unbekannt~grundset~4|normal|||DE', free);
+  checkSheets(env, 'nach addFreeCard');
   G = env.groups().find(g => g['Gruppenschlüssel'] === 'frei:unbekannt~grundset~4|normal|');
   t.ok('Gruppen: freie Gruppe mit eigenem Preis', G && G['Quelle'] === 'frei' && G['Preis (EUR)'] === 1.5 && /^manuell /.test(G['Preisstand']) && G['Setgröße'] === 102, G);
-  checkSheets(env, 'nach addFreeCard');
   t.ok('keine Skriptfehler (Hinzufügen)', E.errors.length === 0, E.errors);
 
   // ---- 5. Import-Zeilen direkt anlegen ----
@@ -649,9 +663,9 @@ function seedImport(env) {
     split.cond === 'LP' && split.origin === 'Hand' && split.key === 'swsh3-025|normal||LP|DE' && +split.added === +handNm.added, [handNm, split]);
   t.ok('Liste nicht neu geladen, Gruppe bleibt offen, Formular zu', E.calls('getCollection').length === nColl && E.group(GK).open && !$('eCond' + gi) &&
     !/speichert/.test($('gh' + gi).textContent), E.calls('getCollection').length);
+  checkSheets(env, 'nach Aufteilen');
   G = env.groups().find(x => x['Gruppenschlüssel'] === GK);
   t.ok('Gruppen: Exemplare 1× DE, 2× DE NM, 1× DE LP', G['Exemplare'] === '1× DE, 2× DE NM, 1× DE LP', G['Exemplare']);
-  checkSheets(env, 'nach Aufteilen');
   checkUiMatchesServer(E, 'nach Aufteilen');
   // zurück auf NM: wird mit der NM-Zeile zusammengelegt
   gi = E.gIdx(GK); g = E.group(GK);
@@ -702,11 +716,11 @@ function seedImport(env) {
   t.eq('setGroupOwnPrice(gkey, 3.1)', E.lastCall('setGroupOwnPrice').args, [GK, 3.1]);
   D = dataRows(env).filter(r => env.ctx.groupKey_(env.run('readData_(sheet_(SHEETS.data))').find(x => x[23] === r.eid)) === GK);
   t.ok('Daten: alle Zeilen der Gruppe 3,10 mit Datum', D.length === 2 && D.every(r => r.ownPrice === 3.1 && r.ownPriceDate === TODAY), D.map(r => [r.eid, r.ownPrice, r.ownPriceDate]));
+  t.ok('UI: „3,10 € manuell“, Entfernen aktiv', /3,10\s€ manuell/.test(headText(E, gi)) && !E.btn($('gp' + gi), 'Entfernen').disabled && /Eigener Preis gespeichert/.test($('collMsg').textContent), headText(E, gi));
+  checkSheets(env, 'nach eigenem Preis');
   G = env.groups().find(x => x['Gruppenschlüssel'] === GK);
   t.ok('Gruppen: Preis 3,1 manuell', G['Preis (EUR)'] === 3.1 && G['Preisstand'] === 'manuell ' + TODAY_DMY, G);
-  t.ok('UI: „3,10 € manuell“, Entfernen aktiv', /3,10\s€ manuell/.test(headText(E, gi)) && !E.btn($('gp' + gi), 'Entfernen').disabled && /Eigener Preis gespeichert/.test($('collMsg').textContent), headText(E, gi));
   t.ok('andere Gruppe derselben Karte unberührt', env.groups().find(x => x['Gruppenschlüssel'] === 'swsh3-025|normal|Snowflake')['Preis (EUR)'] === 1.5);
-  checkSheets(env, 'nach eigenem Preis');
   checkUiMatchesServer(E, 'nach eigenem Preis');
   // ungültig: nichts gesendet
   const nPrice = E.calls('setGroupOwnPrice').length;
@@ -715,6 +729,7 @@ function seedImport(env) {
   t.ok('ungültiger Preis: kein Aufruf, Fehlermeldung', E.calls('setGroupOwnPrice').length === nPrice && /Preis größer als 0/.test($('collMsg').textContent));
   await E.clickSettle(E.btn($('gp' + gi), 'Entfernen'));
   t.eq('Entfernen: setGroupOwnPrice(gkey, null)', E.lastCall('setGroupOwnPrice').args, [GK, null]);
+  checkSheets(env, 'nach Preis entfernen');
   G = env.groups().find(x => x['Gruppenschlüssel'] === GK);
   t.ok('Gruppen: wieder Trendpreis', G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
   t.ok('UI: kein „manuell“ mehr', !/manuell/.test(headText(E, gi)) && E.btn($('gp' + gi), 'Entfernen').disabled, headText(E, gi));
@@ -776,6 +791,14 @@ function seedImport(env) {
     mw.nameEn === 'Mewtwo' && mw.variant === 'reverse' && mw.cond === 'GD' && mw.lang === 'JP' && mw.count === 2 && mw.price === 3.25 && mw.key === 'old9-007|reverse||GD|JP', mw);
   const mi = E.gIdx('old9-007|reverse|');
   t.ok('UI: Titel mit (EN), Gruppe offen', mi >= 0 && /Mewtu Spezial \(EN\)/.test($('gh' + mi).querySelector('.t').textContent) && E.group('old9-007|reverse|').open);
+  // Einsortieren über die Leiste: das Set-Datum von old9 kommt dazu, deshalb lädt die Sammlung neu (#41)
+  const nCollSort = E.calls('getCollection').length;
+  t.ok('Leiste rot mit Knopf', /noch nicht einsortiert/.test($('sortBar').textContent) && !!E.btn($('sortBar'), 'Einsortieren'), $('sortBar').textContent);
+  await E.clickSettle(E.btn($('sortBar'), 'Einsortieren'));
+  t.ok('Einsortieren: Set-Datum geholt, Sammlung neu geladen', dataRows(env).find(r => r.id === 'old9-007').setDate === '2001-01-01' &&
+    E.lastCall('einsortieren').res.filled > 0 && E.calls('getCollection').length === nCollSort + 1 && E.group('old9-007|reverse|').open,
+    [E.lastCall('einsortieren').res, E.calls('getCollection').length - nCollSort]);
+  t.ok('Leiste grün mit Meldung', $('sortBar').classList.contains('good') && /^1 Änderung einsortiert\. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand\./.test($('sortBar').textContent), $('sortBar').textContent);
   checkSheets(env, 'nach Verknüpfen (en)');
   checkUiMatchesServer(E, 'nach Verknüpfen (en)');
   // freie Holo-Karte: Holo bleibt beim Verknüpfen erhalten
