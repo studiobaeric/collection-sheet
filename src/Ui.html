@@ -92,7 +92,6 @@
   .updbar .btn { min-height: 40px; padding: 6px 10px; font-size: 14px; flex: none; }
   .updbar .x { border: 0; background: none; font-size: 20px; min-width: 44px; min-height: 40px; cursor: pointer; color: inherit; flex: none; }
   .updbar.bad { background: var(--errbg); color: var(--err); }
-  .updbar.good { background: var(--okbg); color: var(--ok); }
   .fodd { color: var(--err); font-weight: 600; }
   .ptitle { font-size: 17px; margin: 12px 0 4px; }
   ul.rel { margin: 4px 0 8px 18px; padding: 0; font-size: 14px; }
@@ -124,7 +123,6 @@
 </div>
 <div id="verBar" class="updbar bad hidden"></div>
 <div id="updBar" class="updbar hidden"></div>
-<div id="sortBar" class="updbar bad hidden"></div>
 
 <!-- Hinzufügen -->
 <div id="paneAdd" class="panel">
@@ -324,8 +322,7 @@ function applyConfig(cfg) {
 }
 /** getUiConfig neu laden (auch für ImportUi, z. B. nach einem Import mit neuen Zusatzspalten) */
 function loadUiConfig() {
-  var ticket = pendTicket();
-  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); pendSet(cfg && cfg.pending, ticket); return cfg; })
+  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); return cfg; })
     .catch(function () { return null; }); // mit den bisherigen Listen weiter
 }
 function fillVersionList() {
@@ -733,10 +730,8 @@ function runQueue() {
   }
   queueBusy = true;
   var next = function () { queueBusy = false; runQueue(); };
-  var ticket = pendTicket();
   op.send().then(function (res) {
     queue.shift(); coll.opsDone++;
-    pendSet(res && res.pending, ticket); // jede Änderung meldet, wie viel noch nicht einsortiert ist (#41)
     try { op.done(res); } finally { next(); }
   }, function (e) {
     queue.shift();
@@ -753,11 +748,9 @@ function loadCollection(okText) {
   if (!coll.all) spinner('collResults', 'Lade die Sammlung …');
   setMsg('collMsg', '');
   drawCollDex();
-  var ticket = pendTicket();
   call('getCollection').then(function (res) {
     if (gen !== coll.gen) return;
     if (queue.length || coll.opsDone !== seen) { coll.loading = false; coll.reloadWanted = true; runQueue(); return; } // inzwischen geändert
-    pendSet(res && res.pending, ticket);
     coll.loading = false;
     coll.stale = coll.staleSeq !== staleSeq; // während des Ladens woanders geändert: beim nächsten Öffnen noch einmal
     coll.all = []; coll.byKey = {};
@@ -1700,67 +1693,6 @@ function dexAdd(nr) {
   $('fName').value = e[1];
   $('fNumber').value = '';
   $('fSet').value = '';
-}
-
-// ---------- Einsortieren (#41) ----------
-// Jede Änderung speichert nur ins Blatt Daten. Die Blätter Sammlung, Pokédex und Dashboard ziehen erst beim
-// Einsortieren nach (dieser Knopf, Menü, Dashboard oder nachts mit dem Preislauf). Bis dahin zeigt die Leiste unter den
-// Tabs, wie viele Änderungen fehlen. Antworten haben ein Ticket aus der Reihenfolge, in der sie losgeschickt wurden:
-// eine ältere Zahl überschreibt nie eine neuere. Einsortieren läuft über die Warteschlange, also nach allem, was noch
-// gespeichert wird.
-
-var pend = { n: 0, at: 0, seq: 0, busy: false, msg: '', err: '' };
-
-function pendTicket() { return ++pend.seq; }
-/** Zahl aus einer Antwort übernehmen, wenn sie nicht älter ist als die angezeigte */
-function pendSet(n, ticket) {
-  if (typeof n !== 'number' || ticket < pend.at) return;
-  pend.at = ticket;
-  pend.n = n;
-  if (n > 0) pend.msg = '';
-  else pend.err = ''; // inzwischen anders einsortiert (Menü, nachts)
-  sortBar();
-}
-
-function sortBar() {
-  var bar = $('sortBar'), html = '', kind = 'bad';
-  if (pend.busy) {
-    html = '<span class="grow">Sortiere ein … Neue Karten kannst du weiter hinzufügen.</span>';
-  } else if (pend.err) {
-    html = '<span class="grow">Einsortieren ging nicht: ' + esc(pend.err) + '</span>' +
-      '<button class="btn" type="button" onclick="sortIn()">Nochmal</button>';
-  } else if (pend.n > 0) {
-    html = '<span class="grow">⚠ <b>' + pend.n + (pend.n === 1 ? ' Änderung ist' : ' Änderungen sind') + '</b> noch nicht einsortiert. ' +
-      'Sammlung, Pokédex und Dashboard in der Tabelle zeigen den alten Stand.</span>' +
-      '<button class="btn" type="button" onclick="sortIn()">Einsortieren</button>';
-  } else if (pend.msg) {
-    kind = 'good';
-    html = '<span class="grow">' + esc(pend.msg) + '</span>' +
-      '<button class="x" type="button" title="Ausblenden" aria-label="Ausblenden" onclick="sortCloseMsg()">×</button>';
-  }
-  bar.className = 'updbar ' + kind + (html ? '' : ' hidden');
-  bar.innerHTML = html;
-}
-function sortCloseMsg() { pend.msg = ''; sortBar(); }
-
-/** Knopf Einsortieren: holt fehlende Daten bei tcgdex und baut Sammlung, Pokédex und Dashboard neu auf. */
-function sortIn() {
-  if (pend.busy) return;
-  pend.busy = true; pend.err = ''; pend.msg = '';
-  sortBar();
-  enqueue({
-    send: function () { return call('einsortieren', { ui: true }); },
-    done: function (res) {
-      pend.busy = false;
-      pend.msg = (res && res.message) || 'Einsortiert.';
-      sortBar();
-      if (res && res.filled) { // Set-Daten oder Pokédex-Nummern sind dazugekommen
-        markStale();
-        if (!$('paneColl').classList.contains('hidden')) collShow();
-      }
-    },
-    fail: function (e) { pend.busy = false; pend.err = errText(e); sortBar(); }
-  });
 }
 
 // ---------- Updates ----------

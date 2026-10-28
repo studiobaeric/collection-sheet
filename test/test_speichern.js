@@ -1,16 +1,17 @@
 'use strict';
 /**
- * Leichtes Speichern und Einsortieren (#41), Sammlung im Browser (#30), Zwischenspeicher der Suche (#38 S3), Serverseite:
- * - Jede Änderung aus Seitenleiste und Web-App schreibt nur das Blatt Daten (lightSave_). Gruppen, Pokédex-Daten,
- *   Seltenheiten und Dashboard ziehen erst beim Einsortieren nach; das Ergebnis muss dem vollen Neuaufbau
- *   (rebuildGroups_) entsprechen, geprüft mit vielen zufälligen Änderungen.
- * - pending (noch nicht einsortiert) zählt wie die Hinweis-Formel in den Blättern.
+ * Speichern, wenn die Tabelle selbst rechnet (#43), Sammlung im Browser (#30), Zwischenspeicher der Suche (#38 S3):
+ * - Jede Änderung aus Seitenleiste und Web-App schreibt das Blatt Daten, dazu nur, was keine Formel weiß (Pokédex-Nummern
+ *   neuer Karten, neue Seltenheiten, Set-Daten). Gruppen, Sammlung, Pokédex und Dashboard rechnen ihre Formeln selbst und
+ *   müssen nach jeder Änderung der Rechnung von 1.1.3 entsprechen (test/ref_groups.js), geprüft mit vielen zufälligen
+ *   Änderungen.
  * - Jede Änderung liefert delta mit genau den Gruppen, die getCollection danach liefern würde.
  * - Karten von tcgdex kommen eine halbe Stunde aus dem Zwischenspeicher (fetchCard_), Namenslisten drei Stunden,
  *   die Sets sechs Stunden.
  * Start: node test_speichern.js
  */
 const H = require('./harness2');
+const R = require('./ref_groups');
 const t = H.runner('test_speichern');
 const ok = t.ok, eq = t.eq;
 const J = x => JSON.stringify(x);
@@ -44,33 +45,6 @@ function setup() {
 const IDS = ['swsh3-025', 'swsh3-136', 'sm9-33', 'swsh1-178', 'sv1-1', 'base1-4'];
 const norm = v => (v instanceof Date ? v.toISOString() : v);
 
-/** Stand der abgeleiteten Blätter: Gruppen ohne Lücken und Reihenfolge, Pokédex-Daten, Seltenheiten, Dashboard-Zahlen. */
-function snap(env) {
-  const g = env.values('Gruppen');
-  const helper = env.run('DASH_HELPER_COL');
-  const dash = env.sheet('Dashboard');
-  return {
-    gHead: J(g[0]),
-    groups: g.slice(1).filter(r => r.some(x => x !== '')).map(r => J(r.map(norm))).sort(),
-    dex: env.values('Pokédex-Daten').map(r => J(r.map(norm))),
-    rarity: env.values('Seltenheiten').map(r => J(r)),
-    dash: J(dash.getRange('C5:K7').getValues()) + J(dash.getRange(2, helper, 40, 3).getValues())
-  };
-}
-
-function diff(a, b) {
-  const out = [];
-  if (a.gHead !== b.gHead) out.push(['Kopf Gruppen', a.gHead, b.gHead]);
-  const ga = a.groups.filter(x => b.groups.indexOf(x) < 0), gb = b.groups.filter(x => a.groups.indexOf(x) < 0);
-  if (ga.length || gb.length || a.groups.length !== b.groups.length) out.push(['Gruppen', ga.slice(0, 2), gb.slice(0, 2)]);
-  const dx = [];
-  for (let i = 0; i < Math.max(a.dex.length, b.dex.length); i++) if (a.dex[i] !== b.dex[i]) dx.push([i + 1, a.dex[i], b.dex[i]]);
-  if (dx.length) out.push(['Pokédex-Daten', dx.slice(0, 3)]);
-  if (J(a.rarity) !== J(b.rarity)) out.push(['Seltenheiten', a.rarity, b.rarity]);
-  if (a.dash !== b.dash) out.push(['Dashboard', a.dash, b.dash]);
-  return out;
-}
-
 /** delta einer Änderung = was getCollection danach für diese Gruppen liefert */
 function checkDelta(env, label, res, bad) {
   if (!res || !res.delta) return;
@@ -81,19 +55,10 @@ function checkDelta(env, label, res, bad) {
   res.delta.gone.forEach(k => { if (byKey[k]) bad.push([label, 'gone, aber da', k]); });
 }
 
-/** Wie die Hinweis-Formel in den Blättern (pendingFormula_): Daten-Zeilen, die nach dem spätesten Stand in Gruppen geändert wurden. */
-function pendingByFormula(env) {
-  const C = env.run('COL.changed'), G = env.run("GCOL['Zuletzt geändert']") - 1;
-  const isDate = v => Object.prototype.toString.call(v) === '[object Date]'; // Datum aus dem Skript (anderer Kontext)
-  const times = env.values('Gruppen').slice(1).map(r => r[G]).filter(isDate).map(v => v.getTime());
-  const max = times.length ? Math.max(...times) : 0;
-  return env.values('Daten').slice(1).filter(r => isDate(r[C]) && r[C].getTime() > max).length;
-}
-
-/** Blätter, die nur das Einsortieren schreibt */
-const DERIVED = ['Gruppen', 'Pokédex-Daten', 'Pokédex', 'Seltenheiten', 'Dashboard', 'Sammlung', 'Pokédex-Nummern', 'Sets'];
+/** Blätter mit Formeln: Speichern schreibt sie nie (Gruppen nur, wenn Daten eine neue Spalte bekommt) */
+const FORMULA_SHEETS = ['Gruppen', 'Pokédex-Daten', 'Pokédex', 'Dashboard', 'Sammlung'];
 const writes = env => Object.assign({}, env.writesBy);
-const derivedWrites = (env, before) => DERIVED.filter(n => (env.writesBy[n] || 0) !== (before[n] || 0));
+const formulaWrites = (env, before, newCol) => FORMULA_SHEETS.filter(n => (env.writesBy[n] || 0) !== (before[n] || 0) && !(newCol && n === 'Gruppen'));
 
 /** Zufällige Änderungen wie aus der Seitenleiste (fester Startwert, damit Fehler nachstellbar sind). */
 function randomOps(env, seed, n, after) {
@@ -152,57 +117,45 @@ function randomOps(env, seed, n, after) {
 }
 
 // ---------------------------------------------------------------------------
-t.section('Leichtes Speichern: nur Daten, Einsortieren = alles neu bauen (nach jeder Änderung)');
+t.section('Speichern schreibt Daten, die Formeln rechnen wie 1.1.3 (nach jeder Änderung)');
 {
   const env = setup();
-  env.ctx.setViewExtras(['Ordner']);
-  const bad = [], deltaBad = [], pendBad = [], wroteBad = [];
-  let n = 0, w0 = writes(env);
+  env.ctx.settingSet_('VIEW_EXTRAS', J(['Ordner'])); // gezeigt, bevor es die Spalte in Daten gibt: kommt mit dem ersten Wert
+  env.ctx.ansichtNeuAufbauen();
+  const bad = [], deltaBad = [], wroteBad = [];
+  let n = 0, w0 = writes(env), h0 = env.values('Daten')[0].length;
   const done = randomOps(env, 7, 90, (label, res) => {
-    const wrote = derivedWrites(env, w0);
+    const h1 = env.values('Daten')[0].length;
+    const wrote = formulaWrites(env, w0, h1 !== h0);
     if (wrote.length) wroteBad.push([label, wrote]);
-    if (res && res.pending !== pendingByFormula(env)) pendBad.push([label, res.pending, pendingByFormula(env)]);
+    if (res && 'pending' in res) wroteBad.push([label, 'pending in der Antwort']);
     checkDelta(env, label, res, deltaBad);
-    const r = env.sortIn();
-    if (r.pending !== 0 || pendingByFormula(env) !== 0) pendBad.push([label, 'nach dem Einsortieren', r.pending, pendingByFormula(env)]);
-    const a = snap(env);
-    env.ctx.rebuildGroups_();
-    const d = diff(a, snap(env));
-    if (d.length) bad.push([label, d]);
+    const d = R.compareSheets(env);
+    if (d.length) bad.push([label, d.slice(0, 3)]);
     n++;
     w0 = writes(env);
+    h0 = h1;
   });
   ok('alle Arten von Änderungen kamen vor', ['addCard', 'addFreeCard', 'adjustEntry', 'revertAdjust', 'editEntry', 'setGroupOwnPrice', 'linkFreeGroup']
     .every(k => done[k] > 0), done);
-  eq('Änderungen schreiben nur Daten, nie Gruppen, Pokédex, Seltenheiten, Dashboard oder Sammlung', wroteBad.slice(0, 3), []);
-  eq('pending wie die Formel im Blatt, nach dem Einsortieren 0', pendBad.slice(0, 3), []);
-  eq('Einsortieren = voller Neuaufbau (' + n + ' Änderungen)', bad.slice(0, 2), []);
+  eq('Änderungen schreiben nie in Gruppen, Pokédex, Dashboard oder Sammlung', wroteBad.slice(0, 3), []);
+  eq('Formeln = Rechnung von 1.1.3 nach jeder Änderung (' + n + ' Änderungen)', bad.slice(0, 2), []);
   eq('delta = getCollection', deltaBad.slice(0, 3), []);
+  ok('Spalte Ordner kam beim Speichern dazu, Gruppen zeigt ihre Werte', env.values('Daten')[0].indexOf('Ordner') > 0 &&
+    env.groups().some(g => /^[AB]/.test(g['Ordner'] || '')), env.values('Gruppen')[0]);
 }
 
-t.section('Viele Änderungen, einmal einsortiert');
+t.section('Viele Änderungen hintereinander');
 {
   const env = setup();
-  const deltaBad = [], seen = [];
-  const before = snap(env), w0 = writes(env);
-  randomOps(env, 2024, 120, (label, res) => { checkDelta(env, label, res, deltaBad); if (res) seen.push(res.pending); });
-  eq('ohne Einsortieren: Gruppen, Pokédex, Seltenheiten und Dashboard wie vorher', diff(before, snap(env)), []);
-  eq('und nichts davon geschrieben', derivedWrites(env, w0), []);
-  const open = pendingByFormula(env);
-  ok('pending wächst mit und steht zuletzt wie die Formel', open > 10 && seen[seen.length - 1] === open && seen.every(x => typeof x === 'number'), [open, seen.slice(-3)]);
-  eq('getCollection und getUiConfig melden dieselbe Zahl', [env.uiCall('getCollection').pending, env.uiCall('getUiConfig').pending], [open, open]);
-  const r = env.sortIn();
-  eq('Einsortieren: Zahl, Meldung, danach 0', [r.sorted, r.pending, pendingByFormula(env), r.message.indexOf(open + ' Änderungen einsortiert.') === 0], [open, 0, 0, true]);
-  const a = snap(env);
-  env.ctx.rebuildGroups_();
-  eq('danach wie neu gebaut', diff(a, snap(env)), []);
+  const deltaBad = [];
+  const w0 = writes(env);
+  randomOps(env, 2024, 120, (label, res) => checkDelta(env, label, res, deltaBad));
+  eq('danach: Formeln = Rechnung von 1.1.3', R.compareSheets(env).slice(0, 3), []);
+  eq('und nichts davon vom Skript geschrieben', formulaWrites(env, w0), []);
   eq('delta = getCollection', deltaBad.slice(0, 3), []);
-  const w1 = writes(env), f0 = env.fetchLog.length;
-  const again = env.sortIn();
-  ok('noch einmal: nichts zu tun, nichts geschrieben', again.sorted === 0 && again.filled === 0 && again.message === 'Alles war schon einsortiert.' &&
-    derivedWrites(env, w1).length === 0, [again, derivedWrites(env, w1), env.fetchLog.slice(f0)]);
   const view = env.sheet('Sammlung').getRange('A6').getFormula();
-  ok('Sammlung filtert leere Zeilen aus Gruppen', /FILTER\(Gruppen!A2:[A-Z]+, Gruppen!A2:A<>""\)/.test(view), view);
+  ok('Sammlung filtert leere Zeilen aus Gruppen', /FILTER\(VSTACK\('Gruppen'!A2:[A-Z]+, ""\), VSTACK\('Gruppen'!A2:A<>"", FALSE\)\)/.test(view), view);
 }
 
 t.section('Was geschrieben wird');
@@ -210,7 +163,6 @@ t.section('Was geschrieben wird');
   const env = setup();
   IDS.forEach(id => env.ctx.addCard({ id, lang: 'de', variant: 'base', qty: 1 }));
   for (let k = 0; k < 20; k++) env.ctx.addFreeCard({ name: 'Karte ' + k, setName: 'Ordner', number: String(k), qty: 1 });
-  env.sortIn();
   const count = name => {
     const sh = env.sheet(name);
     let n = 0;
@@ -219,125 +171,84 @@ t.section('Was geschrieben wird');
     return () => { sh.put = orig; return n; };
   };
   const eid = env.data().find(d => d.id === 'swsh3-025').eid;
-  let g = count('Gruppen'), p = count('Pokédex-Daten'), d = count('Daten');
+  const g = count('Gruppen'), p = count('Pokédex-Daten'), d = count('Daten'), x = count('Pokédex-Nummern');
   const f0 = env.flushes;
   const res = env.ctx.adjustEntry(eid, 1);
-  const cellsG = g(), cellsP = p(), cellsD = d();
-  const dWidth = env.values('Daten')[0].length, width = env.values('Gruppen')[0].length;
-  ok('+1: in Daten nur die eine Zeile, nichts in Gruppen und Pokédex', cellsD === dWidth && cellsG === 0 && cellsP === 0, [cellsD, dWidth, cellsG, cellsP]);
+  const cellsG = g(), cellsP = p(), cellsD = d(), cellsX = x();
+  const dWidth = env.values('Daten')[0].length;
+  ok('+1: in Daten nur die eine Zeile, nichts in Gruppen, Pokédex und Pokédex-Nummern', cellsD === dWidth && cellsG === 0 && cellsP === 0 && cellsX === 0,
+    [cellsD, dWidth, cellsG, cellsP, cellsX]);
   ok('+1: ein flush (die Sperre)', env.flushes - f0 === 1, env.flushes - f0);
-  ok('+1: delta mit genau der Gruppe, pending 1', res.delta && J(res.delta.groups.map(x => x.gkey)) === J(['swsh3-025|normal|']) && res.delta.gone.length === 0 && res.pending === 1, res);
-  g = count('Gruppen'); p = count('Pokédex-Daten');
-  env.sortIn();
-  const fullG = g(), fullP = p();
-  ok('Einsortieren baut alles neu', fullG >= 25 * width && fullP > 1000 * 8, [fullG, fullP]);
-  // Gruppen passt nicht (z. B. von einer alten Version): Änderungen gehen trotzdem, Einsortieren baut es richtig neu
-  env.sheet('Gruppen').getRange(1, 1).setValue('Alter Kopf');
-  const r2 = env.ctx.adjustEntry(eid, 1);
-  ok('anderer Kopf in Gruppen: Änderung nur in Daten, delta wie immer', env.values('Gruppen')[0][0] === 'Alter Kopf' && r2.delta.groups.length === 1 && r2.pending === 1, r2);
-  env.sortIn();
-  ok('Einsortieren: Kopf wieder richtig', env.values('Gruppen')[0][0] === 'Gruppenschlüssel');
-  const a = snap(env);
-  env.ctx.rebuildGroups_();
-  eq('danach stimmt alles', diff(a, snap(env)), []);
+  ok('+1: delta mit genau der Gruppe', res.delta && J(res.delta.groups.map(y => y.gkey)) === J(['swsh3-025|normal|']) && res.delta.gone.length === 0, res);
+  eq('+1: Gruppen und Dashboard zeigen es gleich', [env.groups().find(y => y['Gruppenschlüssel'] === 'swsh3-025|normal|')['Anzahl'],
+    R.compareSheets(env)], [2, []]);
+  // neue Karte: ihre Pokédex-Nummer kommt als ein Eintrag dazu
+  const y = count('Pokédex-Nummern');
+  env.ctx.addCard({ id: 'sm9-33', lang: 'de', variant: 'reverse', qty: 1 });
+  ok('neue Gruppe derselben Karte: Pokédex-Nummern unverändert', y() === 0);
+  const z = count('Pokédex-Nummern');
+  env.DB['de/cards/swsh3-002'] = H.card('swsh3-002', 'de', { dexId: [1] });
+  env.ctx.addCard({ id: 'swsh3-002', lang: 'de', variant: 'base', qty: 1 });
+  ok('neue Karte: Pokédex-Nummern bekommt sie (A:C gemerkt, D:E für die Formel)', z() > 0 && env.objects('Pokédex-Nummern').some(o => o['Sammlung: Karte'] === 'swsh3-002' &&
+    String(o['Sammlung: Pokédex-Nr.']) === '1'), env.objects('Pokédex-Nummern').slice(-2));
+  eq('und der Pokédex zeigt sie gleich', R.compareSheets(env), []);
 }
 
-t.section('Einsortieren: Zeitstempel, fehlende Daten, Menü, nachts');
+t.section('Set-Daten und Pokédex-Nummern gleich beim Hinzufügen, nachts der Rest');
 {
   const env = setup();
   const c = env.ctx;
-  // jede Änderung liegt nach dem letzten Einsortieren, auch in derselben Millisekunde oder bei abweichender Uhr
-  c.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
-  env.sortIn();
-  const sorted = c.sortedAt_();
-  env.cache.set('sorted-at', String(sorted + 60000)); // die letzte einsortierte Änderung „in der Zukunft“
-  const r = c.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
-  const ch = env.data().find(x => x.eid === r.eid).changed.getTime();
-  ok('Zeitstempel mindestens 1 s nach dem letzten Einsortieren, zählt als offen', ch >= sorted + 61000 && r.pending === 1, [ch - sorted, r.pending]);
-  env.cache.delete('sorted-at');
-  ok('ohne Zwischenspeicher: Stand aus Gruppen', c.sortedAt_() === sorted && c.pendingCount_(c.readData_(c.sheet_('Daten'))) === 1);
-  // fehlende Set-Daten und Pokédex-Nummern holt das Einsortieren, parallel und ohne Sperre
-  c.addCard({ id: 'sm9-33', lang: 'de', variant: 'base', qty: 1 });
-  c.addCard({ id: 'sv1-1', lang: 'de', variant: 'base', qty: 1 });
-  ok('leicht gespeichert: Set-Datum fehlt noch', ['sm9-33', 'sv1-1'].every(id => env.data().find(x => x.id === id).setDate === ''));
-  env.cache.clear(); // Karten nicht mehr im Zwischenspeicher: die Nummern kommen von tcgdex
+  env.cache.clear();
   env.fetchLog.length = 0;
   env.fetchInLock = [];
   const fa = c.UrlFetchApp.fetchAll, f1 = c.UrlFetchApp.fetch;
   c.UrlFetchApp.fetchAll = (rs, ...x) => { if (env.lock.depth > 0) env.fetchInLock.push(rs.length); return fa(rs, ...x); };
   c.UrlFetchApp.fetch = (u, ...x) => { if (env.lock.depth > 0) env.fetchInLock.push(u); return f1(u, ...x); };
-  const res = env.sortIn();
+  c.addCard({ id: 'sm9-33', lang: 'de', variant: 'base', qty: 1 });
+  c.addCard({ id: 'sv1-1', lang: 'de', variant: 'base', qty: 1 });
+  c.addCard({ id: 'sm9-33', lang: 'de', variant: 'reverse', qty: 1 });
   c.UrlFetchApp.fetchAll = fa; c.UrlFetchApp.fetch = f1;
-  eq('Set-Daten nachgetragen', ['sm9-33', 'sv1-1'].map(id => env.data().find(x => x.id === id).setDate), ['2019-02-01', '2023-03-31']);
-  eq('Pokédex-Nummern gemerkt (sv1-1 ohne dexId: leer)', env.objects('Pokédex-Nummern').map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]).sort(),
-    [['sm9-33', '25 644'], ['sv1-1', ''], ['swsh3-025', '6']]);
-  ok('Abrufe: je neues Set und neue Karte einmal, keiner in der Sperre', env.fetchLog.length === 4 && ['/sets/sm9', '/sets/sv1', '/cards/sm9-33', '/cards/sv1-1']
-    .every(u => env.fetchLog.filter(x => x.indexOf(u) >= 0).length === 1) && env.fetchInLock.length === 0, [env.fetchLog, env.fetchInLock]);
-  ok('Meldung, filled: zwei Set-Daten, zwei Nummern', res.sorted === 3 && res.filled === 4 && /^3 Änderungen einsortiert\./.test(res.message), res);
-  ok('neues Set-Datum: Sets im Zwischenspeicher verworfen', !env.cache.has('sets'));
+  eq('Set-Daten gleich da', ['sm9-33', 'sv1-1'].map(id => env.data().find(x => x.id === id).setDate), ['2019-02-01', '2023-03-31']);
+  eq('Pokédex-Nummern gleich gemerkt (sv1-1 ohne dexId: leer)', env.objects('Pokédex-Nummern').filter(o => o['Karten-ID']).map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]).sort(),
+    [['sm9-33', '25 644'], ['sv1-1', '']]);
+  ok('Abrufe: je Set einmal, keiner in der Sperre', ['/sets/sm9', '/sets/sv1'].every(u => env.fetchLog.filter(x => x.indexOf(u) >= 0).length === 1) &&
+    env.fetchInLock.length === 0, [env.fetchLog, env.fetchInLock]);
   ok('Sets-Blatt kennt die Daten jetzt', c.knownSetDate_('de', 'sm9') === '2019-02-01' && c.knownSetDate_('de', 'sv1') === '2023-03-31');
-  // höchstens SORT_IN_DEX_MAX Karten pro Lauf von tcgdex
-  const max = env.run('SORT_IN_DEX_MAX');
-  const rows = [];
-  for (let k = 0; k < max + 5; k++) env.DB['de/cards/zz-' + k] = H.card('zz-' + k, 'de', { dexId: [1] });
-  for (let k = 0; k < max + 5; k++) rows.push(c.buildCardRow_({ dataLang: 'de', id: 'zz-' + k, name: 'Bisasam', setId: 'swsh3', setName: 'Flammende Finsternis', setDate: '2020-08-14' }, { origin: 'Hand' }));
-  c.withLock_(() => c.appendDataRows_(rows));
-  env.sortIn();
-  const known = env.objects('Pokédex-Nummern').filter(o => /^zz-/.test(o['Karten-ID'])).length;
-  ok('Pokédex-Nummern: höchstens ' + max + ' pro Lauf, der Rest beim nächsten', known === max, known);
-  env.sortIn();
-  ok('beim nächsten Lauf der Rest', env.objects('Pokédex-Nummern').filter(o => /^zz-/.test(o['Karten-ID'])).length === max + 5);
-  // Menü und Dashboard-Knopf: Laufmeldung, dann Ergebnis unten rechts; Fehler: Meldung und weiterwerfen
-  c.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
+  // Import-Zeilen ohne Set-Datum und ohne gemerkte Nummer: der Preislauf holt beides
+  const rows = ['swsh1-178', 'swsh3-136'].map(id => c.buildCardRow_({ dataLang: 'de', id, name: id === 'swsh3-136' ? 'Glurak' : 'Professorin Magnolia',
+    setId: id.split('-')[0], setName: 'X', category: id === 'swsh3-136' ? 'Pokemon' : 'Trainer' }, { origin: 'Import 1' }));
+  c.withLock_(() => { c.appendDataRows_(rows); c.afterDataChange_(); });
+  ok('Import: Set-Datum fehlt noch, Nummer aus dem Namen', env.data().find(x => x.id === 'swsh1-178').setDate === '' &&
+    env.groups().find(g => g['Karten-ID'] === 'swsh3-136')['Pokédex-Nr.'] === '6');
+  c.preiseJetztAktualisieren();
+  eq('nach dem Preislauf: Set-Daten nachgetragen', ['swsh1-178', 'swsh3-136'].map(id => env.data().find(x => x.id === id).setDate), ['2020-02-07', '2020-08-14']);
+  ok('und die Nummern gemerkt', env.objects('Pokédex-Nummern').some(o => o['Karten-ID'] === 'swsh3-136' && String(o['Pokédex-Nr.']) === '6'));
+  eq('alles wie die Rechnung von 1.1.3', R.compareSheets(env), []);
+  ok('keine verschachtelte Sperre', env.lock.nested === 0 && env.lock.depth === 0, env.lock);
+  // der alte Knopf Einsortieren (Tabellen, deren Dashboard noch nicht neu aufgebaut ist)
   env.ss.toastLog = [];
   c.einsortieren();
-  ok('Menü: Laufmeldung, dann Ergebnis', env.ss.toastLog.length === 2 && env.ss.toastLog[0].msg === 'Sortiere ein …' && env.ss.toastLog[0].timeout === -1 &&
-    /^1 Änderung einsortiert\. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand\.$/.test(env.ss.toastLog[1].msg), env.ss.toastLog);
-  env.ss.toastLog = [];
-  ok('aus Seitenleiste und Web-App ohne Meldung unten rechts', c.einsortieren({ ui: true }).message === 'Alles war schon einsortiert.' && env.ss.toastLog.length === 0);
-  const orig = c.rebuildGroups_;
-  c.rebuildGroups_ = () => { throw new Error('Blatt kaputt'); };
-  c.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
-  let threw = '';
-  try { c.einsortieren(); } catch (e) { threw = e.message; }
-  c.rebuildGroups_ = orig;
-  ok('Fehler: Meldung unten rechts, weitergeworfen, bleibt offen', threw === 'Blatt kaputt' && /^Einsortieren ging nicht: Blatt kaputt/.test(env.ss.toastLog.slice(-1)[0].msg) &&
-    pendingByFormula(env) === 1, [threw, env.ss.toastLog.slice(-1)[0]]);
-  ok('keine verschachtelte Sperre', env.lock.nested === 0 && env.lock.depth === 0, env.lock);
-  // nachts: der Preislauf sortiert am Ende ein, auch wenn nur freie Karten dazukamen
-  c.addFreeCard({ name: 'Nachtkarte', setName: 'Ordner', number: '1', qty: 1 });
-  c.preiseJetztAktualisieren();
-  eq('nach dem Preislauf: alles einsortiert', [pendingByFormula(env), env.groups().some(g => g['Name'] === 'Nachtkarte')], [0, true]);
-  const a = snap(env);
-  c.rebuildGroups_();
-  eq('und wie neu gebaut', diff(a, snap(env)), []);
+  ok('einsortieren(): nur ein Hinweis', env.ss.toastLog.length === 1 && /^Einsortieren ist nicht mehr nötig/.test(env.ss.toastLog[0].msg), env.ss.toastLog);
 }
 
-t.section('Hinweise in den Blättern (#41)');
+t.section('Keine Hinweise „noch nicht einsortiert“ mehr, Formeln mit Semikolons (#43)');
 {
   const env = setup();
-  const f = env.run('pendingFormula_()');
-  eq('Formel: Daten-Zeilen nach dem spätesten Stand in Gruppen', f, 'SUMPRODUCT(ISNUMBER(Daten!V2:V)*(Daten!V2:V>MAX(Gruppen!V2:V)))');
-  eq('Spalte V ist in beiden Blättern „Zuletzt geändert“', [env.values('Daten')[0][21], env.values('Gruppen')[0][21]], ['Zuletzt geändert', 'Zuletzt geändert']);
-  const hint = (sheet, a1) => env.sheet(sheet).getRange(a1).getFormula();
-  const tail = (sheet, a1) => (hint(sheet, a1).match(/noch nicht einsortiert, ([^"]*)", "([^"]*)"\)\)$/) || []).slice(1);
-  ok('Sammlung A2: Formel mit der Zahl', hint('Sammlung', 'A2').indexOf('=LET(offen, ' + f + ', IF(offen>0, "⚠ "&offen&IF(offen=1, " Änderung ist", " Änderungen sind")&') === 0, hint('Sammlung', 'A2'));
-  eq('Sammlung A2: Hinweis und sonst die Hilfe', tail('Sammlung', 'A2'), ['die Sammlung zeigt den alten Stand. Menü Pokémon > Einsortieren',
-    'Summen gelten für die aktuelle Suche. Erfassen, Bearbeiten und Entfernen über Menü Pokémon > Karten erfassen.']);
-  eq('Pokédex A2: Hinweis', tail('Pokédex', 'A2')[0], 'der Pokédex zeigt den alten Stand. Menü Pokémon > Einsortieren');
-  eq('Dashboard C9: Hinweis, sonst leer', tail('Dashboard', 'C9'), ['die Zahlen zeigen den alten Stand. Knopf Einsortieren unten', '']);
-  const rule = sheet => env.sheet(sheet).getConditionalFormatRules().find(r => r.arg('whenFormulaSatisfied') === '=LEFT($A$2)="⚠"');
-  ok('Sammlung und Pokédex: Zeile 2 rot, solange etwas fehlt', ['Sammlung', 'Pokédex'].every(n => rule(n) && rule(n).arg('setFontColor') === '#a50e0e' &&
-    rule(n).arg('setBackground') === '#fce8e6' && rule(n).arg('setBold') === true), ['Sammlung', 'Pokédex'].map(n => rule(n) && rule(n).calls));
-  ok('kein Komma außerhalb von Texten in den Regeln', ['Sammlung', 'Pokédex'].every(n => !/,/.test(rule(n).arg('whenFormulaSatisfied').replace(/"[^"]*"/g, ''))));
-  // deutsches Gebietsschema: Semikolons
+  const f = (sheet, a1) => env.sheet(sheet).getRange(a1).getFormula();
+  eq('Sammlung A2, Pokédex A2: Text statt Formel; Dashboard C9 leer', [f('Sammlung', 'A2'), f('Pokédex', 'A2'), f('Dashboard', 'C9'), env.sheet('Dashboard').getRange('C9').getValue()],
+    ['', '', '', '']);
+  ok('Sammlung A2: die Hilfe', /^Summen gelten für die aktuelle Suche/.test(env.sheet('Sammlung').getRange('A2').getValue()), env.sheet('Sammlung').getRange('A2').getValue());
+  const warn = sheet => env.sheet(sheet).getConditionalFormatRules().some(r => r.arg('whenFormulaSatisfied') === '=LEFT($A$2)="⚠"');
+  ok('keine rote Zeile 2 mehr', !warn('Sammlung') && !warn('Pokédex'));
+  // deutsches Gebietsschema: jede Formel mit Semikolons, und sie rechnen trotzdem
+  env.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', qty: 2 });
   env.setFormulaDisplay((sheet, a1, formula) => (/,/.test(formula.replace(/"[^"]*"/g, '')) ? '#ERROR!' : ''));
   env.ctx.ansichtNeuAufbauen();
-  ok('Semikolon-Rückfall auch für die Hinweise', ['Sammlung!A2', 'Pokédex!A2', 'Dashboard!C9'].every(x => {
-    const [sh, a1] = x.split('!');
-    const g = hint(sh, a1);
-    return /^=LET\(offen; SUMPRODUCT\(ISNUMBER\(Daten!V2:V\)\*\(Daten!V2:V>MAX\(Gruppen!V2:V\)\)\); IF\(offen>0;/.test(g) && /einsortiert, /.test(g);
-  }), hint('Pokédex', 'A2').slice(0, 120));
+  const cells = ['Gruppen!A2', 'Sammlung!A6', 'Pokédex!A6', 'Pokédex!H6', 'Pokédex!D1', 'Pokédex-Daten!E2', 'Dashboard!C6', 'Dashboard!C7', 'Dashboard!R2'];
+  const semi = cells.filter(x => { const [sh, a1] = x.split('!'); const g = f(sh, a1); return g && !/,/.test(g.replace(/"[^"]*"/g, '')); });
+  eq('keine Kommas mehr außerhalb von Texten', semi, cells);
+  eq('und alles rechnet wie 1.1.3', R.compareSheets(env), []);
+  eq('Sammlung zeigt die Karte', env.sheet('Sammlung').getRange('B6').getValue(), 'Glurak');
 }
 
 t.section('Zeilenhöhen ohne flush, nur am Bilder-Schalter (#39 V1)');
@@ -473,12 +384,9 @@ t.section('getCollection');
   env.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
   env.ctx.addCard({ id: 'sm9-33', lang: 'de', variant: 'base', qty: 1 });
   const f = env.ctx.addFreeCard({ name: 'Fantasiemon', setName: 'Ordner', number: '007/100', version: 'Staff', qty: 1 });
-  const res0 = env.uiCall('getCollection');
-  ok('vor dem Einsortieren: pending 3, Set-Datum noch leer', res0.pending === 3 && res0.groups[0].k.setDate === '', [res0.pending, res0.groups[0].k]);
-  env.sortIn();
   const res = env.uiCall('getCollection');
   eq('alle Gruppen, ohne Grenze, in der Reihenfolge der Daten', res.groups.map(g => g.gkey), ['swsh3-025|normal|', 'sm9-33|normal|', f.gkey]);
-  eq('nach dem Einsortieren: pending 0', res.pending, 0);
+  ok('ohne pending (#43)', !('pending' in res));
   const g = res.groups.find(x => x.gkey === 'swsh3-025|normal|');
   eq('k: Suchwerte', [g.k.words, g.k.num, g.k.size, g.k.setId, g.k.sets], [['glurak', '', '', 'x'], '25', 189, 'swsh3', ['flammende finsternis', 'darkness ablaze']]);
   ok('k: Sortierwerte', g.k.setDate === '2020-08-14' && g.k.numSort === 25 && g.k.localId === '025' && g.k.variant === 'normal' && g.k.name === 'Glurak' &&
@@ -499,7 +407,6 @@ t.section('Hinzufügen im Hintergrund: delta und Anfrage-ID (#33)');
   const total = () => env.uiCall('getCollection').groups.reduce((n, g) => n + g.count, 0);
   const again = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2, rid: 'r1' });
   ok('gleiche Anfrage-ID: nicht doppelt gezählt', total() === 2 && again.repeat === true && again.eid === a.eid && again.count === 2 && !again.delta, again);
-  ok('pending: 1, bei der Wiederholung neu gezählt', a.pending === 1 && again.pending === 1, [a.pending, again.pending]);
   eq('gleiche Anfrage-ID: dieselbe Meldung', again.message, a.message);
   const b = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1, rid: 'r2' });
   ok('neue Anfrage-ID zählt', total() === 3 && b.count === 3 && !b.repeat);
@@ -511,10 +418,7 @@ t.section('Hinzufügen im Hintergrund: delta und Anfrage-ID (#33)');
   checkDelta(env, 'addFreeCard', f, bad);
   const f2 = env.uiCall('addFreeCard', { name: 'Fantasiemon', setName: 'Ordner', number: '7', qty: 1, rid: 'f1' });
   ok('freie Karte: gleiche Anfrage-ID nicht doppelt', total() === 6 && f2.repeat === true && f2.count === 1);
-  ok('pending zählt Einträge, nicht Karten', d.pending === 1 && f.pending === 2 && f2.pending === 2, [d.pending, f.pending, f2.pending]);
-  env.sortIn();
-  const f3 = env.uiCall('addFreeCard', { name: 'Fantasiemon', setName: 'Ordner', number: '7', qty: 1, rid: 'f1' });
-  ok('Wiederholung nach dem Einsortieren: pending neu gezählt (0)', f3.repeat === true && f3.pending === 0, f3);
+  ok('Antworten ohne pending (#43)', [a, again, d, f, f2].every(x => !('pending' in x)));
   const odd = env.uiCall('addCard', { id: 'sm9-33', lang: 'de', variant: 'base', qty: 1, rid: 'a b/c' });
   const odd2 = env.uiCall('addCard', { id: 'sm9-33', lang: 'de', variant: 'base', qty: 1, rid: 'a b/c' });
   ok('Anfrage-ID mit Sonderzeichen', odd2.repeat === true && odd2.count === odd.count);

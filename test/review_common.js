@@ -53,8 +53,7 @@ function handRow(env, card, qty, opts) {
     const row = c.buildCardRow_(card, Object.assign({ count: qty, origin: 'Hand', headers: st.headers, width: st.width }, opts || {}));
     eid = row[c.COL ? c.COL.eid : 23];
     c.storeAdd_(st, row);
-    c.storeSave_(st);
-    c.rebuildGroups_();
+    c.saveStore_(st);
   });
   return eid;
 }

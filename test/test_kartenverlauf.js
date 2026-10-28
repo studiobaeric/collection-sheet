@@ -29,7 +29,7 @@ function runDay(env, ymd, prices) {
   const cm = {};
   Object.keys(prices).forEach(k => { cm[k] = { trend: prices[k][0], 'trend-holo': prices[k][1], updated: ymd + 'T00:00:00Z' }; });
   c.writePrices_(cm, false);
-  c.withLock_(() => { c.writeCardHistory_(c.readData_(c.sheet_('Daten')), ymd); c.rebuildGroups_(); });
+  c.withLock_(() => { c.writeCardHistory_(c.readData_(c.sheet_('Daten')), ymd); c.afterDataChange_(); });
 }
 
 /** Sammlung mit Glurak normal (2×) und reverse, Grundset-Glurak mit eigenem Preis, einer freien Karte. */
@@ -148,9 +148,8 @@ t.section('Blatt Sammlung');
   eq('Formate: Euro und Prozent mit Vorzeichen', [view.getRange('J6').getNumberFormat(), view.getRange('K6').getNumberFormat()],
     [env.run('SIGNED_EUR_FORMAT'), env.run('SIGNED_PCT_FORMAT')]);
   const rules = view.getConditionalFormatRules();
-  ok('vier Regeln: grau bei 0 Exemplaren, grün, rot, Hinweis „noch nicht einsortiert“ (#41)', rules.length === 4 &&
-    rules[3].arg('whenFormulaSatisfied') === '=LEFT($A$2)="⚠"' && rules[3].arg('setFontColor') === '#a50e0e' && rules[3].arg('setBackground') === '#fce8e6',
-    rules.map(r => r.arg('whenFormulaSatisfied')));
+  ok('drei Regeln: grau bei 0 Exemplaren, grün, rot (ohne Hinweis „noch nicht einsortiert“, #43)', rules.length === 3 &&
+    !rules.some(r => /⚠/.test(r.arg('whenFormulaSatisfied') || '')), rules.map(r => r.arg('whenFormulaSatisfied')));
   ok('Suche im Blatt: Hinweis nennt den Künstler', /Künstler/.test(view.getRange('B3').getValue()), view.getRange('B3').getValue());
   const f = view.getRange('A6').getFormula();
   const G = env.run('GCOL');

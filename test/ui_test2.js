@@ -413,64 +413,17 @@ function boot(mode, opts) {
     ok('Übernahme: kein Vorladen', E.calls('getCollection').length === 0, E.pending.map(p => p.fn));
   }
 
-  // ---- Einsortieren (#41): Leiste unter den Tabs; eine ältere Zahl überschreibt nie eine neuere ----
+  // ---- Ohne Einsortieren (#43): keine Leiste, eine Zahl „pending“ aus einer älteren Antwort stört nicht ----
   for (const mode of ['sidebar', 'web']) {
     const E = boot(mode);
     const { $ } = E;
-    const bar = () => $('sortBar');
-    const cfg = n => Object.assign(E.S.getUiConfig(), { pending: n });
-    ok('Leiste versteckt, solange nichts gemeldet ist (' + mode + ')', bar().classList.contains('hidden'));
+    ok('keine Leiste „Einsortieren“ (' + mode + ')', !$('sortBar') && typeof E.win.sortIn === 'undefined' && typeof E.win.pendSet === 'undefined');
     await E.respond('getSetSuggestions');
-    // getCollection (vorgeladen) wurde nach getUiConfig losgeschickt: ihre Zahl ist neuer
     await E.respond('getCollection', { value: Object.assign(E.S.getCollection(), { pending: 5 }) });
-    ok('getCollection: rote Leiste mit Zahl und Knopf (' + mode + ')', !bar().classList.contains('hidden') && bar().classList.contains('bad') &&
-      /^⚠ 5 Änderungen sind noch nicht einsortiert\. Sammlung, Pokédex und Dashboard in der Tabelle zeigen den alten Stand\./.test(bar().textContent) &&
-      !!E.btn(bar(), 'Einsortieren'), bar().textContent);
-    await E.respond('getUiConfig', { value: cfg(2) });
-    ok('spätere Antwort auf eine ältere Anfrage ändert nichts', /⚠ 5 Änderungen/.test(bar().textContent), bar().textContent);
-    await E.respond('getUpdateInfo'); await flush(); await E.respond('getFileVersions');
-    // Änderung aus der Warteschlange gegen getUiConfig, das vorher losging
-    E.win.loadUiConfig();
-    await E.respond('getUiConfig', { value: cfg(1) });
-    ok('Einzahl', /^⚠ 1 Änderung ist noch nicht einsortiert/.test(bar().textContent), bar().textContent);
-    E.win.loadUiConfig();
-    E.win.enqueue({ send: () => E.win.call('adjustEntry', 'E1', 1), done: () => {}, fail: () => {} });
-    await E.respond('adjustEntry', { value: { applied: 1, delta: null, pending: 3 } });
-    await E.respond('getUiConfig', { value: cfg(2) });
-    ok('Antwort der Änderung zählt, nicht die ältere von getUiConfig', /⚠ 3 Änderungen/.test(bar().textContent), bar().textContent);
-    // Knopf: über die Warteschlange, Laufmeldung, dann grün mit Meldung
-    E.click(E.btn(bar(), 'Einsortieren'));
-    const call = E.calls('einsortieren')[0];
-    ok('Knopf ruft einsortieren({ui: true})', call && J(call.args) === J([{ ui: true }]), E.pending.map(p => p.fn));
-    ok('Laufmeldung ohne Knopf', /^Sortiere ein …/.test(bar().textContent) && !E.btn(bar(), 'Einsortieren'), bar().textContent);
-    E.win.sortIn(); // noch einmal, während es läuft
-    ok('nur ein Aufruf, auch bei zweitem Klick', E.calls('einsortieren').length === 1);
-    await E.respond('einsortieren', { value: { message: '3 Änderungen einsortiert. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand.', pending: 0, sorted: 3, filled: 0 } });
-    ok('grün mit Meldung und ×, Sammlung nicht neu geladen', bar().classList.contains('good') && /^3 Änderungen einsortiert\./.test(bar().textContent) &&
-      !!E.btn(bar(), '×') && E.calls('getCollection').length === 0, bar().textContent);
-    E.click(E.btn(bar(), '×'));
-    ok('× blendet die Meldung aus', bar().classList.contains('hidden'));
-    // neue Änderung: wieder rot
-    E.win.enqueue({ send: () => E.win.call('adjustEntry', 'E1', 1), done: () => {}, fail: () => {} });
-    await E.respond('adjustEntry', { value: { applied: 1, delta: null, pending: 1 } });
-    ok('neue Änderung: wieder rot', bar().classList.contains('bad') && /⚠ 1 Änderung/.test(bar().textContent));
-    // Fehler: rot mit „Nochmal“, Zahl kommt zurück, sobald 0 gemeldet wird
-    E.click(E.btn(bar(), 'Einsortieren'));
-    await E.respond('einsortieren', { error: 'Zeitlimit überschritten' });
-    ok('Fehler: Text und Knopf Nochmal', bar().classList.contains('bad') && /Einsortieren ging nicht: Zeitlimit überschritten/.test(bar().textContent) && !!E.btn(bar(), 'Nochmal'), bar().textContent);
-    E.win.loadUiConfig();
-    await E.respond('getUiConfig', { value: cfg(0) });
-    ok('woanders einsortiert (0): Fehler weg, Leiste aus', bar().classList.contains('hidden'), bar().textContent);
-    // Einsortieren holt Daten (filled): offene Sammlung lädt neu
-    E.win.loadUiConfig();
-    await E.respond('getUiConfig', { value: cfg(2) });
-    E.click($('tabColl'));
-    if (E.calls('getCollection').length) await E.respond('getCollection');
-    E.click(E.btn(bar(), 'Einsortieren'));
-    await E.respond('einsortieren', { value: { message: 'Fehlende Daten von tcgdex ergänzt.', pending: 0, sorted: 0, filled: 2 } });
-    ok('filled: Sammlung lädt neu', E.calls('getCollection').length === 1, E.pending.map(p => p.fn));
-    await E.respond('getCollection');
-    ok('keine Skriptfehler (Einsortieren ' + mode + ')', E.errors.length === 0, E.errors);
+    await E.respond('getUiConfig', { value: Object.assign(E.S.getUiConfig(), { pending: 2 }) });
+    ok('kein Hinweis „noch nicht einsortiert“ (' + mode + ')', !/noch nicht einsortiert/.test(E.doc.body.textContent));
+    await E.respondAll();
+    ok('keine Skriptfehler (ohne Einsortieren, ' + mode + ')', E.errors.length === 0, E.errors);
   }
 
   // ---- Sidebar ohne ImportUi (impInit fehlt) ----

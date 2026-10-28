@@ -57,7 +57,7 @@ safe(() => {
   let err = '';
   try { env.uiCall('importUndo', 1, {}); } catch (e) { err = e.message; }
   sh.getRange = origGR;
-  c.withLock_(() => c.rebuildGroups_());
+  c.withLock_(() => c.afterDataChange_());
   const hand = env.data().filter((r) => r.id === 'base1-4');
   t.ok('DATA-7: Abbruch nach dem ersten Schreiben lässt keine doppelte Hand-Zeile zurück', hand.length === 1 && sumCount(hand) === 1,
     { err, hand: hand.map((r) => [r.eid, r.count]) });
@@ -129,7 +129,7 @@ safe(() => {
   t.ok('GAS-5: Cardmarket-Link wird weiter angehängt', /cardmarket\.com/.test(String(q[0][3])), q[0][3]);
 });
 
-/* ---------- GAS-1 / MIGR-1: Zeile in Daten löschen baut die Gruppen neu ---------- */
+/* ---------- GAS-1 / MIGR-1: Zeile in Daten löschen: Gruppen rechnet nach, der Trigger repariert ---------- */
 t.section('GAS-1 / MIGR-1 onChange-Trigger nach Zeile löschen');
 safe(() => {
   const env = C.mkEnv();
@@ -143,10 +143,10 @@ safe(() => {
   t.eq('GAS-1: vorher zwei Gruppen', env.groups().length, 2);
   const row = env.data().find((r) => r.id === 'base1-4').row;
   env.sheet('Daten').deleteRow(row); // wie Rechtsklick > Zeile löschen (kein onEdit)
+  t.eq('GAS-1: Gruppen rechnet gleich nach dem Löschen (Formel, #43)', env.groups().map((g) => g['Name']), ['Glurak']);
   c.beiStrukturAenderung({ changeType: 'FORMAT' });
-  t.eq('GAS-1: Formatänderung baut nicht neu', env.groups().length, 2);
   c.beiStrukturAenderung({ changeType: 'REMOVE_ROW' });
-  t.eq('GAS-1: nach REMOVE_ROW nur noch Glurak in Gruppen', env.groups().map((g) => g['Name']), ['Glurak']);
+  t.eq('GAS-1: nach REMOVE_ROW weiter nur Glurak in Gruppen', env.groups().map((g) => g['Name']), ['Glurak']);
   let threw = false;
   try { c.beiStrukturAenderung(undefined); } catch (e) { threw = true; }
   t.ok('GAS-1: ohne Ereignis kein Fehler', !threw);

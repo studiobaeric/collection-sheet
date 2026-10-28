@@ -14,10 +14,16 @@
  *   drive     'v3' (Standard) | 'v2' | false (kein erweiterter Dienst Drive)
  *   sheets    Namen leerer Startblätter (Standard ['Tabellenblatt1'])
  *   db        eigene tcgdex-Attrappe (Standard: Kopie von DEFAULT_DB)
+ *   formulas  false: Formeln nicht ausrechnen (Standard: ausrechnen mit formula.js, beim Lesen der Zellen)
+ *   formulaMode  Lesart unsicherer Sheets-Stellen für formula.js (queryHeader, smush, wildcards)
  *
  * Wichtigste Teile von env: ctx, ss, DB, props, cache, ui, lock, fetchLog, triggers, templates, files (Drive),
  * sheet(name), values(name), objects(name), data(), groups(), proto(), addSource(spec), uiCall(fn, ...args),
- * sortIn() (Knopf Einsortieren), run(code), setFormulaDisplay(fn).
+ * run(code), setFormulaDisplay(fn).
+ *
+ * Formeln: Beim Lesen rechnet die Attrappe sie aus (test/formula.js) und breitet Matrizen aus wie Sheets, mit #REF!, wenn
+ * das Blatt zu kurz ist oder im Bereich schon etwas steht. env.formulaLint und env.formulaErrors sammeln Auffälliges,
+ * env.now = () => Date legt HEUTE() fest.
  *
  * Andere Adressen als tcgdex (GitHub, Apps-Script-API …): env.http = (url, options) => {code, body} | undefined.
  * Die Bilder der Dashboard-Knöpfe (raw.githubusercontent.com/…/assets/dashboard/) kommen ohne env.http aus dem Repo.
@@ -27,6 +33,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 const crypto = require('crypto');
+const F = require('./formula');
 
 const SRC_DIR = path.join(__dirname, '..', 'src');
 const API = 'https://api.tcgdex.net/v2/';
@@ -307,6 +314,102 @@ class FakeImage {
   remove() { this.removed = true; this.sh.images = this.sh.images.filter(i => i !== this); }
 }
 
+// ---------------------------------------------------------------------------
+// Formeln ausrechnen (formula.js): Seit 1.2.0 rechnen Gruppen, Pokédex und Dashboard per Formel (#43)
+// ---------------------------------------------------------------------------
+
+const isDateObj = v => Object.prototype.toString.call(v) === '[object Date]';
+const ERR_TEXT_RE = /^#(N\/A|REF!|VALUE!|DIV\/0!|NAME\?|ERROR!|NUM!|NULL!)$/;
+
+/** Zellwert für das Rechenwerk: leer -> null, Datum -> Seriennummer, Fehlertext -> Fehler. */
+function fval(v) {
+  if (v === '' || v === undefined || v === null) return null;
+  if (isDateObj(v)) return F.dateToSerial(v);
+  if (typeof v === 'string' && ERR_TEXT_RE.test(v)) return new F.FErr(v);
+  return v;
+}
+
+function isDateFmt(fmt) { return !!fmt && !/€/.test(fmt) && /yy|dd|hh/i.test(fmt); }
+
+/** Ergebnis einer Formelzelle für getValues: Zahl in einem Datumsformat -> Date (aus dem Skript-Kontext). */
+function outValue(sh, R, C, v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number' && isDateFmt(sh.fmt(R, C))) {
+    const env = sh.ss.env;
+    const d = F.serialToDate(v);
+    return env.VDate ? new env.VDate(d.getTime()) : d;
+  }
+  return v;
+}
+
+/** Bereich für eine Formel lesen: Einzelzelle als Wert, sonst F.Arr; fehlt das Blatt oder die Spalte: #REF! */
+function readRef(sh, a1, name) {
+  if (!sh) return new F.FErr('#REF!', 'Blatt fehlt: ' + name);
+  const p = parseA1(a1);
+  const r2 = p.r2 == null ? sh.maxRows : p.r2;
+  if (p.c2 > sh.maxCols || r2 > sh.maxRows) return new F.FErr('#REF!', 'Bereich außerhalb von ' + sh.name + ': ' + a1);
+  if (p.r === r2 && p.c === p.c2) return fval(sh.rawGet(p.r, p.c));
+  const out = [];
+  for (let R = p.r; R <= r2; R++) {
+    const row = [];
+    for (let C = p.c; C <= p.c2; C++) row.push(fval(sh.rawGet(R, C)));
+    out.push(row);
+  }
+  return F.arr(out);
+}
+
+/**
+ * Formel in (r0, c0) ausrechnen und ausbreiten wie Sheets: Reicht das Blatt nicht oder steht im Bereich schon etwas,
+ * zeigt die Zelle #REF!. Lint-Hinweise und Rechenfehler landen in env.formulaLint bzw. env.formulaErrors.
+ */
+function evalFormulaCell(sh, r0, c0, formula) {
+  const env = sh.ss.env;
+  const a1 = colLetter(c0) + r0;
+  let value;
+  const hook = env.formulaDisplay ? String(env.formulaDisplay(sh.name, a1, formula) || '') : '';
+  if (/^#/.test(hook)) value = new F.FErr(hook);
+  else {
+    const res = F.evaluate(formula, {
+      ref: (sheet, ref) => readRef(sheet == null ? sh : sh.ss.getSheetByName(sheet), ref, sheet),
+      now: () => (env.now ? env.now() : new Date()),
+      mode: env.formulaMode
+    });
+    value = res.value;
+    if (res.lint.length) env.formulaLint.push({ sheet: sh.name, cell: a1, lint: res.lint });
+    if (F.isErr(value) && value.msg) env.formulaErrors.push({ sheet: sh.name, cell: a1, code: value.code, msg: value.msg });
+  }
+  const cells = new Map();
+  if (F.isArr(value)) {
+    const R = value.r, C = value.c;
+    let why = '';
+    if (!R || !C) why = 'leeres Ergebnis';
+    else if (r0 + R - 1 > sh.maxRows || c0 + C - 1 > sh.maxCols) {
+      why = 'Result was not automatically expanded, please insert more ' + (r0 + R - 1 > sh.maxRows ? 'rows (' + (r0 + R - 1 - sh.maxRows) + ')' : 'columns');
+    } else {
+      for (let i = 0; i < R && !why; i++) {
+        for (let j = 0; j < C; j++) {
+          if (!i && !j) continue;
+          const RR = r0 + i, CC = c0 + j;
+          const row = sh.d[RR - 1];
+          const stored = row ? row[CC - 1] : undefined;
+          if (sh.formulas[RR + ',' + CC] || (stored !== undefined && stored !== null && stored !== '')) {
+            why = 'Array result was not expanded because it would overwrite data in ' + colLetter(CC) + RR;
+            break;
+          }
+        }
+      }
+    }
+    if (why) {
+      value = new F.FErr('#REF!', why);
+      env.formulaErrors.push({ sheet: sh.name, cell: a1, code: '#REF!', msg: why });
+    } else {
+      for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) cells.set((r0 + i) + ',' + (c0 + j), value.v[i][j] === undefined ? null : value.v[i][j]);
+    }
+  }
+  if (!F.isArr(value)) cells.set(r0 + ',' + c0, value === undefined ? null : value);
+  return { value, cells };
+}
+
 class Sheet {
   constructor(ss, name, opts) {
     opts = opts || {};
@@ -317,10 +420,50 @@ class Sheet {
     this.images = []; this.gridHidden = false; this.meta = [];
     this.id = ++ss.env.sheetSeq;
   }
-  get(R, C) { const row = this.d[R - 1]; const v = row ? row[C - 1] : undefined; return v === undefined || v === null ? '' : v; }
+  get(R, C) {
+    const fv = this.formulaValue(R, C);
+    if (fv !== undefined) return fv === null ? '' : F.isErr(fv) ? fv.code : fv;
+    const row = this.d[R - 1]; const v = row ? row[C - 1] : undefined; return v === undefined || v === null ? '' : v;
+  }
+  /** Wert für eine Formel: wie get, aber Fehler als F.FErr. */
+  rawGet(R, C) {
+    const fv = this.formulaValue(R, C);
+    if (fv !== undefined) return fv === null ? '' : fv;
+    const row = this.d[R - 1]; const v = row ? row[C - 1] : undefined; return v === undefined || v === null ? '' : v;
+  }
+  /**
+   * Wert aus einer Formel (Anker oder ausgebreitet), sonst undefined. Rechnet nur die Formeln links oberhalb der Zelle,
+   * jede einmal je Schreibstand (env.gen).
+   */
+  formulaValue(R, C) {
+    const env = this.ss.env;
+    if (!env.evalFormulas) return undefined;
+    const keys = Object.keys(this.formulas);
+    for (let i = 0; i < keys.length; i++) {
+      const p = keys[i].split(',');
+      const r0 = +p[0], c0 = +p[1];
+      if (r0 > R || c0 > C) continue;
+      const res = this.anchorResult(r0, c0);
+      if (res && res.cells.has(R + ',' + C)) return outValue(this, R, C, res.cells.get(R + ',' + C));
+    }
+    return undefined;
+  }
+  /** Ergebnis der Formel in (r0, c0): {value, cells: Map 'R,C' -> Wert}; null, solange sie gerade rechnet (Kreis). */
+  anchorResult(r0, c0) {
+    const env = this.ss.env;
+    if (this.fxGen !== env.gen) { this.fx = {}; this.fxGen = env.gen; }
+    const key = r0 + ',' + c0;
+    const hit = this.fx[key];
+    if (hit === 'busy') return null;
+    if (hit) return hit;
+    this.fx[key] = 'busy';
+    let res = null;
+    try { res = evalFormulaCell(this, r0, c0, this.formulas[key]); } finally { this.fx[key] = res || undefined; }
+    return res;
+  }
   fmt(R, C) { const row = this.f[R - 1]; return row ? row[C - 1] : undefined; }
   setFmt(R, C, f) { (this.f[R - 1] = this.f[R - 1] || [])[C - 1] = f; }
-  setCell(R, C, v) { (this.d[R - 1] = this.d[R - 1] || [])[C - 1] = v; }
+  setCell(R, C, v) { this.ss.env.gen++; (this.d[R - 1] = this.d[R - 1] || [])[C - 1] = v; }
   put(R, C, x) {
     if (typeof x === 'string' && x.charAt(0) === '=' && this.fmt(R, C) !== '@') { this.setCell(R, C, ''); this.formulas[R + ',' + C] = x; return; }
     delete this.formulas[R + ',' + C];
@@ -329,11 +472,15 @@ class Sheet {
   display(R, C) {
     if (this.disp && this.disp[R - 1] && this.disp[R - 1][C - 1] !== undefined) return String(this.disp[R - 1][C - 1]);
     const f = this.formulas[R + ',' + C];
-    if (f) { const hook = this.ss.env.formulaDisplay; return hook ? String(hook(this.name, colLetter(C) + R, f) || '') : ''; }
+    const env = this.ss.env;
+    if (f && env.formulaDisplay) { const h = String(env.formulaDisplay(this.name, colLetter(C) + R, f) || ''); if (h || !env.evalFormulas) return h; }
+    if (f && !env.evalFormulas) return '';
+    const fv = this.formulaValue(R, C);
+    if (fv !== undefined) return F.isErr(fv) ? fv.code : displayOf(fv === null ? '' : fv, this.fmt(R, C));
     return displayOf(this.get(R, C), this.fmt(R, C));
   }
   getName() { return this.name; }
-  setName(n) { delete this.ss.byName[this.name]; this.name = n; this.ss.byName[n] = this; return this; }
+  setName(n) { this.ss.env.gen++; delete this.ss.byName[this.name]; this.name = n; this.ss.byName[n] = this; return this; }
   getParent() { return this.ss; }
   getSheetId() { return this.id; }
   getIndex() { return this.ss.list.indexOf(this) + 1; }
@@ -351,17 +498,31 @@ class Sheet {
     let last = 0;
     for (let i = 0; i < this.d.length; i++) if (this.d[i] && this.d[i].some(v => v !== '' && v !== undefined && v !== null)) last = i + 1;
     Object.keys(this.formulas).forEach(k => { last = Math.max(last, +k.split(',')[0]); });
+    this.spillCells().forEach(rc => { last = Math.max(last, rc[0]); });
     return last;
   }
   getLastColumn() {
     let last = 0;
     this.d.forEach(row => { if (row) for (let j = row.length - 1; j >= last; j--) { const v = row[j]; if (v !== '' && v !== undefined && v !== null) { last = j + 1; break; } } });
     Object.keys(this.formulas).forEach(k => { last = Math.max(last, +k.split(',')[1]); });
+    this.spillCells().forEach(rc => { last = Math.max(last, rc[1]); });
     return last;
+  }
+  /** Zellen mit Inhalt aus ausgebreiteten Formeln: [[R, C]] (leere Texte zählen nicht). */
+  spillCells() {
+    const out = [];
+    if (!this.ss.env.evalFormulas) return out;
+    Object.keys(this.formulas).forEach(k => {
+      const p = k.split(',');
+      const res = this.anchorResult(+p[0], +p[1]);
+      if (res) res.cells.forEach((v, rc) => { if (v !== null && v !== '') { const q = rc.split(','); out.push([+q[0], +q[1]]); } });
+    });
+    return out;
   }
   getMaxRows() { return this.maxRows; }
   getMaxColumns() { return this.maxCols; }
   insertRowsAfter(after, n) {
+    this.ss.env.gen++;
     if (after < this.d.length) { this.d.splice(after, 0, ...Array.from({ length: n }, () => [])); }
     if (after < this.f.length) { this.f.splice(after, 0, ...Array.from({ length: n }, () => [])); }
     this.maxRows += n; return this;
@@ -369,11 +530,13 @@ class Sheet {
   insertRowsBefore(before, n) { return this.insertRowsAfter(before - 1, n); }
   insertRows(before, n) { return this.insertRowsAfter(before - 1, n || 1); }
   insertColumnsAfter(after, n) {
+    this.ss.env.gen++;
     [this.d, this.f].forEach(m => m.forEach(row => { if (row && after < row.length) row.splice(after, 0, ...Array(n).fill(undefined)); }));
     this.maxCols += n; return this;
   }
   insertColumnsBefore(before, n) { return this.insertColumnsAfter(before - 1, n); }
   deleteRows(r, n) {
+    this.ss.env.gen++;
     if (r < 1 || r + n - 1 > this.maxRows) throw new Error('deleteRows außerhalb');
     this.d.splice(r - 1, n); this.f.splice(r - 1, n);
     const fm = {};
@@ -383,6 +546,7 @@ class Sheet {
   }
   deleteRow(r) { return this.deleteRows(r, 1); }
   deleteColumns(c, n) {
+    this.ss.env.gen++;
     if (c < 1 || c + n - 1 > this.maxCols) throw new Error('deleteColumns außerhalb');
     [this.d, this.f].forEach(m => m.forEach(row => { if (row) row.splice(c - 1, n); }));
     this.maxCols -= n; return this;
@@ -395,8 +559,8 @@ class Sheet {
     arr.forEach((x, j) => this.put(R, j + 1, x));
     return this;
   }
-  clear() { this.d = []; this.f = []; this.formulas = {}; this.checkboxes = {}; return this; }
-  clearContents() { this.d = []; this.formulas = {}; return this; }
+  clear() { this.ss.env.gen++; this.d = []; this.f = []; this.formulas = {}; this.checkboxes = {}; return this; }
+  clearContents() { this.ss.env.gen++; this.d = []; this.formulas = {}; return this; }
   clearFormats() { this.f = []; return this; }
   hideSheet() { this.hidden = true; return this; }
   showSheet() { this.hidden = false; return this; }
@@ -483,6 +647,7 @@ class FakeSpreadsheet {
     if (typeof opts === 'number') { index = opts; opts = null; } // insertSheet(name, index), index ab 0
     if (!n) { let i = this.list.length + 1; while (this.byName['Tabellenblatt' + i]) i++; n = 'Tabellenblatt' + i; }
     if (this.byName[n]) throw new Error('Ein Tabellenblatt mit dem Namen „' + n + '“ existiert bereits.');
+    this.env.gen++;
     const sh = new Sheet(this, n, opts);
     if (index == null) this.list.push(sh); else this.list.splice(index, 0, sh);
     this.byName[n] = sh;
@@ -490,7 +655,7 @@ class FakeSpreadsheet {
   }
   getSheets() { return this.list.slice(); }
   getSheetById(id) { return this.list.find(s => s.id === id) || null; }
-  deleteSheet(sh) { this.list = this.list.filter(s => s !== sh); delete this.byName[sh.name]; }
+  deleteSheet(sh) { this.env.gen++; this.list = this.list.filter(s => s !== sh); delete this.byName[sh.name]; }
   getId() { return this.id; }
   getName() { return this.name; }
   rename(n) { this.name = String(n); if (this.env && this.env.driveFiles && this.env.driveFiles[this.id]) this.env.driveFiles[this.id].name = this.name; }
@@ -566,6 +731,7 @@ function createEnv(opts) {
     fetchLog: [], fetchFail: null, triggers: [], templates: [], outputs: [], sleeps: 0,
     lock: { depth: 0, acquired: 0, nested: 0, busy: false, maxDepth: 0 },
     formulaDisplay: null, promptResponse: '', promptButton: 'OK',
+    gen: 0, evalFormulas: opts.formulas !== false, formulaMode: opts.formulaMode || {}, formulaLint: [], formulaErrors: [], now: null,
     driveFiles: {}, sources: {}, drive: opts.drive === undefined ? 'v3' : opts.drive, driveCopies: [],
     http: null, httpLog: [], backups: [], perms: {}, permCreates: [], makeCopyFails: 0
   };
@@ -901,6 +1067,7 @@ function createEnv(opts) {
   if (Drive) ctx.Drive = Drive;
   env.ctx = ctx;
   vm.createContext(ctx);
+  env.VDate = vm.runInContext('Date', ctx); // Datumswerte aus Formeln wie die des Skripts (instanceof Date im Kontext)
   files.forEach(f => {
     const code = fs.readFileSync(path.join(srcDir, f), 'utf8');
     vm.runInContext(code, ctx, { filename: f });
@@ -959,8 +1126,6 @@ function createEnv(opts) {
     assertPlain(res, fn);
     return res === undefined ? undefined : JSON.parse(JSON.stringify(res));
   };
-  /** Knopf Einsortieren (#41): Änderungen speichern nur ins Blatt Daten, Gruppen, Pokédex und Dashboard ziehen hier nach. */
-  env.sortIn = () => env.uiCall('einsortieren', { ui: true });
   env.setFormulaDisplay = fn => { env.formulaDisplay = fn; };
   return env;
 }

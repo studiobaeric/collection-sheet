@@ -44,10 +44,13 @@ function setup() {
 
 const add = (env, id, extra) => env.ctx.addCard(Object.assign({ id, lang: 'de', variant: 'base', condition: 'NM', qty: 1 }, extra || {}));
 const dexRow = (env, nr) => env.objects('Pokédex-Daten').find(o => o['Nr.'] === nr);
-const dexCards = env => {
-  const v = env.values('Pokédex-Daten');
-  return v.slice(1).map(r => r.slice(9, 19)).filter(r => r[0] !== '');
+/** Kartenliste im Pokédex (H6:P) für die Auswahl sel in I4: [Bild, Name, Set, Nummer, Variante, Seltenheit, Anzahl, Preis, Wert] */
+const dexCards = (env, sel) => {
+  env.sheet('Pokédex').getRange('I4').setValue(sel);
+  return env.values('Pokédex').slice(5).map(r => r.slice(7, 16)).filter(r => r[1] !== '' && r[1] != null);
 };
+/** Gemerkte Nummern (Pokédex-Nummern A:C) als [Karten-ID, Nummern] */
+const knownDex = env => env.objects('Pokédex-Nummern').filter(o => o['Karten-ID'] !== '').map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]);
 
 // ---------------------------------------------------------------------------
 t.section('Namen und Nummern');
@@ -96,7 +99,8 @@ t.section('Einrichtung');
   const sh = env.sheet('Pokédex');
   const a6 = sh.getRange('A6').getFormula(), h6 = sh.getRange('H6').getFormula(), d1 = sh.getRange('D1').getFormula();
   ok('Listenformel liest Pokédex-Daten mit Filtern', /'Pokédex-Daten'!A2:G/.test(a6) && /B4="Fehlend"/.test(a6) && /C4/.test(a6) && /TRIM\(D4\)/.test(a6), a6);
-  ok('Kartenformel liest J:S und I4', /'Pokédex-Daten'!J2:S/.test(h6) && /TRIM\(I4\)/.test(h6) && /IMAGE\(ul&"\/low.png"\)/.test(h6), h6);
+  ok('Kartenformel liest Gruppen und I4 (#43)', /'Gruppen'!A2:AG/.test(h6) && /'Gruppen'!AG2:AG/.test(h6) && /TRIM\(I4\)/.test(h6) &&
+    /IMAGE\(url & "\/low.png"\)/.test(h6), h6);
   ok('Zähler oben', /COUNTIF\('Pokédex-Daten'!F2:F, ">0"\)/.test(d1), d1);
   eq('Kopfzeilen', [sh.getRange('A5:F5').getValues()[0], sh.getRange('H5:P5').getValues()[0]],
     [['Nr.', 'Name', 'Generation', 'Karten', 'Exemplare', 'Wert (EUR)'], ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Seltenheit', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)']]);
@@ -118,37 +122,32 @@ t.section('Einrichtung');
 }
 
 // ---------------------------------------------------------------------------
-t.section('Einsortieren merkt die Nummern, Pokédex-Daten');
+t.section('Hinzufügen merkt die Nummern, der Pokédex rechnet gleich mit (#43)');
 {
   const env = setup();
   add(env, 'swsh3-025', { qty: 2 });
+  eq('erste Karte: gleich im Pokédex (eine Gruppe, eine Nummer)', [dexRow(env, 6).Exemplare, dexCards(env, '#6 Glurak').length], [2, 1]);
   add(env, 'sm9-33');
   add(env, 'swsh1-178');
-  eq('Hinzufügen speichert nur Daten: noch keine Nummern, Pokédex leer (#41)',
-    [env.objects('Pokédex-Nummern').length, env.objects('Pokédex-Daten').filter(o => o.Exemplare > 0).length], [0, 0]);
-  env.fetchLog.length = 0;
-  env.sortIn();
-  ok('Einsortieren: Nummern aus dem Zwischenspeicher, kein Kartenabruf', !env.fetchLog.some(u => /\/cards\//.test(u)), env.fetchLog);
-  const ids = env.objects('Pokédex-Nummern');
-  eq('Nummern gemerkt (Trainer leer)', ids.map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]),
-    [['swsh3-025', '6'], ['sm9-33', '25 644'], ['swsh1-178', '']]);
+  eq('Nummern beim Hinzufügen gemerkt (Trainer leer)', knownDex(env), [['swsh3-025', '6'], ['sm9-33', '25 644'], ['swsh1-178', '']]);
   ok('Pokédex-Nummern versteckt', env.sheet('Pokédex-Nummern').hidden);
   const g = dexRow(env, 6), p = dexRow(env, 25), z = dexRow(env, 644);
   eq('Glurak: 1 Karte, 2 Exemplare, 3 €', [g.Karten, g.Exemplare, g['Wert (EUR)']], [1, 2, 3]);
   eq('Tag Team zählt bei Pikachu und Zekrom', [p.Exemplare, z.Exemplare, p['Wert (EUR)'], z['Wert (EUR)']], [1, 1, 12, 12]);
   eq('vorhanden gesamt', env.objects('Pokédex-Daten').filter(o => o.Exemplare > 0).length, 3);
-  const cards = dexCards(env);
-  eq('Kartenblock: je Pokémon und Karte, nach Nummer', cards.map(r => [r[0], r[1], r[3], r[6]]),
-    [[6, 'Glurak', '025/189', 2], [25, 'Pikachu & Zekrom-GX', '33/181', 1], [644, 'Pikachu & Zekrom-GX', '33/181', 1]]);
-  eq('Kartenblock: Variante, Seltenheit, Preis, Wert, Bild', cards[0].slice(4), ['Normal', 'Selten', 2, 1.5, 3, 'https://assets.tcgdex.net/de/x/swsh3-025']);
+  const cards = dexCards(env, '#6 Glurak');
+  eq('Kartenliste #6: Glurak', cards.map(r => [r[1], r[2], r[3], r[6]]), [['Glurak', 'Flammende Finsternis', '025/189', 2]]);
+  eq('Kartenliste: Bild, Variante, Seltenheit, Preis, Wert', [cards[0][0]].concat(cards[0].slice(4)),
+    ['IMAGE:https://assets.tcgdex.net/de/x/swsh3-025/low.png', 'Normal', 'Selten', 2, 1.5, 3]);
+  eq('Tag Team bei #25 und bei Zekrom (Name)', [dexCards(env, '#25 Pikachu'), dexCards(env, 'Zekrom')].map(l => l.map(r => [r[1], r[3], r[6]])),
+    [[['Pikachu & Zekrom-GX', '33/181', 1]], [['Pikachu & Zekrom-GX', '33/181', 1]]]);
   ok('neue Seltenheit unten angehängt', env.objects('Seltenheiten').some(o => o['Seltenheit'] === 'Holografisch Selten GX' && o['Stufe'] === ''));
 
-  // −1 bis 0: Pokémon fehlt wieder, Kartenblock leer für Nr. 6
+  // −2 bis 0: Pokémon fehlt gleich wieder, Kartenliste für Nr. 6 leer
   const eids = env.data().filter(r => r.id === 'swsh3-025').map(r => r.eid);
   env.ctx.adjustEntry(eids[0], -2);
-  eq('−2 nur gespeichert: Glurak steht noch im Pokédex', dexRow(env, 6).Exemplare, 2);
-  env.sortIn();
-  eq('0 Exemplare: Glurak fehlt wieder', [dexRow(env, 6).Exemplare, dexCards(env).filter(r => r[0] === 6).length], [0, 0]);
+  eq('0 Exemplare: Glurak fehlt gleich wieder', [dexRow(env, 6).Exemplare, dexCards(env, '#6 Glurak').length], [0, 0]);
+  eq('ohne Karten: Hinweis in H6', env.sheet('Pokédex').getRange('H6').getValue(), 'Keine Karten von diesem Pokémon');
 
   // getPokedex fürs UI
   const res = env.uiCall('getPokedex');
@@ -168,13 +167,13 @@ t.section('Ohne gemerkte Nummer: Name; Preislauf holt sie nach');
     env.ctx.buildCardRow_({ free: true, name: 'Glurak-ex', setName: 'Irgendwas', localId: '5/10' }, {})
   ];
   env.ctx.appendDataRows_(rows);
-  env.ctx.withLock_(() => env.ctx.rebuildGroups_());
+  env.ctx.withLock_(() => env.ctx.afterDataChange_());
   eq('Glurak aus dem Namen (2 Karten), Mewtu aus dem Namen', [dexRow(env, 6).Karten, dexRow(env, 150).Karten], [2, 1]);
-  ok('noch nichts gemerkt', !env.sheet('Pokédex-Nummern') || env.objects('Pokédex-Nummern').length === 0);
+  eq('noch nichts gemerkt', knownDex(env), []);
   const targets = env.ctx.priceTargets_().map(x => x.id);
   ok('Preislauf: Karte mit eigenem Preis wird für die Nummer trotzdem abgerufen', targets.indexOf('swsh3-136') >= 0, targets);
   env.ctx.startPriceRun_();
-  eq('nach dem Preislauf gemerkt (sv1-1 ohne dexId bei tcgdex: leer)', env.objects('Pokédex-Nummern').map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]).sort(),
+  eq('nach dem Preislauf gemerkt (sv1-1 ohne dexId bei tcgdex: leer)', knownDex(env).sort(),
     [['sv1-1', ''], ['swsh3-136', '6']]);
   eq('Mewtu weiter über den Namen', dexRow(env, 150).Karten, 1);
   eq('zweiter Preislauf: Karte mit eigenem Preis weiter abgerufen (für ihre Preiskurve)', env.ctx.priceTargets_().map(x => x.id), ['sv1-1', 'swsh3-136']);
@@ -194,7 +193,6 @@ function sortEnv() {
   add(env, 'base1-4', { qty: 1 });                // Glurak Grundset, Rare (3), 1999
   const zero = env.ctx.addFreeCard({ name: 'Bisasam', setName: 'Alt', number: '1/1', qty: 1 });
   env.ctx.adjustEntry(zero.eid, -1);              // 0 Exemplare: immer am Ende
-  env.sortIn();                                   // Set-Daten und neue Seltenheiten kommen beim Einsortieren (#41)
   return env;
 }
 {
@@ -244,12 +242,11 @@ t.section('Ansicht neu aufbauen und onEdit');
   ok('Ansicht neu aufbauen legt Pokédex und Seltenheiten wieder an', !!env.sheet('Pokédex') && !!env.sheet('Seltenheiten'));
   add(env, 'swsh3-025');
   const sh = env.sheet('Pokédex');
-  // Kartenformel liefert (in der Attrappe) nichts; Zeilenhöhe nach Inhalt von Spalte I
-  sh.getRange('I6').setValue('Glurak');
+  // Zeilenhöhe nach Inhalt von Spalte I (Kartenname aus der Formel in H6)
   sh.getRange('I4').setValue('#6 Glurak');
   env.ctx.onEdit({ range: sh.getRange('I4') });
-  eq('Bildzeile hoch, Rest normal', [sh.rowHeights[6], sh.rowHeights[7]], [90, 21]);
-  sh.getRange('I6').setValue('');
+  eq('Bildzeile hoch, Rest normal', [sh.getRange('I6').getValue(), sh.rowHeights[6], sh.rowHeights[7]], ['Glurak', 90, 21]);
+  sh.getRange('I4').setValue('#1 Bisasam');
   env.ctx.onEdit({ range: sh.getRange('I4') });
   eq('ohne Karten wieder normal', sh.rowHeights[6], 21);
   ok('onEdit im Pokédex baut keine Gruppen', env.lock.depth === 0);
@@ -259,7 +256,7 @@ t.section('Ansicht neu aufbauen und onEdit');
 t.section('Fehler im Pokédex verhindern das Speichern nicht');
 {
   const env = setup();
-  env.run('rebuildPokedex_ = function () { throw new Error("kaputt"); }');
+  env.run('syncDexMap_ = function () { throw new Error("kaputt"); }');
   const r = add(env, 'swsh3-025');
   ok('Karte trotzdem gespeichert', r && r.count === 1 && env.data().length === 1);
 }

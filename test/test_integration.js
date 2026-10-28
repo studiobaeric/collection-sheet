@@ -200,10 +200,8 @@ function dataRows(env) {
 
 function checkSheets(env, label) {
   const COL = env.run('COL');
-  // Änderungen speichern nur in Daten (#41): erst einsortieren, dann muss Gruppen der Neuberechnung aus Daten entsprechen
-  env.sortIn();
+  // Gruppen rechnet per Formel (#43) und muss gleich nach jeder Änderung der Neuberechnung aus Daten entsprechen
   const raw = env.run('readData_(sheet_(SHEETS.data))').filter(r => env.ctx.isDataRow_(r));
-  t.ok(label + ': eingesortiert, nichts mehr offen', env.ctx.pendingCount_(raw) === 0, env.ctx.pendingCount_(raw));
   const eids = raw.map(r => String(r[COL.eid]));
   t.ok(label + ': Eintrag-IDs eindeutig und gesetzt', eids.every(e => /^E[0-9a-f]{10}$/.test(e)) && new Set(eids).size === eids.length, eids);
   const badKey = raw.filter(r => String(r[COL.key]) !== env.ctx.entryKey_(r));
@@ -304,7 +302,7 @@ function seedImport(env) {
       { nr: 3, type: 'neu', eid: rA[COL.eid], fp: 'fpaaaaaaaaaa', qty: 1, data: { id: 'swsh3-025' }, sourceId: 'SRC1' },
       { nr: 3, type: 'neu', eid: rB[COL.eid], fp: 'fpbbbbbbbbbb', qty: 2, data: { id: 'swsh3-136' }, sourceId: 'SRC1' }
     ]);
-    c.rebuildGroups_();
+    c.afterDataChange_();
     return { eidA: String(rA[COL.eid]), eidB: String(rB[COL.eid]) };
   });
 }
@@ -341,7 +339,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'einsortieren', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
@@ -367,10 +365,10 @@ function seedImport(env) {
   t.ok('Daten und Gruppen versteckt, Dashboard und Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden &&
     env.ss.list[0].name === 'Dashboard' && env.ss.list[1].name === 'Sammlung', env.ss.list.map(x => x.name));
   t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 16), env.run('VIEW_HEADERS'));
-  t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:AF,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
+  t.ok('Sammlung-Formel liest Gruppen', /FILTER\(VSTACK\('Gruppen'!A2:AG, ""\)/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,einsortieren,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();
@@ -401,18 +399,11 @@ function seedImport(env) {
   let D = dataRows(env);
   const handA = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 2 &&
-    handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '', handA); // Set-Datum holt das Einsortieren
+    handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA); // Set-Datum gleich (#43)
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
-  // Einsortieren (#41): nur Daten gespeichert, die Leiste nennt die Zahl, ihr Knopf sortiert ein
-  t.ok('Gruppen noch leer (nur Daten gespeichert)', env.groups().length === 0, env.groups().length);
-  t.ok('Leiste: 1 Änderung noch nicht einsortiert, mit Knopf', !$('sortBar').classList.contains('hidden') && $('sortBar').classList.contains('bad') &&
-    /1 Änderung ist noch nicht einsortiert/.test($('sortBar').textContent) && !!E.btn($('sortBar'), 'Einsortieren'), $('sortBar').textContent);
-  await E.clickSettle(E.btn($('sortBar'), 'Einsortieren'));
-  t.eq('Knopf ruft einsortieren({ui: true})', E.lastCall('einsortieren').args, [{ ui: true }]);
-  t.ok('Leiste grün mit Meldung, Gruppen und Set-Datum da', $('sortBar').classList.contains('good') && /1 Änderung einsortiert/.test($('sortBar').textContent) &&
-    env.groups().length === 1 && dataRows(env)[0].setDate === '2020-08-14', [$('sortBar').textContent, env.groups().length, dataRows(env)[0].setDate]);
-  E.click(E.btn($('sortBar'), '×'));
-  t.ok('Meldung lässt sich schließen', $('sortBar').classList.contains('hidden'));
+  // Die Tabelle rechnet selbst (#43): Gruppen gleich da, keine Leiste „Einsortieren“ mehr
+  t.ok('Gruppen gleich da, ohne Einsortieren', env.groups().length === 1 && !$('sortBar') && !('pending' in addRes.res),
+    [env.groups().length, !!$('sortBar'), addRes.res]);
   checkSheets(env, 'nach addCard');
   t.ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1'));
   // dieselbe Karte noch einmal über das Formular: zählt in dieselbe Zeile
@@ -422,7 +413,6 @@ function seedImport(env) {
   await E.clickSettle($('cAdd'));
   t.ok('noch einmal hinzugefügt -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
   t.ok('Daten: 3 Stück in derselben Zeile', dataRows(env).find(r => r.eid === handA.eid).count === 3 && E.lastCall('addCard').res.eid === handA.eid);
-  t.ok('Leiste wieder rot: 1 Änderung', /1 Änderung ist noch nicht einsortiert/.test($('sortBar').textContent) && E.lastCall('addCard').res.pending === 1, $('sortBar').textContent);
   checkSheets(env, 'nach dem zweiten Hinzufügen');
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
   t.ok('Gruppen: 3× DE NM, Preis 1,5, Preisstand Trend', G && G['Exemplare'] === '3× DE NM' && G['Anzahl'] === 3 && G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
@@ -791,14 +781,7 @@ function seedImport(env) {
     mw.nameEn === 'Mewtwo' && mw.variant === 'reverse' && mw.cond === 'GD' && mw.lang === 'JP' && mw.count === 2 && mw.price === 3.25 && mw.key === 'old9-007|reverse||GD|JP', mw);
   const mi = E.gIdx('old9-007|reverse|');
   t.ok('UI: Titel mit (EN), Gruppe offen', mi >= 0 && /Mewtu Spezial \(EN\)/.test($('gh' + mi).querySelector('.t').textContent) && E.group('old9-007|reverse|').open);
-  // Einsortieren über die Leiste: das Set-Datum von old9 kommt dazu, deshalb lädt die Sammlung neu (#41)
-  const nCollSort = E.calls('getCollection').length;
-  t.ok('Leiste rot mit Knopf', /noch nicht einsortiert/.test($('sortBar').textContent) && !!E.btn($('sortBar'), 'Einsortieren'), $('sortBar').textContent);
-  await E.clickSettle(E.btn($('sortBar'), 'Einsortieren'));
-  t.ok('Einsortieren: Set-Datum geholt, Sammlung neu geladen', dataRows(env).find(r => r.id === 'old9-007').setDate === '2001-01-01' &&
-    E.lastCall('einsortieren').res.filled > 0 && E.calls('getCollection').length === nCollSort + 1 && E.group('old9-007|reverse|').open,
-    [E.lastCall('einsortieren').res, E.calls('getCollection').length - nCollSort]);
-  t.ok('Leiste grün mit Meldung', $('sortBar').classList.contains('good') && /^1 Änderung einsortiert\. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand\./.test($('sortBar').textContent), $('sortBar').textContent);
+  t.eq('Set-Datum gleich beim Verknüpfen geholt (#43)', mw.setDate, '2001-01-01');
   checkSheets(env, 'nach Verknüpfen (en)');
   checkUiMatchesServer(E, 'nach Verknüpfen (en)');
   // freie Holo-Karte: Holo bleibt beim Verknüpfen erhalten
@@ -825,13 +808,13 @@ function seedImport(env) {
   const ve = env.uiCall('setViewExtras', ['Ordner', 'Gibtsnicht']);
   t.eq('setViewExtras behält nur vorhandene', ve, { viewExtras: ['Ordner'] });
   const gh = env.values('Gruppen')[0];
-  t.ok('Gruppen: Spalte 33 = Ordner (nach den Hilfsspalten)', gh.length === 33 && gh[32] === 'Ordner', gh);
+  t.ok('Gruppen: Spalte 34 = Ordner (nach den Hilfsspalten und der Pokédex-Nr.)', gh.length === 34 && gh[32] === 'Pokédex-Nr.' && gh[33] === 'Ordner', gh);
   t.ok('Gruppen: Wert der Gruppe', env.groups().find(x => x['Gruppenschlüssel'] === GK)['Ordner'] === 'Seite 4');
   const view = env.sheet('Sammlung');
   t.ok('Sammlung: Kopf mit Ordner', view.getRange(5, 17).getValue() === 'Ordner' && view.getRange(5, 16).getValue() === 'Preisstand');
   const f = view.getRange('A6').getFormula();
-  t.ok('Formel liest Gruppen!A2:AG und zeigt Spalte 33', /Gruppen!A2:AG,/.test(f) && /CHOOSECOLS\(srt, 33\)\s*\)\)/.test(f) && !/Daten!/.test(f));
-  t.ok('Setliste aus Gruppen', /Gruppen!D2:D/.test(view.getRange('Z2').getFormula()));
+  t.ok('Formel liest Gruppen!A2:AH und zeigt Spalte 34', /'Gruppen'!A2:AH,/.test(f) && /CHOOSECOLS\(srt, 34\)\s*\)\)/.test(f) && !/Daten'?!/.test(f), f);
+  t.ok('Setliste aus Gruppen', /'Gruppen'!D2:D/.test(view.getRange('Z2').getFormula()), view.getRange('Z2').getFormula());
   const before = env.groups().find(x => x['Gruppenschlüssel'] === 'swsh3-025|normal|Snowflake');
   env.DB['de/cards/swsh3-025'] = H.card('swsh3-025', 'de', { pricing: { cardmarket: { trend: 2, 'trend-holo': 4, updated: '2026-10-15T00:00:00Z' } } });
   env.ctx.preiseJetztAktualisieren();
@@ -951,7 +934,7 @@ function seedImport(env) {
     t.ok('alte Einträge: Schlüssel v2, Herkunft Hand', nd.length === 3 && nd.every(r => r.origin === 'Hand' && r.lang === 'DE' && /^E[0-9a-f]{10}$/.test(r.eid)) &&
       nd.map(r => r.key).join(',') === 'swsh3-025|normal||NM|DE,swsh3-025|reverse|||DE,base1-4|holo||LP|DE', nd.map(r => r.key));
     const vf = nu.sheet('Sammlung').getRange('A6').getFormula();
-    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /Gruppen!A2:AF,/.test(vf) && !/Daten!/.test(vf));
+    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /'Gruppen'!A2:AG,/.test(vf) && !/Daten'?!/.test(vf), vf);
     t.ok('Sammlung: Suchfeld und Bilder-Schalter bleiben', nu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && nu.sheet('Sammlung').getRange('H4').getValue() === true);
     t.ok('Sammlung: Spalte Exemplare statt Zustand', nu.sheet('Sammlung').getRange(5, 6).getValue() === 'Exemplare');
     t.ok('Gruppen: 3 Gruppen', nu.groups().length === 3);
