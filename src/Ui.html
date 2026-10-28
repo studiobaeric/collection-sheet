@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.2
+     Pokémon-Sammlung · Version 1.1.3
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -92,6 +92,7 @@
   .updbar .btn { min-height: 40px; padding: 6px 10px; font-size: 14px; flex: none; }
   .updbar .x { border: 0; background: none; font-size: 20px; min-width: 44px; min-height: 40px; cursor: pointer; color: inherit; flex: none; }
   .updbar.bad { background: var(--errbg); color: var(--err); }
+  .updbar.good { background: var(--okbg); color: var(--ok); }
   .fodd { color: var(--err); font-weight: 600; }
   .ptitle { font-size: 17px; margin: 12px 0 4px; }
   ul.rel { margin: 4px 0 8px 18px; padding: 0; font-size: 14px; }
@@ -123,6 +124,7 @@
 </div>
 <div id="verBar" class="updbar bad hidden"></div>
 <div id="updBar" class="updbar hidden"></div>
+<div id="sortBar" class="updbar bad hidden"></div>
 
 <!-- Hinzufügen -->
 <div id="paneAdd" class="panel">
@@ -219,7 +221,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
-var UI_FILE_VERSION = '1.1.2'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
+var UI_FILE_VERSION = '1.1.3'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -235,7 +237,7 @@ var LANGS = [
   { code: 'KO', label: 'Koreanisch' }, { code: 'ZH', label: 'Chinesisch' }
 ];
 var UI_CONFIG = { versions: [], extras: [], viewExtras: [] };
-var state = { lastQuery: null, lastRes: null, current: null, lastEid: null, lastKey: null, groups: [], open: {} };
+var state = { lastQuery: null, lastRes: null, current: null, groups: [], open: {} };
 var searchGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
 
 function $(id) { return document.getElementById(id); }
@@ -322,7 +324,8 @@ function applyConfig(cfg) {
 }
 /** getUiConfig neu laden (auch für ImportUi, z. B. nach einem Import mit neuen Zusatzspalten) */
 function loadUiConfig() {
-  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); return cfg; })
+  var ticket = pendTicket();
+  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); pendSet(cfg && cfg.pending, ticket); return cfg; })
     .catch(function () { return null; }); // mit den bisherigen Listen weiter
 }
 function fillVersionList() {
@@ -347,7 +350,7 @@ function showTab(t) {
   });
   if (t === 'coll') { collShow(); $('colQuery').focus(); }
   else if (t === 'dex') loadDex();
-  else if (t === 'import') { markStale(); if (typeof impInit === 'function') impInit(); } // ein Import ändert die Sammlung
+  else if (t === 'import') { if (typeof impInit === 'function') impInit(); } // erst ein echter Import ändert die Sammlung (impAsk)
   else if (t === 'upd') updRender();
   else $('fName').focus();
 }
@@ -594,8 +597,6 @@ function drawAdds() {
   var last = lastAdd(), lastOk = null;
   adds.forEach(function (a) { if (a.status === 'ok') lastOk = a; });
   adds = adds.filter(function (a) { return a.status !== 'ok' || a === lastOk; }); // gespeicherte vergessen, bis auf die neueste
-  state.lastEid = last && last.status === 'ok' ? last.res.eid || null : null;
-  state.lastKey = last && last.status === 'ok' ? last.res.key || null : null;
   var html = '';
   adds.forEach(function (a) {
     if (a.status !== 'err') return;
@@ -613,9 +614,7 @@ function drawAdds() {
     html += '<div class="notes lasthead">Zuletzt hinzugefügt' + (ok ? ' (antippen zeigt die Karte in der Sammlung)' : '') + '</div>' +
       '<div class="item">' + imgTag(cardImg(last.image, 'low')) +
       '<div class="info' + (ok ? ' tap" role="button" tabindex="0" onclick="openAdded(' + last.n + ')" onkeydown="addedKey(event,' + last.n + ')"' : '"') + '>' +
-      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div>' +
-      (ok && r.eid ? '<div class="ctl"><button class="btn" onclick="againPlusOne(this)"' + (last.plus ? ' disabled' : '') + '>' +
-        (last.plus ? 'Speichere …' : 'Nochmal +1') + '</button></div>' : '') + '</div>';
+      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div></div>';
   }
   if (pending > 1) html += '<div class="notes">Noch ' + pending + ' Karten werden gespeichert …</div>';
   if (pending) html += '<div class="hint">' + (MODE === 'sidebar' ? 'Seitenleiste' : 'Seite') + ' bitte offen lassen, bis alles gespeichert ist.</div>';
@@ -653,26 +652,6 @@ function addedKey(ev, n) {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
   ev.preventDefault();
   openAdded(n);
-}
-
-function againPlusOne(btn) {
-  var a = lastAdd();
-  if (!a || a.status !== 'ok' || !a.res.eid || a.plus) return;
-  var eid = a.res.eid;
-  a.plus = true;
-  drawAdds();
-  enqueue({
-    send: function () { return call('adjustEntry', eid, 1); },
-    done: function (res) {
-      a.plus = false;
-      if (res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } else markStale();
-      if (res.eid) a.res.eid = res.eid;
-      a.res.count = res.count;
-      a.res.message = 'Noch eine dazu, jetzt ' + res.count + ' Stück.';
-      drawAdds();
-    },
-    fail: function (e) { a.plus = false; drawAdds(); setMsg('addMsg', esc(errText(e)), 'err'); }
-  });
 }
 
 // Freie Karte (tcgdex kennt sie nicht)
@@ -754,8 +733,10 @@ function runQueue() {
   }
   queueBusy = true;
   var next = function () { queueBusy = false; runQueue(); };
+  var ticket = pendTicket();
   op.send().then(function (res) {
     queue.shift(); coll.opsDone++;
+    pendSet(res && res.pending, ticket); // jede Änderung meldet, wie viel noch nicht einsortiert ist (#41)
     try { op.done(res); } finally { next(); }
   }, function (e) {
     queue.shift();
@@ -772,9 +753,11 @@ function loadCollection(okText) {
   if (!coll.all) spinner('collResults', 'Lade die Sammlung …');
   setMsg('collMsg', '');
   drawCollDex();
+  var ticket = pendTicket();
   call('getCollection').then(function (res) {
     if (gen !== coll.gen) return;
     if (queue.length || coll.opsDone !== seen) { coll.loading = false; coll.reloadWanted = true; runQueue(); return; } // inzwischen geändert
+    pendSet(res && res.pending, ticket);
     coll.loading = false;
     coll.stale = coll.staleSeq !== staleSeq; // während des Ladens woanders geändert: beim nächsten Öffnen noch einmal
     coll.all = []; coll.byKey = {};
@@ -1719,6 +1702,67 @@ function dexAdd(nr) {
   $('fSet').value = '';
 }
 
+// ---------- Einsortieren (#41) ----------
+// Jede Änderung speichert nur ins Blatt Daten. Die Blätter Sammlung, Pokédex und Dashboard ziehen erst beim
+// Einsortieren nach (dieser Knopf, Menü, Dashboard oder nachts mit dem Preislauf). Bis dahin zeigt die Leiste unter den
+// Tabs, wie viele Änderungen fehlen. Antworten haben ein Ticket aus der Reihenfolge, in der sie losgeschickt wurden:
+// eine ältere Zahl überschreibt nie eine neuere. Einsortieren läuft über die Warteschlange, also nach allem, was noch
+// gespeichert wird.
+
+var pend = { n: 0, at: 0, seq: 0, busy: false, msg: '', err: '' };
+
+function pendTicket() { return ++pend.seq; }
+/** Zahl aus einer Antwort übernehmen, wenn sie nicht älter ist als die angezeigte */
+function pendSet(n, ticket) {
+  if (typeof n !== 'number' || ticket < pend.at) return;
+  pend.at = ticket;
+  pend.n = n;
+  if (n > 0) pend.msg = '';
+  else pend.err = ''; // inzwischen anders einsortiert (Menü, nachts)
+  sortBar();
+}
+
+function sortBar() {
+  var bar = $('sortBar'), html = '', kind = 'bad';
+  if (pend.busy) {
+    html = '<span class="grow">Sortiere ein … Neue Karten kannst du weiter hinzufügen.</span>';
+  } else if (pend.err) {
+    html = '<span class="grow">Einsortieren ging nicht: ' + esc(pend.err) + '</span>' +
+      '<button class="btn" type="button" onclick="sortIn()">Nochmal</button>';
+  } else if (pend.n > 0) {
+    html = '<span class="grow">⚠ <b>' + pend.n + (pend.n === 1 ? ' Änderung ist' : ' Änderungen sind') + '</b> noch nicht einsortiert. ' +
+      'Sammlung, Pokédex und Dashboard in der Tabelle zeigen den alten Stand.</span>' +
+      '<button class="btn" type="button" onclick="sortIn()">Einsortieren</button>';
+  } else if (pend.msg) {
+    kind = 'good';
+    html = '<span class="grow">' + esc(pend.msg) + '</span>' +
+      '<button class="x" type="button" title="Ausblenden" aria-label="Ausblenden" onclick="sortCloseMsg()">×</button>';
+  }
+  bar.className = 'updbar ' + kind + (html ? '' : ' hidden');
+  bar.innerHTML = html;
+}
+function sortCloseMsg() { pend.msg = ''; sortBar(); }
+
+/** Knopf Einsortieren: holt fehlende Daten bei tcgdex und baut Sammlung, Pokédex und Dashboard neu auf. */
+function sortIn() {
+  if (pend.busy) return;
+  pend.busy = true; pend.err = ''; pend.msg = '';
+  sortBar();
+  enqueue({
+    send: function () { return call('einsortieren', { ui: true }); },
+    done: function (res) {
+      pend.busy = false;
+      pend.msg = (res && res.message) || 'Einsortiert.';
+      sortBar();
+      if (res && res.filled) { // Set-Daten oder Pokédex-Nummern sind dazugekommen
+        markStale();
+        if (!$('paneColl').classList.contains('hidden')) collShow();
+      }
+    },
+    fail: function (e) { pend.busy = false; pend.err = errText(e); sortBar(); }
+  });
+}
+
 // ---------- Updates ----------
 
 var UPD = null; // Antwort von getUpdateInfo
@@ -2059,6 +2103,8 @@ loadUiConfig();
 $('takeImgHint').textContent = UPD_IMAGE_HINT;
 updLoad(START === 'upd'); // Menü „Nach Updates suchen“: frisch von GitHub
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fileCheck); else fileCheck();
+// Sammlung schon jetzt im Hintergrund laden, dann ist der Tab Sammlung sofort da (#39 V3)
+if (START !== 'takeover') loadCollection();
 if (START === 'upd') showTab('upd');
 else if (START === 'takeover') updOpenTakeover();
 // Knopf „Importieren“: der Bereich Import steht erst nach diesem Skript im Dokument (include am Ende)

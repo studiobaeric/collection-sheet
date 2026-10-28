@@ -47,7 +47,7 @@ const ASSETS = H.createEnv().run('DASH_ASSETS');
 t.section('Knöpfe: Liste, Funktionen, Bilder im Repo');
 {
   const env = H.createEnv();
-  eq('11 Knöpfe: 7 Aktionen, 4 Blätter', BTN.map(b => b.key + (b.nav ? ' (Blatt)' : '')), ['erfassen', 'preise', 'import', 'updates', 'sets', 'ansicht', 'handy',
+  eq('12 Knöpfe: 8 Aktionen, 4 Blätter', BTN.map(b => b.key + (b.nav ? ' (Blatt)' : '')), ['erfassen', 'einsortieren', 'preise', 'import', 'updates', 'sets', 'ansicht', 'handy',
     'sammlung (Blatt)', 'pokedex (Blatt)', 'verlauf (Blatt)', 'seltenheiten (Blatt)']);
   ok('jede Funktion ist öffentlich und vorhanden', BTN.every(b => !/_$/.test(b.fn) && typeof env.ctx[b.fn] === 'function'), BTN.filter(b => typeof env.ctx[b.fn] !== 'function'));
   eq('Zeichen-Skript und Code.gs: gleiche Schlüssel und Beschriftungen', KN.BUTTONS.map(b => [b.key, b.label]), BTN.map(b => [b.key, b.label]));
@@ -65,7 +65,7 @@ t.section('Knöpfe: Liste, Funktionen, Bilder im Repo');
   ok('Bilder fest auf einen Commit (nicht main)', /^https:\/\/raw\.githubusercontent\.com\/studiobaeric\/collection-sheet\/[0-9a-f]{40}\/assets\/dashboard\/$/.test(ASSETS), ASSETS);
   eq('Lage der Knöpfe', BTN.map((b, i) => J(env.ctx.dashButtonCell_(i))), [
     '{"row":12,"col":2}', '{"row":12,"col":6}', '{"row":12,"col":10}', '{"row":12,"col":14}',
-    '{"row":13,"col":2}', '{"row":13,"col":6}', '{"row":13,"col":10}',
+    '{"row":13,"col":2}', '{"row":13,"col":6}', '{"row":13,"col":10}', '{"row":13,"col":14}',
     '{"row":17,"col":2}', '{"row":17,"col":6}', '{"row":17,"col":10}', '{"row":17,"col":14}']);
 }
 
@@ -108,7 +108,7 @@ t.section('Einrichtung legt das Dashboard an');
   ok('Wertverlauf leer', sh.getRange('R2:R91').getValues().every(r => r[0] === ''));
   // Knöpfe
   const imgs = buttons(env);
-  eq('11 Knöpfe, je einmal geladen', [imgs.length, assetFetches(env).length], [11, 11]);
+  eq('12 Knöpfe, je einmal geladen', [imgs.length, assetFetches(env).length], [12, 12]);
   eq('geladen von DASH_ASSETS', assetFetches(env).map(u => u.slice(ASSETS.length)).sort(), BTN.map(b => b.key + '.png').sort());
   const wrong = BTN.map((b, i) => {
     const img = imgs.find(x => x.getAltTextDescription() === 'Dashboard-Knopf ' + b.key + ' v' + env.run('DASH_ASSET_VERSION'));
@@ -131,6 +131,14 @@ t.section('Kennzahlen nach Änderungen');
   const env = setup();
   add(env, { qty: 2 });
   add(env, { variant: 'reverse' });
+  // nur gespeichert (#41): die Kacheln stehen noch auf dem alten Stand, darunter der rote Hinweis
+  eq('nur gespeichert: Kacheln beim alten Stand', ['C6', 'G6', 'K6'].map(a => cell(env, a)), [0, 0, '0 von 1025']);
+  const f9 = dash(env).getRange('C9').getFormula();
+  ok('Hinweis unter den Kacheln: Formel mit der Zahl, rot', /^=LET\(offen, SUMPRODUCT\(ISNUMBER\(Daten!V2:V\)\*\(Daten!V2:V>MAX\(Gruppen!V2:V\)\)\), IF\(offen>0, "⚠ "&offen&/.test(f9) &&
+    /noch nicht einsortiert, die Zahlen zeigen den alten Stand\. Knopf Einsortieren unten", ""\)\)$/.test(f9) &&
+    dash(env).getRange('C9').getFontColor() === env.run('DASH_COLORS').warn, f9);
+  env.ctx.einsortieren(); // wie der Knopf im Dashboard (ohne Argument)
+  ok('Knopf Einsortieren: Meldung unten rechts', env.ss.toasts.slice(-1)[0] === '2 Änderungen einsortiert. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand.', env.ss.toasts.slice(-2));
   const v = env.ctx.collectionValue_(env.ctx.readData_(env.sheet('Daten')));
   ok('Wert der Sammlung > 0', v.total > 0 && v.cards === 3, v);
   eq('Gesamtwert, Karten, Pokédex', ['C6', 'G6', 'K6'].map(a => cell(env, a)), [v.total, 3, '1 von 1025']);
@@ -248,7 +256,7 @@ t.section('Knöpfe beim erneuten Aufbau');
   const sh = dash(env);
   const before = buttons(env);
   env.ctx.setupAll_();
-  ok('Einrichtung noch einmal: keine neuen Abrufe, dieselben Bilder', assetFetches(env).length === 11 && buttons(env).length === 11 &&
+  ok('Einrichtung noch einmal: keine neuen Abrufe, dieselben Bilder', assetFetches(env).length === BTN.length && buttons(env).length === BTN.length &&
     buttons(env).every(i => before.indexOf(i) >= 0), [assetFetches(env).length, buttons(env).length]);
   env.ctx.ansichtNeuAufbauen();
   eq('Ansicht neu aufbauen: Meldung ohne Ladefehler', env.ui.alerts.slice(-1)[0], 'Ansicht neu aufgebaut.');
@@ -264,14 +272,14 @@ t.section('Knöpfe beim erneuten Aufbau');
   const k0 = buttons(env).find(i => /erfassen/.test(i.getAltTextDescription()));
   ok('verschobener Knopf wieder an seinem Platz', k0 === before[0] && k0.getAnchorCell().getA1Notation() === 'B12' && k0.getWidth() === 276 && k0.getScript() === 'kartenErfassen');
   ok('eigenes Bild bleibt', sh.getImages().indexOf(own) >= 0 && !own.removed);
-  ok('doppelter und unbekannter Knopf entfernt', dup.removed && odd.removed && buttons(env).length === 11 &&
+  ok('doppelter und unbekannter Knopf entfernt', dup.removed && odd.removed && buttons(env).length === BTN.length &&
     buttons(env).filter(i => /preise/.test(i.getAltTextDescription())).length === 1);
-  ok('dabei nichts geladen', assetFetches(env).length === 11);
+  ok('dabei nichts geladen', assetFetches(env).length === BTN.length);
   // neue Bild-Version: alle ersetzen
   buttons(env).forEach(i => i.setAltTextDescription(i.getAltTextDescription().replace(/ v\S+$/, ' v0')));
   const old = buttons(env);
   env.ctx.ansichtNeuAufbauen();
-  ok('alte Bild-Version: alle neu geladen und ersetzt', old.every(i => i.removed) && buttons(env).length === 11 && assetFetches(env).length === 22 &&
+  ok('alte Bild-Version: alle neu geladen und ersetzt', old.every(i => i.removed) && buttons(env).length === BTN.length && assetFetches(env).length === 2 * BTN.length &&
     buttons(env).every(i => / v1$/.test(i.getAltTextDescription())), [assetFetches(env).length, buttons(env).length]);
   ok('eigenes Bild bleibt auch dabei', !own.removed);
   // Blatt von Hand verschoben: wieder nach vorne, Inhalt neu
@@ -297,7 +305,7 @@ t.section('GitHub nicht erreichbar');
   ok('Kennzahlen trotzdem da', cell(env, 'C2') === 'Pokémon-Sammlung' && cell(env, 'K6') === '0 von 1025');
   env.fetchFail = null;
   env.ctx.ansichtNeuAufbauen();
-  eq('wieder erreichbar: Knöpfe da, Hinweis normal', [buttons(env).length, cell(env, 'C19'), env.ui.alerts.slice(-1)[0]], [11, env.run('DASH_HELP'), 'Ansicht neu aufgebaut.']);
+  eq('wieder erreichbar: Knöpfe da, Hinweis normal', [buttons(env).length, cell(env, 'C19'), env.ui.alerts.slice(-1)[0]], [BTN.length, env.run('DASH_HELP'), 'Ansicht neu aufgebaut.']);
 
   const env2 = H.createEnv();
   env2.fetchFail = url => (ASSET_RE.test(url) ? 'throw' : undefined);
@@ -307,11 +315,11 @@ t.section('GitHub nicht erreichbar');
   const env3 = H.createEnv();
   env3.http = url => (/\/preise\.png$/.test(url) ? { code: 404, body: '404: Not Found' } : /\/sets\.png$/.test(url) ? { code: 200, body: Buffer.alloc(0) } : undefined);
   env3.ctx.setupAll_();
-  ok('zwei fehlen (404, leeres Bild): 9 Knöpfe, Hinweis', buttons(env3).length === 9 && cell(env3, 'C19') === FAILED &&
+  ok('zwei fehlen (404, leeres Bild): zwei Knöpfe weniger, Hinweis', buttons(env3).length === BTN.length - 2 && cell(env3, 'C19') === FAILED &&
     !buttons(env3).some(i => / (preise|sets) /.test(i.getAltTextDescription())));
   env3.http = null;
   env3.ctx.ansichtNeuAufbauen();
-  eq('danach: nur die zwei fehlenden geladen', [buttons(env3).length, assetFetches(env3).slice(9).map(u => u.split('/').pop())], [11, ['preise.png', 'sets.png']]);
+  eq('danach: nur die zwei fehlenden geladen', [buttons(env3).length, assetFetches(env3).slice(BTN.length - 2).map(u => u.split('/').pop())], [BTN.length, ['preise.png', 'sets.png']]);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,7 +347,7 @@ t.section('Blätter öffnen, Dashboard, Import');
   add(env);
   ok('ohne Dashboard: Änderungen legen keins an', !env.sheet('Dashboard') && env.ctx.refreshDashboard_([]) === false);
   env.ctx.zumDashboard();
-  ok('Menü Dashboard: neu aufgebaut, vorne, offen, mit Knöpfen', env.ss.list[0].name === 'Dashboard' && active() === 'Dashboard' && buttons(env).length === 11 && cell(env, 'G6') === 1);
+  ok('Menü Dashboard: neu aufgebaut, vorne, offen, mit Knöpfen', env.ss.list[0].name === 'Dashboard' && active() === 'Dashboard' && buttons(env).length === BTN.length && cell(env, 'G6') === 1);
   // Importieren: Seitenleiste im Bereich Import
   env.ctx.importAnzeigen();
   const tpl = env.templates[env.templates.length - 1];
@@ -446,7 +454,7 @@ t.section('Eigenes Blatt „Dashboard“ aus der Zeit vor 1.1.0');
   ok('eigenes Blatt bleibt als „Dashboard (alt 2)“, Inhalt unverändert', env.sheet('Dashboard (alt 2)') && env.sheet('Dashboard (alt 2)').getRange('B2').getValue() === 300 &&
     env.sheet('Dashboard (alt)').getRange('A1').getValue() === 'noch älter', env.ss.list.map(s => s.name));
   ok('Hinweis unten rechts', env.ss.toasts.some(m => /Dein Blatt „Dashboard“ heißt jetzt „Dashboard \(alt 2\)“/.test(m)), env.ss.toasts);
-  ok('Dashboard des Tools neu, vorne, mit Knöpfen', env.ss.list[0].name === 'Dashboard' && cell(env, 'C2') === 'Pokémon-Sammlung' && buttons(env).length === 11);
+  ok('Dashboard des Tools neu, vorne, mit Knöpfen', env.ss.list[0].name === 'Dashboard' && cell(env, 'C2') === 'Pokémon-Sammlung' && buttons(env).length === BTN.length);
   ok('jetzt in TOOL_SHEETS', JSON.parse(env.setting('TOOL_SHEETS')).indexOf('Dashboard') >= 0);
   const n = env.ss.list.length;
   env.ctx.ansichtNeuAufbauen();
@@ -460,7 +468,7 @@ t.section('Eigenes Blatt „Dashboard“ aus der Zeit vor 1.1.0');
   const env2 = H.createEnv({ sheets: ['Tabellenblatt1', 'Dashboard'] });
   env2.sheet('Dashboard').getRange('A1').setValue('Meins');
   env2.ctx.setupAll_();
-  ok('neue Tabelle: eigenes Blatt als „Dashboard (alt)“', env2.sheet('Dashboard (alt)').getRange('A1').getValue() === 'Meins' && buttons(env2).length === 11);
+  ok('neue Tabelle: eigenes Blatt als „Dashboard (alt)“', env2.sheet('Dashboard (alt)').getRange('A1').getValue() === 'Meins' && buttons(env2).length === BTN.length);
 }
 
 // ---------------------------------------------------------------------------
@@ -468,7 +476,7 @@ t.section('Code ohne Update.gs');
 {
   const env = H.createEnv({ files: ['Code.gs', 'Import.gs'] });
   env.ctx.setupAll_();
-  ok('Dashboard auch ohne Update.gs, ohne Hinweis auf Versionen', buttons(env).length === 11 && cell(env, 'O2') === 'Version ' + env.run('TOOL_VERSION'));
+  ok('Dashboard auch ohne Update.gs, ohne Hinweis auf Versionen', buttons(env).length === BTN.length && cell(env, 'O2') === 'Version ' + env.run('TOOL_VERSION'));
 }
 
 t.done();

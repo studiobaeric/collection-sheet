@@ -147,11 +147,17 @@ t.section('Blatt Sammlung');
     ['Preis (EUR)', 'Wert (EUR)', '± 30 Tage (EUR)', '± 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand']);
   eq('Formate: Euro und Prozent mit Vorzeichen', [view.getRange('J6').getNumberFormat(), view.getRange('K6').getNumberFormat()],
     [env.run('SIGNED_EUR_FORMAT'), env.run('SIGNED_PCT_FORMAT')]);
-  ok('drei Regeln: grau bei 0 Exemplaren, grün, rot', view.getConditionalFormatRules().length === 3);
+  const rules = view.getConditionalFormatRules();
+  ok('vier Regeln: grau bei 0 Exemplaren, grün, rot, Hinweis „noch nicht einsortiert“ (#41)', rules.length === 4 &&
+    rules[3].arg('whenFormulaSatisfied') === '=LEFT($A$2)="⚠"' && rules[3].arg('setFontColor') === '#a50e0e' && rules[3].arg('setBackground') === '#fce8e6',
+    rules.map(r => r.arg('whenFormulaSatisfied')));
   ok('Suche im Blatt: Hinweis nennt den Künstler', /Künstler/.test(view.getRange('B3').getValue()), view.getRange('B3').getValue());
   const f = view.getRange('A6').getFormula();
-  ok('Formel: Suche auch im Illustrator (Gruppen-Spalte 20)', /ISNUMBER\(SEARCH\(wd, INDEX\(rw, 1, 20\)\)\)/.test(f));
-  ok('Formel: Spalten 24 bis 26 nach dem Wert', /CHOOSECOLS\(srt, 29\),\s+CHOOSECOLS\(srt, 24\), CHOOSECOLS\(srt, 25\), CHOOSECOLS\(srt, 26\),/.test(f), f.slice(-400));
+  const G = env.run('GCOL');
+  ok('Formel: Suche im Suchtext (Name, Name englisch, Illustrator)', new RegExp('ISNUMBER\\(SEARCH\\(wd, CHOOSECOLS\\(dat, ' + G['Suchtext'] + '\\)\\)\\)').test(f));
+  ok('Formel: Spalten 24 bis 26 nach dem Wert', new RegExp('CHOOSECOLS\\(srt, ' + G['Wert (EUR)'] + '\\), CHOOSECOLS\\(srt, 24\\), CHOOSECOLS\\(srt, 25\\), CHOOSECOLS\\(srt, 26\\),').test(f), f.slice(-400));
+  const g = env.objects('Gruppen')[0];
+  ok('Suchtext: Name, Name englisch und Illustrator', g && g['Suchtext'] === [g['Name'], g['Name englisch'], g['Illustrator']].join('\n'), g && g['Suchtext']);
   ok('Formel ohne Komma-Fallen in den neuen Regeln (deutsche Tabelle)', env.run('SIGNED_PCT_FORMAT').indexOf(',') < 0);
 }
 

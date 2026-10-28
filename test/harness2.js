@@ -17,7 +17,7 @@
  *
  * Wichtigste Teile von env: ctx, ss, DB, props, cache, ui, lock, fetchLog, triggers, templates, files (Drive),
  * sheet(name), values(name), objects(name), data(), groups(), proto(), addSource(spec), uiCall(fn, ...args),
- * run(code), setFormulaDisplay(fn).
+ * sortIn() (Knopf Einsortieren), run(code), setFormulaDisplay(fn).
  *
  * Andere Adressen als tcgdex (GitHub, Apps-Script-API …): env.http = (url, options) => {code, body} | undefined.
  * Die Bilder der Dashboard-Knöpfe (raw.githubusercontent.com/…/assets/dashboard/) kommen ohne env.http aus dem Repo.
@@ -50,6 +50,19 @@ function chainObj() {
     apply: () => c
   });
   return c;
+}
+
+/** Bauer für bedingte Formatierung: merkt sich jeden Aufruf, build() -> {calls: [[Name, ...Argumente]], arg(Name)} */
+function ruleBuilder() {
+  const calls = [];
+  const b = new Proxy({}, {
+    get: (t, p) => {
+      if (p === 'then') return undefined;
+      if (p === 'build') return () => ({ calls: calls.slice(), arg: n => { const c = calls.find(x => x[0] === n); return c ? c[1] : undefined; } });
+      return (...args) => { calls.push([String(p), ...args]); return b; };
+    }
+  });
+  return b;
 }
 
 function colNum(s) {
@@ -829,7 +842,7 @@ function createEnv(opts) {
     ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' },
     BorderStyle: { SOLID: 'SOLID', DASHED: 'DASHED' },
     newDataValidation: () => chainObj(),
-    newConditionalFormatRule: () => chainObj(),
+    newConditionalFormatRule: () => ruleBuilder(),
     newRichTextValue() {
       const rt = { text: '', link: null };
       const b = {
@@ -946,6 +959,8 @@ function createEnv(opts) {
     assertPlain(res, fn);
     return res === undefined ? undefined : JSON.parse(JSON.stringify(res));
   };
+  /** Knopf Einsortieren (#41): Änderungen speichern nur ins Blatt Daten, Gruppen, Pokédex und Dashboard ziehen hier nach. */
+  env.sortIn = () => env.uiCall('einsortieren', { ui: true });
   env.setFormulaDisplay = fn => { env.formulaDisplay = fn; };
   return env;
 }

@@ -233,6 +233,9 @@ t.section('searchCollection');
   addImportRow(env, glurakCard(), { nr: 7, fp: 'fpB', cond: 'EX', count: 1 });
   env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
+  ok('Set-Daten neuer Sets erst beim Einsortieren (#41)', env.data().every(r => r.setDate === '' || r.origin !== 'Hand'), env.data().map(r => [r.id, r.setDate]));
+  env.sortIn();
+  ok('nach dem Einsortieren: alle Set-Daten da', env.data().every(r => /^\d{4}-\d\d-\d\d$/.test(r.setDate)), env.data().map(r => [r.id, r.setDate]));
   let res = env.uiCall('searchCollection', '', '');
   ok('groups total', res.total === 3 && res.groups.length === 3, res.total);
   eq('sort by set date (base1 first)', res.groups.map(g => g.gkey), ['base1-4|holo|', 'swsh3-025|normal|', 'swsh3-025|normal|Snowflake']);
@@ -313,6 +316,8 @@ t.section('adjustEntry / revertAdjust');
   // Rückgängig des +1, das die Zeile angelegt hat: Zeile ist wieder 0 -> gelöscht
   r = env.uiCall('revertAdjust', tokCreate);
   ok('revert of creating +1 deletes Hand row at 0', r.count === 0 && !env.data().some(x => x.eid === hand.eid) && env.data().length === 1, [r, env.data().length]);
+  ok('Gruppen noch beim alten Stand, nur Daten gespeichert (#41)', groupBy(env, 'swsh3-025|normal|')['Anzahl'] === 2, groupBy(env, 'swsh3-025|normal|')['Anzahl']);
+  env.sortIn();
   ok('Gruppen updated after revert', groupBy(env, 'swsh3-025|normal|')['Anzahl'] === 0);
   t.throws('unknown eid', () => env.uiCall('adjustEntry', 'Exxxxxxxxxx', 1), /nicht gefunden/);
   ok('no nested locks', env.lock.nested === 0, env.lock);
@@ -356,6 +361,7 @@ t.section('editEntry');
   ok('unknown extra creates column', c.extraNames_().indexOf('Neue Spalte') >= 0 && env.data().find(x => x.eid === a.eid).extras['Neue Spalte'] === 'x');
   // Sonderversion wechselt die Gruppe
   r = env.uiCall('editEntry', a.eid, { version: 'Snowflake' });
+  env.sortIn();
   ok('version moves to other group', r.gkey === 'swsh3-025|normal|Snowflake' && groupBy(env, 'swsh3-025|normal|Snowflake')['Anzahl'] === 3, r);
   r = env.uiCall('editEntry', a.eid, {});
   ok('no change -> ok', r.ok && r.eid === a.eid);
@@ -377,6 +383,7 @@ t.section('setGroupOwnPrice / Gruppen');
   let r = env.uiCall('setGroupOwnPrice', a.gkey, 4.2);
   ok('set own price', r.gkey === a.gkey && r.price === 4.2 && r.priceManual === true, r);
   ok('own price on all rows', env.data().every(x => x.ownPrice === 4.2 && x.ownPriceDate === TODAY));
+  env.sortIn();
   g = groupBy(env, a.gkey);
   ok('Gruppen effective price + manuell date', g['Preis (EUR)'] === 4.2 && g['Preisstand'] === 'manuell ' + TODAY_DMY, g['Preisstand']);
   const s = env.uiCall('searchCollection', '', '').groups[0];
@@ -394,9 +401,19 @@ t.section('setGroupOwnPrice / Gruppen');
   t.throws('unknown group', () => env.uiCall('setGroupOwnPrice', 'x|normal|', 2), /nicht gefunden/);
   // Name mit Sonderversion, leere Gruppe, freie Karte
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
+  env.sortIn();
   ok('Gruppen name with version', groupBy(env, 'swsh3-025|normal|Snowflake')['Name'] === 'Glurak · Snowflake');
+  {
+    // Hilfsspalten für die Ansichtsformel (#39 V2)
+    const gv = groupBy(env, 'swsh3-025|normal|Snowflake');
+    const num = gv['Preis (EUR)'] === '' ? 0 : gv['Preis (EUR)'] * gv['Anzahl'];
+    ok('Gruppen helper columns', gv['Suchtext'] === ['Glurak · Snowflake', gv['Name englisch'], gv['Illustrator']].join('\n') &&
+      gv['Wert (EUR)'] === num && gv['Name Anzeige'] === 'Glurak · Snowflake' && gv['Nummer Anzeige'] === gv['Nummer'] + (gv['Setgröße'] === '' ? '' : '/' + gv['Setgröße']) &&
+      gv['Variante Anzeige'] === 'Normal' && (gv['Preis Anzeige'] === gv['Preis (EUR)'] || (gv['Preis (EUR)'] === '' && gv['Preis Anzeige'] === 'kein Preis')), gv);
+  }
   const b = env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('adjustEntry', b.eid, -1);
+  env.sortIn();
   g = groupBy(env, b.gkey);
   ok('empty group: Exemplare empty, Anzahl 0', g['Exemplare'] === '' && g['Anzahl'] === 0, g);
   // Zusatzspalten in der Ansicht
@@ -409,15 +426,15 @@ t.section('setGroupOwnPrice / Gruppen');
   const ve = env.uiCall('setViewExtras', ['Fach', 'Gibtsnicht', 'Fach']);
   eq('setViewExtras keeps existing names only', ve, { viewExtras: ['Fach'] });
   g = groupBy(env, a.gkey);
-  ok('Gruppen extra column values joined', env.values('Gruppen')[0][26] === 'Fach' && (g['Fach'] === 'A1 / B2' || g['Fach'] === 'B2 / A1'), g['Fach']);
+  ok('Gruppen extra column values joined', env.values('Gruppen')[0][env.run('GROUP_HEADERS').length] === 'Fach' && (g['Fach'] === 'A1 / B2' || g['Fach'] === 'B2 / A1'), g['Fach']);
   const view = env.values('Sammlung');
   ok('view header has extra', view[4][16] === 'Fach', view[4]);
   const f = env.sheet('Sammlung').formulas['6,1'];
-  ok('view formula reads Gruppen with extra', /Gruppen!A2:AA,/.test(f) && /CHOOSECOLS\(srt, 27\)\s*\)\), "Keine/.test(f) && !/Daten!/.test(f), f.slice(0, 120));
+  ok('view formula reads Gruppen with extra', /Gruppen!A2:AG,/.test(f) && /CHOOSECOLS\(srt, 33\)\s*\)\)\), "Keine/.test(f) && !/Daten!/.test(f), f.slice(0, 120));
   env.sheet('Sammlung').getRange('B4').setValue('glurak');
   env.uiCall('setViewExtras', []);
   ok('view controls kept on layout change', env.sheet('Sammlung').getRange('B4').getValue() === 'glurak');
-  ok('extra removed from view', env.values('Gruppen')[0].length === 26 && env.values('Sammlung')[4][15] === 'Preisstand' && env.values('Sammlung')[4][16] === '', env.values('Sammlung')[4]);
+  ok('extra removed from view', env.values('Gruppen')[0].length === env.run('GROUP_HEADERS').length && env.values('Sammlung')[4][15] === 'Preisstand' && env.values('Sammlung')[4][16] === '', env.values('Sammlung')[4]);
   ok('no nested locks', env.lock.nested === 0, env.lock);
 }
 
@@ -427,13 +444,21 @@ t.section('viewFormula_ / Ansicht');
   const env = setup();
   const c = env.ctx;
   const f0 = c.viewFormula_(0), f2 = c.viewFormula_(2);
-  ok('formula 0 extras', /FILTER\(Gruppen!A2:Z, Gruppen!A2:A<>""\)/.test(f0) && /HSTACK\(flt, zsort, msort, vals\), 27, TRUE, 28, TRUE, 5, TRUE/.test(f0) && /CHOOSECOLS\(srt, 29\)/.test(f0), f0);
-  ok('formula 2 extras', /Gruppen!A2:AB,/.test(f2) && /, 29, TRUE, 30, TRUE,/.test(f2) && /CHOOSECOLS\(srt, 31\)/.test(f2) && /CHOOSECOLS\(srt, 27\), CHOOSECOLS\(srt, 28\)/.test(f2), f2);
-  ok('Zuletzt hinzugefügt uses column 21', /CHOOSECOLS\(flt, 21\)/.test(f0));
-  ok('Exemplare column 13, price 15', /CHOOSECOLS\(srt, 13\),\s+CHOOSECOLS\(srt, 14\),\s+MAP\(CHOOSECOLS\(srt, 15\)/.test(f0));
+  const G = env.run('GCOL');
+  ok('GCOL matches GROUP_HEADERS', env.run('GROUP_HEADERS').every((h, i) => G[h] === i + 1) && G['Anzahl'] === 14 && G['Suchtext'] === 27);
+  ok('formula 0 extras', /FILTER\(Gruppen!A2:AF, Gruppen!A2:A<>""\)/.test(f0) && /HSTACK\(flt, zsort, msort\), 33, TRUE, 34, TRUE, 5, TRUE, 3, TRUE, 23, TRUE, 7, TRUE, 12, TRUE, 9, TRUE\)/.test(f0), f0);
+  ok('formula 2 extras', /Gruppen!A2:AH,/.test(f2) && /, 35, TRUE, 36, TRUE,/.test(f2) && /CHOOSECOLS\(srt, 16\), CHOOSECOLS\(srt, 33\), CHOOSECOLS\(srt, 34\) \)\)\)/.test(f2), f2);
+  ok('no LAMBDA, BYROW, MAP or REDUCE (#39 V2)', !/LAMBDA|BYROW|MAP\(|REDUCE/.test(f0) && /^=IFERROR\(ARRAYFORMULA\(LET\(/.test(f0) && /MMULT\(SIGN\(hit\)/.test(f0));
+  ok('Zuletzt hinzugefügt uses column 21', /tm, CHOOSECOLS\(flt, 21\)/.test(f0));
+  // Ausgabe: Spalten der Ansicht in der Reihenfolge von VIEW_HEADERS (Bild zuerst, aus der Bild-URL)
+  const outCols = (f0.match(/IMAGE\(url&"\/low\.png"\), IF\(H4=TRUE, "–", ""\)\),\s+(.*?) \)\)\)/) || [])[1] || '';
+  const want = ['Name Anzeige', 'Setname', 'Nummer Anzeige', 'Variante Anzeige', 'Exemplare', 'Anzahl', 'Preis Anzeige', 'Wert (EUR)',
+    'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand'];
+  eq('view columns by name', (outCols.match(/CHOOSECOLS\(srt, \d+\)/g) || []).map(x => +x.replace(/\D/g, '')), want.map(h => G[h]));
+  ok('url from Bild-URL, search in Suchtext, number and set size', /url, CHOOSECOLS\(srt, 17\)/.test(f0) && /SEARCH\(wd, CHOOSECOLS\(dat, 27\)\)/.test(f0) &&
+    /TO_TEXT\(CHOOSECOLS\(dat, 7\)\)=wnr/.test(f0) && /TO_TEXT\(CHOOSECOLS\(dat, 8\)\)=wsz/.test(f0) && /CHOOSECOLS\(dat, 4\)=C4/.test(f0) && /wert, CHOOSECOLS\(flt, 28\)/.test(f0));
   ok('no <? in formula', f0.indexOf('<?') < 0);
   eq('VIEW_HEADERS', env.run('VIEW_HEADERS'), ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)', '± 30 Tage (EUR)', '± 30 Tage (%)', 'Verlauf seit', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand']);
-  ok('change columns after Wert, artist in the search', /CHOOSECOLS\(srt, 29\),\s+CHOOSECOLS\(srt, 24\), CHOOSECOLS\(srt, 25\), CHOOSECOLS\(srt, 26\),/.test(f0) && /SEARCH\(wd, INDEX\(rw, 1, 20\)\)/.test(f0));
   ok('Daten probe now Gruppen', env.run('FORMULA_PROBES').some(p => /Gruppen!A1:Z/.test(p[0])) && !env.run('FORMULA_PROBES').some(p => /Daten!/.test(p[0])));
   const z = env.sheet('Sammlung').formulas['2,26'];
   ok('set list from Gruppen!D2:D', /Gruppen!D2:D/.test(z), z);
@@ -441,7 +466,7 @@ t.section('viewFormula_ / Ansicht');
   env.setFormulaDisplay((sheet, a1, formula) => (/,/.test(formula.replace(/"[^"]*"/g, '')) ? '#ERROR!' : ''));
   c.ansichtNeuAufbauen();
   const a6 = env.sheet('Sammlung').formulas['6,1'];
-  ok('setFormulaLocal_ falls back to semicolons', /Gruppen!A2:Z; Gruppen!A2:A<>""/.test(a6), a6.slice(0, 80));
+  ok('setFormulaLocal_ falls back to semicolons', /Gruppen!A2:AF; Gruppen!A2:A<>""/.test(a6), a6.slice(0, 80));
   ok('ansichtNeuAufbauen message', /Ansicht neu aufgebaut/.test(env.ui.alerts[env.ui.alerts.length - 1]));
 }
 
@@ -464,6 +489,7 @@ t.section('linkFreeGroup');
   const li = d.find(x => x.eid === eidOfRow(imp, env));
   ok('import row linked, keeps origin/fp/cond/ownPrice', li.id === 'swsh3-025' && li.origin === 'Import 3' && li.fp === 'fz' && li.cond === 'LP' && li.ownPrice === 9 &&
     li.source === 'de' && li.name === 'Glurak' && li.setName === 'Flammende Finsternis' && li.localId === '025' && li.img && li.price === 1.5 && li.key === 'swsh3-025|normal||LP|DE', li);
+  env.sortIn();
   ok('one group now', env.groups().length === 1 && env.groups()[0]['Anzahl'] === 4);
   // englische Daten: freier Name bleibt
   const f2 = env.uiCall('addFreeCard', { name: 'Mewtu Spezial', number: '7' });
@@ -596,12 +622,16 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   ok('getCardBySetNumber', bs.id === 'swsh3-136');
   r = env.uiCall('searchCards', { name: 'Mewtu' });
   ok('en fallback via translation', r.stage === 'en' && r.cards[0].id === 'old9-007', r);
-  // Set-Datum nachtragen beim Preislauf
+  // Set-Datum: ein Set ohne Datum im Blatt Sets holt erst das Einsortieren (#41), danach trägt addCard es nach
+  env.fetchLog.length = 0;
   const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
+  ok('addCard: Datum eines neuen Sets fehlt noch, kein Set-Abruf', env.data()[0].setDate === '' && !env.fetchLog.some(u => /\/sets\//.test(u)), [env.data()[0].setDate, env.fetchLog]);
+  env.sortIn();
+  ok('Einsortieren holt das Set-Datum', env.data()[0].setDate === '2020-08-14' && env.fetchLog.some(u => /\/sets\/swsh3$/.test(u)), env.data()[0].setDate);
   const sh = env.sheet('Daten');
   sh.getRange(2, 5).setValue('');
   env.uiCall('addCard', { id: 'swsh3-136', lang: 'de', variant: 'base', qty: 1 });
-  ok('addCard backfills set date', env.data()[0].setDate === '2020-08-14', env.data()[0].setDate);
+  ok('addCard backfills set date', env.data()[0].setDate === '2020-08-14' && env.data()[1].setDate === '2020-08-14', env.data().map(x => x.setDate));
   sh.getRange(2, 5).setValue('');
   env.ctx.preiseJetztAktualisieren();
   ok('price run backfills set date', env.data().every(x => x.setDate === '2020-08-14'));
@@ -609,8 +639,8 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
-  ok('menu mit Dashboard, ohne Einrichtung', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7 &&
-    env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung'), env.ui.menus[0].items);
+  ok('menu mit Einsortieren und Dashboard, ohne Einrichtung', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 8 &&
+    env.ui.menus[0].items[1][1] === 'einsortieren' && env.ui.menus[0].items[2][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung'), env.ui.menus[0].items);
   ok('getSetSuggestions', env.uiCall('getSetSuggestions').indexOf('Darkness Ablaze') >= 0);
   ok('Hand row count', a.count === 1);
 }
@@ -620,6 +650,7 @@ t.section('Direkte Änderungen im Blatt Daten');
 {
   const env = setup();
   const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
+  env.sortIn();
   ok('Gruppen Nummer stays text', groupBy(env, a.gkey)['Nummer'] === '025' && groupBy(env, a.gkey)['Nummer normalisiert'] === '25');
   const sh = env.sheet('Daten');
   const COL = env.run('COL');

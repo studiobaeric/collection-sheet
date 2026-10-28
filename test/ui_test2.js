@@ -394,6 +394,85 @@ function boot(mode, opts) {
     ok('keine Skriptfehler (Sidebar)', E.errors.length === 0, E.errors);
   }
 
+  // ---- Sammlung beim Start vorladen (#39 V3) ----
+  for (const mode of ['sidebar', 'web']) {
+    const E = boot(mode);
+    const { $ } = E;
+    ok('Start lädt die Sammlung im Hintergrund (' + mode + ')', E.calls('getCollection').length === 1, E.pending.map(p => p.fn));
+    await E.startup();
+    await E.respond('getCollection');
+    ok('Tab Sammlung noch zu, Liste schon da (' + mode + ')', $('paneColl').classList.contains('hidden') && E.win.coll.all.length > 0);
+    if (mode === 'sidebar') E.click($('tabImport'));
+    E.click($('tabColl'));
+    ok('Tab Sammlung ohne Warten, auch nach dem Import-Tab (' + mode + ')', E.calls('getCollection').length === 0 && !E.win.coll.stale &&
+      E.win.state.groups.length > 0 && $('gh0') && !/Lade/.test($('collResults').textContent));
+    ok('keine Skriptfehler (Vorladen ' + mode + ')', E.errors.length === 0, E.errors);
+  }
+  {
+    const E = boot('sidebar', { start: 'takeover' });
+    ok('Übernahme: kein Vorladen', E.calls('getCollection').length === 0, E.pending.map(p => p.fn));
+  }
+
+  // ---- Einsortieren (#41): Leiste unter den Tabs; eine ältere Zahl überschreibt nie eine neuere ----
+  for (const mode of ['sidebar', 'web']) {
+    const E = boot(mode);
+    const { $ } = E;
+    const bar = () => $('sortBar');
+    const cfg = n => Object.assign(E.S.getUiConfig(), { pending: n });
+    ok('Leiste versteckt, solange nichts gemeldet ist (' + mode + ')', bar().classList.contains('hidden'));
+    await E.respond('getSetSuggestions');
+    // getCollection (vorgeladen) wurde nach getUiConfig losgeschickt: ihre Zahl ist neuer
+    await E.respond('getCollection', { value: Object.assign(E.S.getCollection(), { pending: 5 }) });
+    ok('getCollection: rote Leiste mit Zahl und Knopf (' + mode + ')', !bar().classList.contains('hidden') && bar().classList.contains('bad') &&
+      /^⚠ 5 Änderungen sind noch nicht einsortiert\. Sammlung, Pokédex und Dashboard in der Tabelle zeigen den alten Stand\./.test(bar().textContent) &&
+      !!E.btn(bar(), 'Einsortieren'), bar().textContent);
+    await E.respond('getUiConfig', { value: cfg(2) });
+    ok('spätere Antwort auf eine ältere Anfrage ändert nichts', /⚠ 5 Änderungen/.test(bar().textContent), bar().textContent);
+    await E.respond('getUpdateInfo'); await flush(); await E.respond('getFileVersions');
+    // Änderung aus der Warteschlange gegen getUiConfig, das vorher losging
+    E.win.loadUiConfig();
+    await E.respond('getUiConfig', { value: cfg(1) });
+    ok('Einzahl', /^⚠ 1 Änderung ist noch nicht einsortiert/.test(bar().textContent), bar().textContent);
+    E.win.loadUiConfig();
+    E.win.enqueue({ send: () => E.win.call('adjustEntry', 'E1', 1), done: () => {}, fail: () => {} });
+    await E.respond('adjustEntry', { value: { applied: 1, delta: null, pending: 3 } });
+    await E.respond('getUiConfig', { value: cfg(2) });
+    ok('Antwort der Änderung zählt, nicht die ältere von getUiConfig', /⚠ 3 Änderungen/.test(bar().textContent), bar().textContent);
+    // Knopf: über die Warteschlange, Laufmeldung, dann grün mit Meldung
+    E.click(E.btn(bar(), 'Einsortieren'));
+    const call = E.calls('einsortieren')[0];
+    ok('Knopf ruft einsortieren({ui: true})', call && J(call.args) === J([{ ui: true }]), E.pending.map(p => p.fn));
+    ok('Laufmeldung ohne Knopf', /^Sortiere ein …/.test(bar().textContent) && !E.btn(bar(), 'Einsortieren'), bar().textContent);
+    E.win.sortIn(); // noch einmal, während es läuft
+    ok('nur ein Aufruf, auch bei zweitem Klick', E.calls('einsortieren').length === 1);
+    await E.respond('einsortieren', { value: { message: '3 Änderungen einsortiert. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand.', pending: 0, sorted: 3, filled: 0 } });
+    ok('grün mit Meldung und ×, Sammlung nicht neu geladen', bar().classList.contains('good') && /^3 Änderungen einsortiert\./.test(bar().textContent) &&
+      !!E.btn(bar(), '×') && E.calls('getCollection').length === 0, bar().textContent);
+    E.click(E.btn(bar(), '×'));
+    ok('× blendet die Meldung aus', bar().classList.contains('hidden'));
+    // neue Änderung: wieder rot
+    E.win.enqueue({ send: () => E.win.call('adjustEntry', 'E1', 1), done: () => {}, fail: () => {} });
+    await E.respond('adjustEntry', { value: { applied: 1, delta: null, pending: 1 } });
+    ok('neue Änderung: wieder rot', bar().classList.contains('bad') && /⚠ 1 Änderung/.test(bar().textContent));
+    // Fehler: rot mit „Nochmal“, Zahl kommt zurück, sobald 0 gemeldet wird
+    E.click(E.btn(bar(), 'Einsortieren'));
+    await E.respond('einsortieren', { error: 'Zeitlimit überschritten' });
+    ok('Fehler: Text und Knopf Nochmal', bar().classList.contains('bad') && /Einsortieren ging nicht: Zeitlimit überschritten/.test(bar().textContent) && !!E.btn(bar(), 'Nochmal'), bar().textContent);
+    E.win.loadUiConfig();
+    await E.respond('getUiConfig', { value: cfg(0) });
+    ok('woanders einsortiert (0): Fehler weg, Leiste aus', bar().classList.contains('hidden'), bar().textContent);
+    // Einsortieren holt Daten (filled): offene Sammlung lädt neu
+    E.win.loadUiConfig();
+    await E.respond('getUiConfig', { value: cfg(2) });
+    E.click($('tabColl'));
+    if (E.calls('getCollection').length) await E.respond('getCollection');
+    E.click(E.btn(bar(), 'Einsortieren'));
+    await E.respond('einsortieren', { value: { message: 'Fehlende Daten von tcgdex ergänzt.', pending: 0, sorted: 0, filled: 2 } });
+    ok('filled: Sammlung lädt neu', E.calls('getCollection').length === 1, E.pending.map(p => p.fn));
+    await E.respond('getCollection');
+    ok('keine Skriptfehler (Einsortieren ' + mode + ')', E.errors.length === 0, E.errors);
+  }
+
   // ---- Sidebar ohne ImportUi (impInit fehlt) ----
   {
     const E = boot('sidebar', { include: '' });
@@ -482,17 +561,12 @@ function boot(mode, opts) {
     ok('addCard sendet cardLang/version/ownPrice', J(req) === J({ id: 'swsh3-025', lang: 'de', variant: 'reverse', condition: 'NM', qty: 2, inputName: 'Glurak', cardLang: 'EN', version: 'Snowflake', ownPrice: 1.5 }), req);
     ok('letzte Karte darunter: speichert …', /Zuletzt hinzugefügt/.test($('addLast').textContent) && /Glurak/.test($('addLast').textContent) &&
       /Flammende Finsternis · 025\/\d+ · Reverse Holo/.test($('addLast').textContent) && /speichert/.test($('addLast').textContent), $('addLast').textContent);
-    ok('beim Speichern nicht antippbar, kein Nochmal +1', !$('addLast').querySelector('.info.tap') && !E.btn($('addLast'), 'Nochmal +1'));
+    ok('beim Speichern nicht antippbar', !$('addLast').querySelector('.info.tap'));
     ok('Hinweis: Seitenleiste offen lassen', /Seitenleiste bitte offen lassen/.test($('addLast').textContent));
     const r = await E.respond('addCard');
-    ok('gespeichert: jetzt 2 Stück, Nochmal +1, antippbar', /hinzugefügt, jetzt 2 Stück/.test($('addLast').textContent) &&
-      !!E.btn($('addLast'), 'Nochmal +1') && !!$('addLast').querySelector('.info.tap') && !/offen lassen/.test($('addLast').textContent), $('addLast').textContent);
-    ok('state.lastEid gesetzt', E.win.state.lastEid === r.res.eid);
-    E.click(E.btn($('addLast'), 'Nochmal +1'));
-    ok('Nochmal +1 nutzt adjustEntry(eid, 1)', J(E.calls('adjustEntry')[0].args) === J([r.res.eid, 1]), E.calls('adjustEntry')[0].args);
-    ok('Nochmal +1 gesperrt, solange es speichert', E.btn($('addLast'), 'Speichere …').disabled);
-    await E.respond('adjustEntry');
-    ok('Nochmal +1: neue Anzahl', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
+    ok('gespeichert: jetzt 2 Stück, antippbar', /hinzugefügt, jetzt 2 Stück/.test($('addLast').textContent) &&
+      !!$('addLast').querySelector('.info.tap') && !/offen lassen/.test($('addLast').textContent), $('addLast').textContent);
+    ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1') && !$('addLast').querySelector('button') && typeof E.win.againPlusOne === 'undefined');
 
     // Standardwerte: DE, keine Version, kein eigener Preis
     E.type($('fName'), 'Glurak');
@@ -526,7 +600,9 @@ function boot(mode, opts) {
     const { $, S } = E;
     const tag = loaded ? ' (Sammlung schon geladen)' : ' (Sammlung noch nicht geladen)';
     await E.startup();
+    // Vorladen beim Start (#39 V3): hier einmal fehlgeschlagen, dann ist die Sammlung noch nicht geladen
     if (loaded) { await E.openColl(); E.type($('colQuery'), 'Evoli'); E.win.__advance(200); E.click($('tabAdd')); }
+    else await E.respond('getCollection', { error: 'Zeitüberschreitung' });
     S.searchCardsImpl = q => ({ stage: 'de', notes: [], cards: [{ id: 'swsh3-025', lang: 'de', name: 'Glurak', setName: 'Flammende Finsternis', localId: '025' }] });
     E.type($('fName'), 'Glurak');
     E.click(E.btn($('searchForm'), 'Suchen'));
@@ -667,7 +743,7 @@ function boot(mode, opts) {
     ok('addFreeCard-Argumente', J(req) === J({ name: 'Unbekannt', setName: 'Ordner', number: '12', variant: 'holo', condition: 'EX', qty: 3, cardLang: 'JP', version: 'Staff', ownPrice: 2.5 }), req);
     ok('freie Karte darunter: speichert …', /freie Karte · Ordner · 12 · Holo/.test($('addLast').textContent) && /speichert/.test($('addLast').textContent), $('addLast').textContent);
     const r = await E.respond('addFreeCard');
-    ok('freie Karte gespeichert', /hinzugefügt, jetzt 3 Stück/.test($('addLast').textContent) && E.win.state.lastEid === r.res.eid, $('addLast').textContent);
+    ok('freie Karte gespeichert', /hinzugefügt, jetzt 3 Stück/.test($('addLast').textContent) && !!$('addLast').querySelector('.info.tap') && r.res.eid, $('addLast').textContent);
     ok('neue Version gemerkt', /value="Staff"/.test($('versionList').innerHTML));
     // Serverfehler: zweimal von selbst wiederholen, dann rote Zeile
     E.type($('fName'), 'Unbekannt');
@@ -1459,7 +1535,8 @@ function boot(mode, opts) {
     await E.respond('getUpdateInfo');
     ok('Leiste weg nach der Übernahme', $('updBar').classList.contains('hidden'));
     E.click(E.btn($('takeMsg'), 'Zur Sammlung'));
-    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('getCollection').length === 1);
+    // das Vorladen vom Start (#39 V3) gilt nach der Übernahme nicht mehr: ein zweiter Aufruf
+    ok('Zur Sammlung', !$('paneColl').classList.contains('hidden') && E.calls('getCollection').length === 2);
     E.click(E.btn($('takeBox'), 'Prüfen'));
     await E.respond('takeoverPreview', { error: 'In dieser Tabelle sind schon Karten.' });
     ok('Vorschau-Fehler', $('takeMsg').querySelector('.msg.err') && /schon Karten/.test($('takeMsg').textContent));

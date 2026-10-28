@@ -548,7 +548,7 @@ function missingPaths(res, paths) {
   t.section('1. Seitenleiste, Import-Tab, Einstellungen');
   let E = boot(env, 'sidebar', 'Seitenleiste');
   await E.settle();
-  t.ok('Start lädt nur Set-Vorschläge, getUiConfig, getUpdateInfo und getFileVersions', J(E.callLog.map((x) => x.fn).sort()) === J(['getFileVersions', 'getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
+  t.ok('Start lädt nur Set-Vorschläge, getUiConfig, getUpdateInfo, getFileVersions und die Sammlung', J(E.callLog.map((x) => x.fn).sort()) === J(['getCollection', 'getFileVersions', 'getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.callLog.map((x) => x.fn));
   t.ok('Import-Tab sichtbar', !E.$('tabImport').classList.contains('hidden'));
   t.ok('Import-Bereich noch versteckt, kein importState', E.$('paneImport').classList.contains('hidden') && E.calls('importState').length === 0);
   await E.clickSettle(E.$('tabImport'), 'Tab Import');
@@ -871,6 +871,10 @@ function missingPaths(res, paths) {
   await E.clickSettle(E.btn(E.$('ge' + des), 'Speichern'), 'Speichern');
   t.ok('Bearbeiten: gespeichert, ohne die Liste neu zu laden', rowsOf(env, 1).find((d) => d.name === 'Despotar').cond === 'LP' &&
     !/speichert/.test(E.$('gh' + des).textContent) && /1× DE LP · Pokemon Ordner\.xlsx, Import 1/.test(E.$('gr' + des).textContent), E.$('gr' + des).textContent);
+  // beide Änderungen stehen nur in Daten, bis jemand einsortiert (#41)
+  t.ok('Leiste: 2 Änderungen noch nicht einsortiert', /2 Änderungen sind noch nicht einsortiert/.test(E.$('sortBar').textContent), E.$('sortBar').textContent);
+  await E.clickSettle(E.btn(E.$('sortBar'), 'Einsortieren'), 'Einsortieren');
+  t.ok('Einsortiert: Leiste grün', E.$('sortBar').classList.contains('good') && /2 Änderungen einsortiert/.test(E.$('sortBar').textContent), E.$('sortBar').textContent);
   checkSheets(env, 'Nach der Sammlung', { verlauf: VERLAUF });
 
   /* ---------------- 9. Zurücknehmen ---------------- */

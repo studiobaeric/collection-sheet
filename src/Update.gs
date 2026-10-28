@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.2
+ *  Pokémon-Sammlung · Version 1.1.3
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -20,7 +20,7 @@
  */
 
 /** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
-const UPDATE_FILE_VERSION = '1.1.2';
+const UPDATE_FILE_VERSION = '1.1.3';
 
 const UPD_REPO = 'studiobaeric/collection-sheet';
 const UPD_RAW = 'https://raw.githubusercontent.com/';
@@ -613,6 +613,7 @@ function takeoverRun(url) {
       throw started ? updTakeError_(e) : e;
     }
   })();
+  dropSetsCache_(); // das Blatt Sets kommt jetzt aus der alten Tabelle
 
   let note, shared;
   try {

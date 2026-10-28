@@ -7,6 +7,22 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.1.3] – 2026-10-28
+
+- Nächste Suche wartet nicht mehr auf das Speichern der vorigen Karte
+- Hinzufügen und Ändern speichern erst nur ins Blatt Daten
+- Knopf „Einsortieren“ aktualisiert Sammlung, Pokédex und Dashboard
+- Roter Hinweis, solange Änderungen noch nicht einsortiert sind
+- Einsortieren auch im Menü, im Dashboard und nachts von selbst
+- Suche merkt sich Sets und Trefferlisten, Wiederholen geht schneller
+- Suche im Blatt Sammlung rechnet schneller, auch bei großen Sammlungen
+- Suchen im Blatt startet kein Skript mehr, die Zeilen springen nicht
+- Mit Bildern sind alle Zeilen der Sammlung gleich hoch
+- Hinzufügen mit Bildern wartet nicht mehr auf die Zeilenhöhen
+- Tab Sammlung lädt schon beim Öffnen, danach ohne Warten
+- Import-Tab öffnen lädt die Sammlung nicht mehr neu
+- Knopf „Nochmal +1“ nach dem Hinzufügen entfernt
+
 ## [1.1.2] – 2026-10-27
 
 - Hinzufügen: leeres Formular sofort, Karte speichert im Hintergrund

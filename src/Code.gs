@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.2
+ *  Pokémon-Sammlung · Version 1.1.3
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -12,10 +12,11 @@
  *   1b. Import-Protokoll (gemeinsam mit Import.gs)
  *   1c. Einstellungen (Blatt „Tool-Einstellungen“) und Stilllegen nach einer Übernahme
  *   2. Menü, Sidebar, Web-App, onEdit
- *   3. Einrichtung (Blätter, Gruppen, Ansicht, Trigger)
+ *   3. Einrichtung (Blätter, Gruppen, leichtes Speichern, Ansicht, Trigger)
  *   4. tcgdex-API
  *   5. Suche und Hinzufügen
  *   6. Sammlung (Gruppen, -1/+1, Rückgängig, Bearbeiten, eigener Preis, Verknüpfen)
+ *   6a. Einsortieren (Gruppen, Pokédex und Dashboard nachziehen)
  *   7. Übersetzung und Set-Cache
  *   8. Preislauf und Wertverlauf
  *   9. API-Prüfung ("Beim Bau zu prüfen")
@@ -35,7 +36,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.1.2';
+const TOOL_VERSION = '1.1.3';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -82,14 +83,19 @@ const TEXT_COLS = [COL.key, COL.id, COL.setId, COL.setName, COL.setDate, COL.loc
 const SCHEMA_VERSION = '2';
 const ORIGIN_HAND = 'Hand';
 
-// Gruppen: eine Zeile pro Karte + Variante + Sonderversion. Die Ansichtsformel hängt an diesen Positionen.
+// Gruppen: eine Zeile pro Karte + Variante + Sonderversion. Die Ansichtsformel liest die Spalten über GCOL.
+// Die letzten Spalten (ab Suchtext) sind Hilfsspalten nur für die Ansichtsformel (#39 V2): Sie rechnet damit
+// über ganze Spalten statt Zeile für Zeile.
 const GROUP_HEADERS = [
   'Gruppenschlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer',
   'Nummer normalisiert', 'Setgröße', 'Name', 'Name englisch', 'Quelle', 'Variante', 'Exemplare',
   'Anzahl', 'Preis (EUR)', 'Preisstand', 'Bild-URL', 'Seltenheit', 'Kartentyp', 'Illustrator',
   'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar',
-  'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit'
+  'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit',
+  'Suchtext', 'Wert (EUR)', 'Name Anzeige', 'Nummer Anzeige', 'Variante Anzeige', 'Preis Anzeige'
 ];
+// Spaltennummer (1-basiert) im Blatt Gruppen nach Name, z. B. GCOL['Anzahl'] (#36 C4)
+const GCOL = GROUP_HEADERS.reduce(function (m, h, i) { m[h] = i + 1; return m; }, {});
 
 const PROTO_HEADERS = ['Log-ID', 'Import-Nr', 'Typ', 'Eintrag-ID', 'Quellzeile', 'Menge', 'Daten', 'Status', 'Zeitpunkt', 'Quelle-ID'];
 const PROTO_FORMATS = ['@', '0', '@', '@', '@', '0', '@', '@', 'dd.mm.yyyy hh:mm', '@'];
@@ -315,6 +321,45 @@ function restoreActiveSheet_(ss, prevName) {
 function alert_(msg) {
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { notify_(msg); }
+}
+
+// Zwischenspeicher (CacheService) für Werte über 100 KB: in Stücken, unter dem Schlüssel selbst steht deren Zahl.
+// 30.000 Zeichen sind höchstens 90 KB, auch wenn jedes Zeichen drei Bytes braucht.
+const CACHE_CHUNK = 30000;
+
+/** Wert als JSON merken (höchstens 6 Stunden). Geht es nicht, bleibt es ohne Zwischenspeicher. */
+function cachePutJson_(key, obj, secs) {
+  try {
+    const text = JSON.stringify(obj);
+    const n = Math.max(1, Math.ceil(text.length / CACHE_CHUNK));
+    const put = {};
+    for (let i = 0; i < n; i++) put[key + ':' + i] = text.slice(i * CACHE_CHUNK, (i + 1) * CACHE_CHUNK);
+    put[key] = String(n);
+    CacheService.getScriptCache().putAll(put, secs);
+  } catch (e) { /* ohne Zwischenspeicher weiter */ }
+}
+
+/** Gemerkten Wert lesen; fehlt ein Stück oder ist er kaputt: null. */
+function cacheGetJson_(key) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const n = Number(cache.get(key));
+    if (!(n >= 1)) return null;
+    const keys = [];
+    for (let i = 0; i < n; i++) keys.push(key + ':' + i);
+    const got = cache.getAll(keys);
+    let text = '';
+    for (let i = 0; i < n; i++) {
+      if (typeof got[keys[i]] !== 'string') return null;
+      text += got[keys[i]];
+    }
+    return JSON.parse(text);
+  } catch (e) { return null; }
+}
+
+/** Vergessen (die Stücke laufen von selbst ab). */
+function cacheDrop_(key) {
+  try { CacheService.getScriptCache().remove(key); } catch (e) { /* läuft von selbst ab */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1436,6 +1481,7 @@ function onOpen() {
   }
   const menu = ui.createMenu('Pokémon')
     .addItem('Karten erfassen', 'kartenErfassen')
+    .addItem('Einsortieren', 'einsortieren')
     .addItem('Dashboard', 'zumDashboard')
     .addItem('Preise jetzt aktualisieren', 'preiseJetztAktualisieren')
     .addItem('Übersetzung und Sets aktualisieren', 'uebersetzungUndSetsAktualisieren')
@@ -1662,17 +1708,19 @@ function uebersetzungUndSetsAktualisieren() {
 
 /**
  * Einfacher Trigger: Zeilenhöhe an den Bilder-Schalter anpassen (Sammlung) bzw. an die gewählten Karten (Pokédex);
- * nach Änderungen im Blatt Daten
- * die Gruppen (und damit die Sammlung) neu berechnen. Ist das Sheet gerade beschäftigt, passiert nichts.
+ * nach Änderungen im Blatt Daten die Gruppen (und damit die Sammlung) neu berechnen, nach Änderungen im Blatt Sets
+ * dessen Zwischenspeicher vergessen. Ist das Sheet gerade beschäftigt, passiert nichts.
  */
 function onEdit(e) {
   try {
     const sh = e.range.getSheet();
     const name = sh.getName();
     if (name === SHEETS.data) { rebuildAfterEdit_(); return; }
+    if (name === SHEETS.sets) { dropSetsCache_(); return; }
     if (name === SHEETS.dex) { if (e.range.getRow() === 4) applyDexRowHeights_(sh); return; }
     if (name !== SHEETS.view || e.range.getRow() !== 4) return;
-    applyRowHeights_(sh);
+    // nur der Bilder-Schalter (H4) ändert die Zeilenhöhen; Suche, Set, Sortierung und 0er zeigen starten kein Skript (#39 V1)
+    if (e.range.getColumn() <= 8 && e.range.getLastColumn() >= 8) applyRowHeights_(sh);
   } catch (err) { /* nie den Edit stören */ }
 }
 
@@ -1704,19 +1752,18 @@ function rebuildAfterEdit_() {
   }
 }
 
+/**
+ * Zeilenhöhen der Sammlung: mit Bildern alle Zeilen ab 6 hoch (90 px), sonst normal. Hängt nur am Bilder-Schalter,
+ * nicht an den Treffern, und wartet deshalb nicht auf die Formel (#39 V1, #36 A7). Unter den Treffern stehen mit
+ * Bildern leere, hohe Zeilen.
+ */
 function applyRowHeights_(sh) {
   sh = sh || ss_().getSheetByName(SHEETS.view);
   if (!sh) return;
   const show = sh.getRange('H4').getValue() === true;
   const max = sh.getMaxRows();
   if (max < 6) return;
-  if (!show) { sh.setRowHeights(6, max - 5, 21); return; }
-  SpreadsheetApp.flush(); // erst rechnen lassen, dann die gefüllten Zeilen zählen (nur mit Bildern nötig)
-  const names = sh.getRange(6, 2, max - 5, 1).getValues();
-  let last = 5;
-  for (let i = names.length - 1; i >= 0; i--) { if (names[i][0] !== '') { last = i + 6; break; } }
-  if (last >= 6) sh.setRowHeights(6, last - 5, 90);
-  if (max > last) sh.setRowHeights(last + 1, max - last, 21);
+  sh.setRowHeights(6, max - 5, show ? 90 : 21);
 }
 
 // ---------------------------------------------------------------------------
@@ -1908,7 +1955,11 @@ const FORMULA_PROBES = [
   ['=REGEXREPLACE("TG05","^([A-Z]*)0+([0-9])","$1$2")', 'TG5'],
   ['=SUM(SORT(SEQUENCE(3),1,FALSE))', '6'],
   ['=ROWS(FILTER(Gruppen!A1:Z,Gruppen!A1:A<>""))', '>=1'],
-  ['=IF(G4=TRUE,1,0)', '0']
+  ['=IF(G4=TRUE,1,0)', '0'],
+  // Bausteine der Ansichtsformel ohne LAMBDA (#39 V2): Spalte × Zeile ergibt eine Matrix, MMULT zählt, IMAGE über eine Spalte
+  ['=SUM(ARRAYFORMULA(SEQUENCE(3)*SEQUENCE(1,2)))', '18'],
+  ['=SUM(MMULT(ARRAYFORMULA(SIGN(ISNUMBER(SEARCH(SPLIT("a b"," "),TRANSPOSE(SPLIT("ab a c"," ")))))),SEQUENCE(2,1,1,0)))', '3'],
+  ['=ROWS(ARRAYFORMULA(IMAGE(TRANSPOSE(SPLIT("https://assets.tcgdex.net/de/swsh/swsh3/136/low.png https://assets.tcgdex.net/de/swsh/swsh3/136/low.png"," ")))))', '2']
 ];
 
 /** Schreibt die fehlerhafte Formel und einen Funktionstest ins Blatt „Diagnose". */
@@ -2056,14 +2107,17 @@ function setViewExtras(names) {
 
 function groupFormatRow_(width) {
   const f = new Array(width).fill('@');
-  f[7] = '0';            // Setgröße
-  f[13] = '0';           // Anzahl
-  f[14] = EUR_FORMAT;    // Preis
-  f[20] = DATE_TIME_FORMAT;
-  f[21] = DATE_TIME_FORMAT;
-  f[22] = '0';           // Nummer sortierbar
-  f[23] = SIGNED_EUR_FORMAT; // Veränderung 30 Tage
-  f[24] = SIGNED_PCT_FORMAT;
+  const set = function (name, fmt) { f[GCOL[name] - 1] = fmt; };
+  set('Setgröße', '0');
+  set('Anzahl', '0');
+  set('Preis (EUR)', EUR_FORMAT);
+  set('Hinzugefügt am', DATE_TIME_FORMAT);
+  set('Zuletzt geändert', DATE_TIME_FORMAT);
+  set('Nummer sortierbar', '0');
+  set('Veränderung 30 Tage (EUR)', SIGNED_EUR_FORMAT);
+  set('Veränderung 30 Tage (%)', SIGNED_PCT_FORMAT);
+  set('Wert (EUR)', EUR_FORMAT);
+  set('Preis Anzeige', EUR_FORMAT);
   return f;
 }
 
@@ -2099,6 +2153,16 @@ function groupSheetRow_(gkey, rows, dHeaders, extras, refs) {
   ];
   const ch = gp.manual ? null : (groupChanges_(rows, refs) || {})[VIEW_CHANGE_DAYS];
   out.push(ch ? ch.eur : '', ch && ch.pct != null ? ch.pct / 100 : '', ch && ch.since ? dmyText_(ch.since) : '');
+  // Hilfsspalten für die Ansichtsformel (#39 V2)
+  const name = out[GCOL['Name'] - 1], nr = out[GCOL['Nummer'] - 1], price = out[GCOL['Preis (EUR)'] - 1];
+  out.push(
+    [name, out[GCOL['Name englisch'] - 1], out[GCOL['Illustrator'] - 1]].join('\n'),
+    typeof price === 'number' ? price * count : 0,
+    String(p[COL.source] || '') === 'en-Ersatz' ? name + ' (EN)' : name,
+    setSize === '' ? nr : nr + '/' + setSize,
+    VARIANT_LABELS[String(p[COL.variant] || '')] || VARIANT_LABELS.normal,
+    typeof price === 'number' ? price : 'kein Preis'
+  );
   extras.forEach(function (name) {
     const c = dHeaders.indexOf(name, NCOL);
     const vals = [];
@@ -2114,8 +2178,9 @@ function groupSheetRow_(gkey, rows, dHeaders, extras, refs) {
 }
 
 /**
- * Berechnet das Blatt „Gruppen“ aus dem Blatt Daten neu (idempotent). Nach JEDER Änderung an Daten aufrufen,
- * am besten innerhalb der Sperre. Repariert nebenbei Zeilen, die direkt im Blatt geändert wurden (repairRows_).
+ * Berechnet das Blatt „Gruppen“ aus dem Blatt Daten neu (idempotent), dazu Seltenheiten, Pokédex und Dashboard. Das
+ * ist das Einsortieren (#41): nach dem Import, nachts, beim Knopf Einsortieren und nach Änderungen direkt im Blatt
+ * Daten. Innerhalb der Sperre. Repariert nebenbei Zeilen, die direkt im Blatt geändert wurden (repairRows_).
  */
 function rebuildGroups_() {
   const ss = ss_();
@@ -2147,6 +2212,7 @@ function rebuildGroups_() {
   range.setValues(all);
   if (oldLastRow > all.length) sh.getRange(all.length + 1, 1, oldLastRow - all.length, Math.max(width, oldLastCol)).clearContent();
   if (oldLastCol > width) sh.getRange(1, width + 1, all.length, oldLastCol - width).clearContent();
+  rememberSortedAt_(changedMax_(rows)); // alles einsortiert (#41)
   // Pokédex, Seltenheiten und Dashboard nachziehen; ein Fehler dort darf das Speichern nie verhindern
   let dex = null;
   try {
@@ -2157,94 +2223,104 @@ function rebuildGroups_() {
   return out.length;
 }
 
-/**
- * Nach einer Änderung einzelner Karten (Hinzufügen, +1/−1, Bearbeiten, eigener Preis) statt rebuildGroups_: schreibt
- * nur die betroffenen Zeilen im Blatt Gruppen und im Pokédex, dazu Seltenheiten und Dashboard (#31). Nutzt die schon
- * gelesene Arbeitskopie st (nach storeSave_), liest Daten also nicht noch einmal. Passt das Blatt Gruppen nicht
- * (fehlt, andere Spalten, doppelte Schlüssel), baut es alles neu auf wie bisher. Innerhalb der Sperre.
- * -> {full: true, wenn alles neu gebaut wurde, shape: true, wenn eine Gruppe dazukam, wegfiel oder über 0 sprang,
- *     keys: die betroffenen Gruppenschlüssel (für collDelta_)}
- */
-function afterDataChange_(st) {
-  const keys = storeTouchedGroups_(st);
-  let res = null;
-  try { res = refreshGroups_(st, keys); } catch (e) { res = null; }
-  if (!res) {
-    rebuildGroups_();
-    return { full: true, shape: true, keys: keys };
-  }
-  const rows = storeLiveRows_(st);
-  let dex = null;
+// ---------------------------------------------------------------------------
+// Leichtes Speichern und „noch nicht einsortiert“ (#41)
+// ---------------------------------------------------------------------------
+// Hinzufügen und jede Änderung aus Seitenleiste und Web-App schreiben nur das Blatt Daten (lightSave_). Gruppen (und
+// damit das Blatt Sammlung), Pokédex, Seltenheiten und Dashboard ziehen erst beim Einsortieren nach (Knopf, Menü,
+// nachts nach dem Preislauf), in einem vollen Neuaufbau (rebuildGroups_). So wartet die nächste Suche nicht darauf.
+// Noch nicht einsortiert ist jede Daten-Zeile, die nach dem letzten Neuaufbau geändert wurde: Ihr „Zuletzt geändert“
+// liegt nach dem spätesten in Gruppen. So rechnen das Skript (pendingCount_) und die Hinweise in den Blättern
+// (pendingFormula_). Jede Änderung setzt „Zuletzt geändert“ erst in der Sperre: Ein Neuaufbau, der sie nicht gesehen
+// hat, liegt dann immer davor.
+
+const SORTED_AT_KEY = 'sorted-at';
+
+/** Spätestes „Zuletzt geändert“ der Daten-Zeilen (ms), 0 ohne. Gleich dem spätesten in Gruppen nach rebuildGroups_. */
+function changedMax_(rows) {
+  let max = 0;
+  (rows || []).forEach(function (r) {
+    const t = r[COL.changed];
+    if (isDataRow_(r) && t instanceof Date && t.getTime() > max) max = t.getTime();
+  });
+  return max;
+}
+
+/** Stand des letzten Neuaufbaus (ms): aus dem Zwischenspeicher, sonst aus der Spalte „Zuletzt geändert“ in Gruppen. */
+function sortedAt_() {
   try {
-    syncRarities_(storeTouchedIdx_(st).map(function (i) { return st.rows[i]; }));
-    dex = refreshPokedex_(rows) || null;
-  } catch (e) { /* beim nächsten Neuaufbau wieder */ }
-  try { refreshDashboard_(rows, dex); } catch (e) { /* beim nächsten Neuaufbau wieder */ }
-  return { full: false, shape: res.shape, keys: keys };
+    const hit = CacheService.getScriptCache().get(SORTED_AT_KEY);
+    if (hit !== null && hit !== '' && isFinite(Number(hit))) return Number(hit);
+  } catch (e) { /* aus dem Blatt */ }
+  let max = 0;
+  const sh = ss_().getSheetByName(SHEETS.groups);
+  const col = GCOL['Zuletzt geändert'];
+  if (sh && sh.getLastRow() >= 2 && sh.getLastColumn() >= col) {
+    sh.getRange(2, col, sh.getLastRow() - 1, 1).getValues().forEach(function (r) {
+      if (r[0] instanceof Date && r[0].getTime() > max) max = r[0].getTime();
+    });
+  }
+  rememberSortedAt_(max);
+  return max;
+}
+
+function rememberSortedAt_(ms) {
+  try { CacheService.getScriptCache().put(SORTED_AT_KEY, String(ms), 21600); } catch (e) { /* dann aus Gruppen */ }
 }
 
 /**
- * Nur die Gruppen keys im Blatt Gruppen neu schreiben: vorhandene Zeile ersetzen, neue Gruppe in eine Lücke oder
- * ans Ende, weggefallene Gruppe leeren (die Lücke stört die Sammlung nicht, sie filtert leere Zeilen; der nächste
- * volle Neuaufbau schließt sie). -> {shape} oder null, wenn das Blatt nicht passt (dann rebuildGroups_)
+ * Zeitstempel einer Änderung, in der Sperre: jetzt, aber mindestens eine Sekunde nach dem letzten Einsortieren, sonst
+ * zählte sie nicht als offen (gleiche Millisekunde, Uhren verschiedener Server, Zeiten ohne Millisekunden im Blatt).
+ * -> {now, since (sortedAt_, für lightSave_)}
  */
-function refreshGroups_(st, keys) {
-  const sh = ss_().getSheetByName(SHEETS.groups);
-  if (!sh) return null;
-  const extras = getViewExtras_();
-  const headers = GROUP_HEADERS.concat(extras);
-  const width = headers.length;
-  if (sh.getLastColumn() !== width) return null;
-  const last = sh.getLastRow();
-  if (last < 1) return null;
-  const COUNT = 13; // Spalte Anzahl im Blatt Gruppen
-  const top = sh.getRange(1, 1, last, COUNT + 1).getValues();
-  const head = sh.getRange(1, 1, 1, width).getValues()[0].map(function (x) { return String(x); });
-  if (head.join('\u0001') !== headers.join('\u0001')) return null;
-  const at = {}, holes = [];
-  for (let i = 1; i < top.length; i++) {
-    const k = String(top[i][0] == null ? '' : top[i][0]);
-    if (!k) { holes.push(i + 1); continue; }
-    if (k in at) return null; // doppelt: lieber alles neu
-    at[k] = i + 1;
-  }
-  const want = {};
-  keys.forEach(function (k) { want[k] = []; });
-  st.rows.forEach(function (r, i) {
-    if (!storeLive_(st, i)) return;
-    const g = groupKey_(r);
-    if (g in want) want[g].push(r);
+function changeTime_() {
+  const since = sortedAt_();
+  return { now: new Date(Math.max(Date.now(), since + 1000)), since: since };
+}
+
+/**
+ * Wie viele Daten-Zeilen sind geändert, aber noch nicht einsortiert? rows: die lebenden Zeilen (storeLiveRows_),
+ * since: sortedAt_, wenn schon gelesen.
+ */
+function pendingCount_(rows, since) {
+  if (since == null) since = sortedAt_();
+  let n = 0;
+  (rows || []).forEach(function (r) {
+    const t = r[COL.changed];
+    if (isDataRow_(r) && t instanceof Date && t.getTime() > since) n++;
   });
-  const refs = st.refs || (st.refs = loadCardHistRefs_());
-  const fmt = groupFormatRow_(width);
-  const writes = []; // [Zeile, Werte]
-  let shape = false;
-  let end = last;
-  keys.forEach(function (k) {
-    const rows = want[k];
-    const row = at[k];
-    const oldCount = row ? Number(top[row - 1][COUNT]) || 0 : null;
-    if (!rows.length) {
-      if (row) { writes.push([row, new Array(width).fill('')]); shape = true; }
-      return;
-    }
-    const out = groupSheetRow_(k, rows, st.headers, extras, refs);
-    const count = Number(out[COUNT]) || 0;
-    if (row) {
-      writes.push([row, out]);
-      if ((oldCount > 0) !== (count > 0)) shape = true;
-    } else {
-      writes.push([holes.length ? holes.shift() : ++end, out]);
-      shape = true;
-    }
-  });
-  if (end > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), end - sh.getMaxRows() + 100);
-  writes.forEach(function (w) {
-    const range = sh.getRange(w[0], 1, 1, width);
-    range.setNumberFormats([fmt]);
-    range.setValues([w[1]]);
-  });
-  return { shape: shape };
+  return n;
+}
+
+/** pendingCount_ als Formel für die Hinweise in den Blättern Sammlung, Pokédex und Dashboard. */
+function pendingFormula_() {
+  const d = colLetter_(COL.changed + 1), g = colLetter_(GCOL['Zuletzt geändert']);
+  const col = SHEETS.data + '!' + d + '2:' + d;
+  return 'SUMPRODUCT(ISNUMBER(' + col + ')*(' + col + '>MAX(' + SHEETS.groups + '!' + g + '2:' + g + ')))';
+}
+
+/**
+ * Hinweis „noch nicht einsortiert“ als Formel: solange etwas fehlt, ein Satz mit der Zahl, der mit ⚠ anfängt (daran
+ * hängt die rote Farbe, pendingRule_) und mit tail endet, sonst rest. Beide Texte ohne Anführungszeichen.
+ */
+function pendingHintFormula_(tail, rest) {
+  return '=LET(offen, ' + pendingFormula_() + ', IF(offen>0, "⚠ "&offen&IF(offen=1, " Änderung ist", " Änderungen sind")&' +
+    '" noch nicht einsortiert, ' + tail + '", "' + (rest || '') + '"))';
+}
+
+/** Bedingte Formatierung für eine Zeile mit pendingHintFormula_ in Spalte A: rot, solange etwas fehlt. */
+function pendingRule_(range, row) {
+  return SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=LEFT($A$' + row + ')="⚠"')
+    .setFontColor('#a50e0e').setBackground('#fce8e6').setBold(true).setRanges([range]).build();
+}
+
+/**
+ * Leichtes Speichern: schreibt die Arbeitskopie zurück, sonst nichts (#41). Innerhalb der Sperre, since aus changeTime_.
+ * -> Zahl der Einträge, die noch nicht einsortiert sind (für die Leiste in Seitenleiste und Web-App)
+ */
+function lightSave_(st, since) {
+  storeSave_(st);
+  return pendingCount_(storeLiveRows_(st), since);
 }
 
 // ---------------------------------------------------------------------------
@@ -2280,8 +2356,10 @@ function setupViewSheet_(ss, keepControls) {
   sh.getRange('E1:J1').setValues([['Gesamtwert', '=SUM(I6:I)', 'Karten', '=SUM(G6:G)', 'Einträge', '=COUNT(G6:G)']]);
   sh.getRange('E1').setFontWeight('bold'); sh.getRange('G1').setFontWeight('bold'); sh.getRange('I1').setFontWeight('bold');
   sh.getRange('F1').setNumberFormat(EUR_FORMAT);
-  sh.getRange('A2').setValue('Summen gelten für die aktuelle Suche. Erfassen, Bearbeiten und Entfernen über Menü Pokémon > Karten erfassen.')
-    .setFontColor('#5f6368').setFontSize(9);
+  // solange Änderungen nicht einsortiert sind, steht hier rot der Hinweis darauf (#41), sonst die Hilfe
+  setFormulaLocal_(sh.getRange('A2'), pendingHintFormula_('die Sammlung zeigt den alten Stand. Menü Pokémon > Einsortieren',
+    'Summen gelten für die aktuelle Suche. Erfassen, Bearbeiten und Entfernen über Menü Pokémon > Karten erfassen.'));
+  sh.getRange('A2').setFontColor('#5f6368').setFontSize(9);
 
   // Steuerzeile
   sh.getRange('B3:H3').setValues([['Suche (Name, Nummer oder Künstler, z. B. Glurak 025/165 oder Arita)', 'Set', '', 'Sortierung', '', '0er zeigen', 'Bilder zeigen']])
@@ -2333,7 +2411,7 @@ function setupViewSheet_(ss, keepControls) {
     .setFontColor('#137333').setRanges([sh.getRange('J6:K')]).build();
   const down = SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=N($J6)<0')
     .setFontColor('#c5221f').setRanges([sh.getRange('J6:K')]).build();
-  sh.setConditionalFormatRules([grey, up, down]);
+  sh.setConditionalFormatRules([grey, up, down, pendingRule_(sh.getRange('A2:' + lastL + '2'), 2)]);
 
   sh.getRange('A5:' + lastL).protect().setDescription('Ansicht – Änderungen nur über die Oberfläche').setWarningOnly(true);
   applyRowHeights_(sh);
@@ -2341,50 +2419,53 @@ function setupViewSheet_(ss, keepControls) {
 
 /**
  * Die eine Formel der Sammlungsansicht: liest das Blatt Gruppen, filtert, sortiert und gibt die Tabelle aus.
- * nExtras = Anzahl der gezeigten Zusatzspalten (Gruppen-Spalten 27 …).
+ * nExtras = Anzahl der gezeigten Zusatzspalten (Gruppen-Spalten nach GROUP_HEADERS).
+ * Ohne LAMBDA (#39 V2): Alle Schritte rechnen über ganze Spalten. Mehrere Suchwörter ergeben eine Matrix
+ * Einträge × Wörter, MMULT zählt je Eintrag die passenden Wörter. Anzeige, Wert und Suchtext kommen fertig aus
+ * den Hilfsspalten von Gruppen (groupSheetRow_).
  */
 function viewFormula_(nExtras) {
   const n = Math.max(0, Math.floor(Number(nExtras) || 0));
   const w = GROUP_HEADERS.length + n;
-  const zc = w + 1, mc = w + 2, vc = w + 3;
+  const zc = w + 1, mc = w + 2;
+  const gc = function (name) {
+    if (!GCOL[name]) throw new Error('Spalte fehlt in GROUP_HEADERS: ' + name);
+    return GCOL[name];
+  };
+  const col = function (arr, name) { return 'CHOOSECOLS(' + arr + ', ' + gc(name) + ')'; };
   const extraCols = [];
   for (let i = 0; i < n; i++) extraCols.push('CHOOSECOLS(srt, ' + (GROUP_HEADERS.length + 1 + i) + ')');
+  const sortBy = ['Set-Erscheinungsdatum', 'Set-ID', 'Nummer sortierbar', 'Nummer normalisiert', 'Variante', 'Name']
+    .map(function (h) { return gc(h) + ', TRUE'; }).join(', ');
+  const show = ['Name Anzeige', 'Setname', 'Nummer Anzeige', 'Variante Anzeige', 'Exemplare', 'Anzahl', 'Preis Anzeige',
+    'Wert (EUR)', 'Veränderung 30 Tage (EUR)', 'Veränderung 30 Tage (%)', 'Verlauf seit',
+    'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand'].map(function (h) { return col('srt', h); });
   return [
-    '=IFERROR(LET(',
+    '=IFERROR(ARRAYFORMULA(LET(',
     'dat, FILTER(Gruppen!A2:' + colLetter_(w) + ', Gruppen!A2:A<>""),',
     'qry, TRIM(B4),',
     'wrds, IF(qry="", "", SPLIT("§"&REGEXREPLACE(qry, "\\s+", " §"), " ")),',
-    'nrm, LAMBDA(xx, REGEXREPLACE(UPPER(TO_TEXT(xx)), "^([A-Z]*)0+([0-9])", "$1$2")),',
-    'okay, BYROW(dat, LAMBDA(rw, AND(',
-    '  OR(C4="", C4="Alle", INDEX(rw, 1, 4)=C4),',
-    '  OR(G4=TRUE, INDEX(rw, 1, 14)>0),',
-    '  REDUCE(TRUE, wrds, LAMBDA(acc, wraw, LET(wd, MID(wraw, 2, 200), szw, IFERROR(REGEXEXTRACT(wd, "/(.*)$"), ""), AND(acc, IF(wd="", TRUE,',
-    '    IF(REGEXMATCH(wd, "[0-9]"),',
-    '      IF(REGEXMATCH(wd, "/"),',
-    '        AND(TO_TEXT(INDEX(rw, 1, 7))=nrm(REGEXEXTRACT(wd, "^[^/]*")), IF(REGEXMATCH(szw, "^0*[1-9]"), TO_TEXT(INDEX(rw, 1, 8))=REGEXEXTRACT(REGEXREPLACE(szw, "^0+", ""), "^[0-9]+"), TRUE)),',
-    '        TO_TEXT(INDEX(rw, 1, 7))=nrm(wd)),',
-    '      OR(ISNUMBER(SEARCH(wd, INDEX(rw, 1, 9))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 10))), ISNUMBER(SEARCH(wd, INDEX(rw, 1, 20))))))))))',
-    '))),',
-    'flt, FILTER(dat, okay),',
-    'cnt, CHOOSECOLS(flt, 14),',
-    'vals, MAP(CHOOSECOLS(flt, 15), cnt, LAMBDA(pr, cn, IF(ISNUMBER(pr), pr*cn, 0))),',
-    'zsort, MAP(cnt, LAMBDA(cn, IF(cn>0, 0, 1))),',
-    'msort, MAP(CHOOSECOLS(flt, 9), vals, CHOOSECOLS(flt, 21), CHOOSECOLS(flt, 5), LAMBDA(nm, vl, tm, sd,',
-    '  IF(E4="Name", LOWER(nm), IF(E4="Wert", -vl, IF(E4="Zuletzt hinzugefügt", -N(tm), TO_TEXT(sd)))))),',
-    'srt, SORT(HSTACK(flt, zsort, msort, vals), ' + zc + ', TRUE, ' + mc + ', TRUE, 5, TRUE, 3, TRUE, 23, TRUE, 7, TRUE, 12, TRUE, 9, TRUE),',
+    'wd, MID(wrds, 2, 200),',
+    'isnr, REGEXMATCH(wd, "[0-9]"),',
+    'wnr, REGEXREPLACE(UPPER(IFERROR(REGEXEXTRACT(wd, "^[^/]*"), "")), "^([A-Z]*)0+([0-9])", "$1$2"),',
+    'szw, IFERROR(REGEXEXTRACT(wd, "/(.*)$"), ""),',
+    'szon, REGEXMATCH(wd, "/")*REGEXMATCH(szw, "^0*[1-9]"),',
+    'wsz, IFERROR(REGEXEXTRACT(REGEXREPLACE(szw, "^0+", ""), "^[0-9]+"), ""),',
+    'hit, (wd="") + isnr*(TO_TEXT(' + col('dat', 'Nummer normalisiert') + ')=wnr)*(1-szon+szon*(TO_TEXT(' + col('dat', 'Setgröße') + ')=wsz))' +
+      ' + (1-isnr)*ISNUMBER(SEARCH(wd, ' + col('dat', 'Suchtext') + ')),',
+    'okay, ((C4="")+(C4="Alle")+(' + col('dat', 'Setname') + '=C4))*((G4=TRUE)+(' + col('dat', 'Anzahl') + '>0))' +
+      '*(MMULT(SIGN(hit), SEQUENCE(COLUMNS(wrds), 1, 1, 0))=COLUMNS(wrds)),',
+    'flt, FILTER(dat, okay>0),',
+    'wert, ' + col('flt', 'Wert (EUR)') + ',',
+    'tm, ' + col('flt', 'Hinzugefügt am') + ',',
+    'zsort, 1-(' + col('flt', 'Anzahl') + '>0),',
+    'msort, IF(E4="Name", LOWER(' + col('flt', 'Name') + '), IF(E4="Wert", -wert, IF(E4="Zuletzt hinzugefügt", IF(ISNUMBER(tm), -tm, 0), 0*wert))),',
+    'srt, SORT(HSTACK(flt, zsort, msort), ' + zc + ', TRUE, ' + mc + ', TRUE, ' + sortBy + '),',
+    'url, ' + col('srt', 'Bild-URL') + ',',
     'HSTACK(',
-    '  MAP(CHOOSECOLS(srt, 17), LAMBDA(ul, IF(H4=TRUE, IF(ul="", "–", IMAGE(ul&"/low.png")), ""))),',
-    '  MAP(CHOOSECOLS(srt, 9), CHOOSECOLS(srt, 11), LAMBDA(nm, src, IF(src="en-Ersatz", nm&" (EN)", nm))),',
-    '  CHOOSECOLS(srt, 4),',
-    '  MAP(CHOOSECOLS(srt, 6), CHOOSECOLS(srt, 8), LAMBDA(nr, sz, IF(sz="", nr, nr&"/"&sz))),',
-    '  MAP(CHOOSECOLS(srt, 12), LAMBDA(vr, IF(vr="reverse", "Reverse Holo", IF(vr="holo", "Holo", IF(vr="firstEdition", "1. Edition", "Normal"))))),',
-    '  CHOOSECOLS(srt, 13),',
-    '  CHOOSECOLS(srt, 14),',
-    '  MAP(CHOOSECOLS(srt, 15), LAMBDA(pr, IF(ISNUMBER(pr), pr, "kein Preis"))),',
-    '  CHOOSECOLS(srt, ' + vc + '),',
-    '  CHOOSECOLS(srt, 24), CHOOSECOLS(srt, 25), CHOOSECOLS(srt, 26),',
-    '  CHOOSECOLS(srt, 18), CHOOSECOLS(srt, 19), CHOOSECOLS(srt, 20), CHOOSECOLS(srt, 16)' + (n ? ', ' + extraCols.join(', ') : ''),
-    ')), "Keine Einträge gefunden")'
+    '  IF((H4=TRUE)*(url<>""), IMAGE(url&"/low.png"), IF(H4=TRUE, "–", "")),',
+    '  ' + show.concat(extraCols).join(', '),
+    '))), "Keine Einträge gefunden")'
   ].join(' ');
 }
 
@@ -2592,6 +2673,25 @@ function loadSets_() {
   return out;
 }
 
+// Sets im Zwischenspeicher (#38 S3): Suche, Set-Vorschläge und Sammlung lesen das Blatt Sets nicht bei jedem Aufruf.
+// So wartet eine Suche nicht auf das Speichern der vorigen Karte (#41). Wer das Blatt Sets schreibt, vergisst den
+// Zwischenspeicher (dropSetsCache_), eine Änderung von Hand ebenso (onEdit).
+const SETS_CACHE_KEY = 'sets';
+const SETS_CACHE_SECS = 21600; // 6 Stunden, mehr erlaubt CacheService nicht
+
+/** Wie loadSets_, aus dem Zwischenspeicher (row stimmt dann nicht immer, zum Schreiben loadSets_ nehmen). */
+function cachedSets_() {
+  const hit = cacheGetJson_(SETS_CACHE_KEY);
+  if (hit && hit.de && hit.en && hit.order) return hit;
+  const sets = loadSets_();
+  if (sets.order.de.length || sets.order.en.length) cachePutJson_(SETS_CACHE_KEY, sets, SETS_CACHE_SECS);
+  return sets;
+}
+
+function dropSetsCache_() {
+  cacheDrop_(SETS_CACHE_KEY);
+}
+
 function matchSets_(sets, text) {
   const t = String(text || '').trim().toLowerCase();
   if (!t) return [];
@@ -2615,12 +2715,28 @@ function squash_(s) {
   return String(s || '').toLowerCase().replace(/[\s\-.]/g, '');
 }
 
+// Trefferlisten nach Name (cards?name=…) merkt sich das Tool ein paar Stunden (#38 S3): „Glurak“ (zu viele Treffer) und
+// gleich danach „Glurak 4“ holen dieselbe Liste nur einmal. Neue Karten kommen mit neuen Sets, selten am selben Tag.
+const NAME_LIST_SECS = 3 * 3600;
+
+/** Kurzform aller Karten mit diesem Namen von tcgdex: [{id, localId, name, image}], gemerkt für NAME_LIST_SECS. */
+function cardsByName_(lang, name) {
+  const key = 'tcgl:' + lang + ':' + String(name).trim().toLowerCase().slice(0, 200);
+  const hit = cacheGetJson_(key);
+  if (Array.isArray(hit)) return hit;
+  const res = fetchJson_(apiUrl_(lang, 'cards', { name: name }));
+  const list = (Array.isArray(res) ? res : []).map(function (c) {
+    return { id: c.id, localId: c.localId, name: c.name, image: c.image };
+  });
+  cachePutJson_(key, list, NAME_LIST_SECS);
+  return list;
+}
+
 /** Kandidaten (Kurzform) aus tcgdex holen und lokal exakt filtern. */
 function findCandidates_(lang, name, num, setIds, sets, suffix) {
   let list = [];
   if (name) {
-    const res = fetchJson_(apiUrl_(lang, 'cards', { name: name }));
-    list = Array.isArray(res) ? res : [];
+    list = cardsByName_(lang, name);
   } else {
     (setIds || []).slice(0, 5).forEach(function (id) {
       const set = fetchJson_(apiUrl_(lang, 'sets/' + encodeURIComponent(id)));
@@ -2658,7 +2774,7 @@ function summarizeCard_(card, lang) {
   };
 }
 
-function finishCandidates_(lang, cands, notes, inputName, enNote) {
+function finishCandidates_(lang, cands, notes, inputName, enNote, sets) {
   if (cands.length > MAX_CANDIDATES) {
     notes.push(cands.length + ' Treffer – bitte Nummer oder Set ergänzen.');
     return { stage: lang, tooMany: cands.length, cards: [], notes: notes, inputName: inputName };
@@ -2677,7 +2793,6 @@ function finishCandidates_(lang, cands, notes, inputName, enNote) {
     });
   }
   cacheCards_(toCache);
-  const sets = loadSets_();
   const cards = cands.map(function (c, i) {
     if (details[i].ok) return summarizeCard_(details[i].data, langs[i]);
     const s = sets[langs[i]][c.setId];
@@ -2699,7 +2814,7 @@ function searchCards(input) {
   const setText = String(input.set || '').trim();
   if (!name && !(num && setText)) throw new Error('Bitte einen Namen eingeben – oder Set und Nummer.');
 
-  const sets = loadSets_();
+  const sets = cachedSets_(); // einmal pro Suche, ohne das Blatt zu lesen (#38 S3)
   const notes = [];
   let setIds = null;
   if (setText) {
@@ -2718,7 +2833,7 @@ function searchCards(input) {
         .filter(function (c) { return squash_(c.name).indexOf(squash_(name)) >= 0; });
     }
   }
-  if (cands.length) return finishCandidates_('de', cands, notes, name);
+  if (cands.length) return finishCandidates_('de', cands, notes, name, '', sets);
 
   // Stufe 2: englisch mit übersetztem Namen
   if (name) {
@@ -2733,12 +2848,12 @@ function searchCards(input) {
       seen[t.q.toLowerCase()] = true;
       cands = findCandidates_('en', t.q, num, setIds, sets, t.suffix);
       if (cands.length) {
-        return finishCandidates_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten für „' + t.label + '".');
+        return finishCandidates_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten für „' + t.label + '".', sets);
       }
     }
   } else {
     cands = findCandidates_('en', '', num, setIds, sets, null);
-    if (cands.length) return finishCandidates_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten.');
+    if (cands.length) return finishCandidates_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten.', sets);
   }
 
   // Stufe 3: Set-Auswahl (braucht eine Nummer)
@@ -2818,29 +2933,57 @@ function getCardBySetNumber(setId, number) {
   throw new Error('Nummer ' + num.raw + ' gibt es in diesem Set nicht.');
 }
 
-/** Erscheinungsdatum eines Sets: aus dem Cache, sonst einmal holen und speichern. */
+/** Erscheinungsdatum eines Sets: aus dem Blatt Sets, sonst einmal holen und speichern (setReleaseDates_). */
 function setReleaseDate_(lang, setId, setBrief) {
+  const need = {};
+  need[setId] = { lang: lang, brief: setBrief };
+  return setReleaseDates_(need)[setId] || '';
+}
+
+/**
+ * Erscheinungsdaten mehrerer Sets: aus dem Blatt Sets, die übrigen parallel von tcgdex holen und im Blatt Sets merken.
+ * need = {Set-ID: {lang: 'de'|'en', brief (Set aus den Kartendaten, optional)}} -> {Set-ID: 'yyyy-MM-dd' oder ''}
+ */
+function setReleaseDates_(need) {
+  const out = {};
+  const ids = Object.keys(need || {});
+  if (!ids.length) return out;
   const sets = loadSets_();
-  const hit = sets[lang][setId] || sets[lang === 'de' ? 'en' : 'de'][setId];
-  if (hit && hit.releaseDate) return hit.releaseDate;
-  let date = '';
-  try {
-    const full = fetchJson_(apiUrl_(lang, 'sets/' + encodeURIComponent(setId)));
-    date = full && full.releaseDate ? String(full.releaseDate).slice(0, 10) : '';
-  } catch (e) { date = ''; }
-  if (!date) return '';
+  const langOf = function (id) { return need[id].lang === 'en' ? 'en' : 'de'; };
+  const missing = ids.filter(function (id) {
+    const lang = langOf(id);
+    const hit = sets[lang][id] || sets[lang === 'de' ? 'en' : 'de'][id];
+    out[id] = hit && hit.releaseDate ? hit.releaseDate : '';
+    return !out[id];
+  });
+  if (!missing.length) return out;
+  const res = fetchAllJson_(missing.map(function (id) { return apiUrl_(langOf(id), 'sets/' + encodeURIComponent(id)); }));
   const sh = ss_().getSheetByName(SHEETS.sets);
-  if (sh) {
-    const own = sets[lang][setId];
+  let wrote = false;
+  missing.forEach(function (id, i) {
+    const full = res[i].ok ? res[i].data : null;
+    const date = full && full.releaseDate ? String(full.releaseDate).slice(0, 10) : '';
+    out[id] = date;
+    if (!date || !sh) return;
+    const own = sets[langOf(id)][id];
     if (own) {
       sh.getRange(own.row, 8).setValue(date);
     } else {
-      const b = setBrief || {};
+      const b = need[id].brief || full;
       const cc = b.cardCount || {};
-      sh.appendRow([lang, setId, b.name || setId, b.logo || '', b.symbol || '', cc.official || '', cc.total || '', date]);
+      sh.appendRow([langOf(id), id, b.name || id, b.logo || '', b.symbol || '', cc.official || '', cc.total || '', date]);
     }
-  }
-  return date;
+    wrote = true;
+  });
+  if (wrote) dropSetsCache_();
+  return out;
+}
+
+/** Erscheinungsdatum eines Sets nur aus dem Zwischenspeicher (leichtes Speichern, #41); fehlt es: '' (Einsortieren holt es). */
+function knownSetDate_(lang, setId) {
+  const sets = cachedSets_();
+  const hit = sets[lang][setId] || sets[lang === 'de' ? 'en' : 'de'][setId];
+  return hit && hit.releaseDate ? hit.releaseDate : '';
 }
 
 /** Eigener Preis aus einer Anfrage: Zahl > 0 oder null (leer/0). Unlesbar -> Fehler. */
@@ -2928,19 +3071,24 @@ function addRidPut_(rid, res) {
   keep.repeat = true;
   try { CacheService.getScriptCache().put(ADD_RID_PREFIX + rid, JSON.stringify(keep), 21600); } catch (e) { /* ohne Schutz weiter */ }
 }
+/** Gemerkte Antwort für eine Wiederholung, pending neu gezählt (die gemerkte Zahl kann inzwischen veraltet sein) */
+function addRepeat_(prev) {
+  try { prev.pending = pendingCount_(readData_(sheet_(SHEETS.data))); } catch (e) { delete prev.pending; }
+  return prev;
+}
 
 /**
- * Karte speichern. req = {id, lang ('de'|'en' Datensprache), variant: 'base'|'reverse'|'firstEdition', condition, qty,
- * inputName, cardLang (Sprache der Karte, Standard 'DE'), version (Sonderversion, Standard ''), ownPrice (Zahl|null|''),
- * rid (Anfrage-ID, optional)}
- * -> {eid, key, gkey, count, message, delta (collDelta_)}; schon gespeicherte rid: dieselbe Antwort mit
- * repeat: true und ohne delta
+ * Karte speichern, nur ins Blatt Daten (lightSave_, #41). req = {id, lang ('de'|'en' Datensprache),
+ * variant: 'base'|'reverse'|'firstEdition', condition, qty, inputName, cardLang (Sprache der Karte, Standard 'DE'),
+ * version (Sonderversion, Standard ''), ownPrice (Zahl|null|''), rid (Anfrage-ID, optional)}
+ * -> {eid, key, gkey, count, message, delta (collDelta_), pending (noch nicht einsortiert)}; schon gespeicherte rid:
+ * dieselbe Antwort mit repeat: true, ohne delta und mit neu gezähltem pending
  */
 function addCard(req) {
   req = req || {};
   const rid = addRid_(req);
   const prev = addRidGet_(rid);
-  if (prev) return prev;
+  if (prev) return addRepeat_(prev);
   ensureSchema_();
   const lang = req.lang === 'en' ? 'en' : 'de';
   const qty = Math.max(1, Math.floor(Number(req.qty) || 1));
@@ -2961,7 +3109,7 @@ function addCard(req) {
   const priceDate = p.cm ? dateText_(p.cm.updated) : '';
   const set = card.set || {};
   const setId = String(set.id || setIdOf_(card));
-  const setDate = setReleaseDate_(lang, setId, set);
+  const setDate = knownSetDate_(lang, setId); // fehlt es (neues Set), holt es das Einsortieren
   const summary = summarizeCard_(card, lang);
   summary.dataLang = lang;
   summary.setName = String(set.name || setId);
@@ -2969,12 +3117,11 @@ function addCard(req) {
   summary.price = price;
   summary.priceDate = priceDate;
   summary.inputName = String(req.inputName || '').trim();
-  const now = new Date();
 
-  let shape = true;
   const result = withLock_(function () {
     const again = addRidGet_(rid); // dieselbe Anfrage lief inzwischen durch
     if (again) return { prev: again };
+    const ct = changeTime_(), now = ct.now; // erst in der Sperre
     const st = dataStore_();
     if (setDate) {
       // ältere Einträge dieses Sets ohne Datum nachtragen
@@ -2987,11 +3134,8 @@ function addCard(req) {
       now: now, headers: st.headers, width: st.width
     });
     const res = storeAddHand_(st, row, qty, ownPrice, now, { price: price, date: priceDate });
-    storeSave_(st);
-    storeDexIds_(dexMapOf_(card));
-    const ch = afterDataChange_(st);
-    shape = ch.shape;
-    res.delta = collDelta_(st, ch);
+    res.pending = lightSave_(st, ct.since);
+    res.delta = collDelta_(st);
     const name = summary.dataLang === 'en' && summary.inputName ? summary.inputName : String(card.name);
     let priceInfo = '';
     if (ownPrice != null) priceInfo = ' Eigener Preis: ' + eurText_(ownPrice) + '.';
@@ -3000,16 +3144,12 @@ function addCard(req) {
     addRidPut_(rid, out); // noch in der Sperre: eine Wiederholung wartet darauf und bekommt diese Antwort
     return out;
   });
-  if (result.prev) return result.prev;
-
-  // Die Zeilenzahl der Sammlung ändert sich nur mit einer neuen Gruppe oder einer, die über 0 springt
-  if (shape) { try { applyRowHeights_(); } catch (e) { /* egal */ } }
-  return result;
+  return result.prev ? addRepeat_(result.prev) : result;
 }
 
 /** Antwort von addCard / addFreeCard */
 function addResult_(res, message) {
-  return { eid: res.eid, key: res.key, gkey: res.gkey, count: res.count, message: message, delta: res.delta || null };
+  return { eid: res.eid, key: res.key, gkey: res.gkey, count: res.count, message: message, delta: res.delta || null, pending: res.pending };
 }
 
 /**
@@ -3021,7 +3161,7 @@ function addFreeCard(req) {
   req = req || {};
   const rid = addRid_(req);
   const prev = addRidGet_(rid);
-  if (prev) return prev;
+  if (prev) return addRepeat_(prev);
   ensureSchema_();
   const name = String(req.name || '').trim();
   if (!name) throw new Error('Bitte einen Namen eingeben.');
@@ -3031,55 +3171,49 @@ function addFreeCard(req) {
   const cardLang = langCode_(req.cardLang);
   const version = versionText_(req.version);
   const ownPrice = ownPriceOf_(req.ownPrice);
-  const now = new Date();
   const card = { free: true, name: name, setName: String(req.setName || '').trim(), localId: String(req.number || '').trim() };
 
-  let shape = true;
   const result = withLock_(function () {
     const again = addRidGet_(rid);
     if (again) return { prev: again };
+    const ct = changeTime_(), now = ct.now;
     const st = dataStore_();
     const row = buildCardRow_(card, {
       variant: variant, cond: cond, lang: cardLang, version: version, count: qty, origin: ORIGIN_HAND, fp: '',
       now: now, headers: st.headers, width: st.width
     });
     const res = storeAddHand_(st, row, qty, ownPrice, now, null);
-    storeSave_(st);
-    const ch = afterDataChange_(st);
-    shape = ch.shape;
-    res.delta = collDelta_(st, ch);
+    res.pending = lightSave_(st, ct.since);
+    res.delta = collDelta_(st);
     const priceInfo = ownPrice != null ? ' Eigener Preis: ' + eurText_(ownPrice) + '.' : ' (freie Karte, kein Preis)';
     const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
     addRidPut_(rid, out);
     return out;
   });
-  if (result.prev) return result.prev;
-
-  if (shape) { try { applyRowHeights_(); } catch (e) { /* egal */ } }
-  return result;
+  return result.prev ? addRepeat_(result.prev) : result;
 }
 
 // ---------------------------------------------------------------------------
 // 6. Sammlung: Gruppen, -1/+1, Rückgängig, Bearbeiten, eigener Preis, Verknüpfen
 // ---------------------------------------------------------------------------
 
-/** Auswahllisten fürs UI. */
+/** Auswahllisten fürs UI, dazu pending: Einträge, die noch nicht einsortiert sind (#41). */
 function getUiConfig() {
   ensureSchema_();
   const sh = ss_().getSheetByName(SHEETS.data);
   const versions = {};
-  if (sh) {
-    readData_(sh).forEach(function (r) {
-      const v = versionText_(r[COL.version]);
-      if (v && isDataRow_(r)) versions[v] = true;
-    });
-  }
+  const rows = sh ? readData_(sh) : [];
+  rows.forEach(function (r) {
+    const v = versionText_(r[COL.version]);
+    if (v && isDataRow_(r)) versions[v] = true;
+  });
   return {
     conditions: CONDITIONS.map(function (c) { return { code: c, label: CONDITION_LABELS[c] || c }; }),
     langs: LANGS.map(function (l) { return { code: l[0], label: l[1] }; }),
     versions: Object.keys(versions).sort(function (a, b) { return a.localeCompare(b, 'de'); }),
     extras: sh ? extraNames_() : [],
-    viewExtras: getViewExtras_()
+    viewExtras: getViewExtras_(),
+    pending: pendingCount_(rows)
   };
 }
 
@@ -3161,7 +3295,7 @@ function searchCollection(query, setText, opts) {
   const rows = st.rows;
   const words = String(query || '').trim().split(/\s+/).filter(Boolean);
   const stx = String(setText || '').trim().toLowerCase();
-  const stIds = stx ? matchSets_(loadSets_(), stx) : [];
+  const stIds = stx ? matchSets_(cachedSets_(), stx) : [];
   let groups = groupRows_(rows).map(function (g) {
     return { gkey: g.gkey, rows: g.idx.map(function (i) { return rows[i]; }) };
   }).filter(function (g) {
@@ -3201,7 +3335,7 @@ function searchCollection(query, setText, opts) {
 /**
  * Die ganze Sammlung für den Tab Sammlung (#30): alle Gruppen wie in searchCollection, ohne Grenze und unsortiert
  * (Reihenfolge wie im Blatt Daten). Suchen, Filtern und Sortieren macht der Browser mit den Werten in k, ohne weitere
- * Aufrufe. -> {groups: [collGroup_], total}
+ * Aufrufe. -> {groups: [collGroup_], total, pending (noch nicht einsortiert, #41)}
  */
 function getCollection() {
   ensureSchema_();
@@ -3210,16 +3344,16 @@ function getCollection() {
     withLock_(function () { rebuildGroups_(); });
     st = dataStore_();
   }
-  const ctx = collCtx_(null);
+  const ctx = collCtx_();
   const groups = groupRows_(st.rows).map(function (g) {
     return collGroup_(g.gkey, g.idx.map(function (i) { return st.rows[i]; }), st.headers, ctx);
   });
-  return { groups: groups, total: groups.length };
+  return { groups: groups, total: groups.length, pending: pendingCount_(st.rows) };
 }
 
-/** Nachschlagewerte für collGroup_, einmal pro Aufruf gelesen. refs: schon gelesene Vergleichspreise oder null. */
-function collCtx_(refs) {
-  return { info: importInfo_(), refs: refs || loadCardHistRefs_(), dexIds: loadDexIds_(), ranks: rarityRanks_(), sets: loadSets_() };
+/** Nachschlagewerte für collGroup_, einmal pro Aufruf gelesen. */
+function collCtx_() {
+  return { info: importInfo_(), refs: loadCardHistRefs_(), dexIds: loadDexIds_(), ranks: rarityRanks_(), sets: cachedSets_() };
 }
 
 /**
@@ -3253,11 +3387,11 @@ function collGroup_(gkey, rows, headers, ctx) {
 }
 
 /**
- * Nach einer Änderung in der Sperre (ch aus afterDataChange_): die betroffenen Gruppen fürs UI, damit es nur diese
- * Karten austauscht statt neu zu laden (#30). -> {groups: [collGroup_], gone: [Schlüssel ohne Zeilen]}
+ * Nach einer Änderung in der Sperre: die betroffenen Gruppen fürs UI, damit es nur diese Karten austauscht statt neu
+ * zu laden (#30). -> {groups: [collGroup_], gone: [Schlüssel ohne Zeilen]}
  */
-function collDelta_(st, ch) {
-  const keys = (ch && ch.keys) || storeTouchedGroups_(st);
+function collDelta_(st) {
+  const keys = storeTouchedGroups_(st);
   const want = {};
   keys.forEach(function (k) { want[k] = []; });
   st.rows.forEach(function (r, i) {
@@ -3265,7 +3399,7 @@ function collDelta_(st, ch) {
     const g = groupKey_(r);
     if (g in want) want[g].push(r);
   });
-  const ctx = collCtx_(st.refs);
+  const ctx = collCtx_();
   const out = { groups: [], gone: [] };
   keys.forEach(function (k) {
     if (want[k].length) out.groups.push(collGroup_(k, want[k], st.headers, ctx));
@@ -3278,16 +3412,17 @@ function collDelta_(st, ch) {
  * Anzahl einer Exemplar-Zeile ändern (eid = Eintrag-ID). Nie unter 0, die Zeile bleibt.
  * +1 auf eine Import-Zeile landet in der Zeile „von Hand“ desselben Eintrags (wird bei Bedarf angelegt).
  * -1 auf eine Import-Zeile wird als 'handentfernt' im Import-Protokoll vermerkt.
- * -> {token: {eid, applied, logIds, createdEid}, eid, count, groupCount, applied, gkey, delta (collDelta_, null ohne Änderung)}
+ * -> {token: {eid, applied, logIds, createdEid}, eid, count, groupCount, applied, gkey, delta (collDelta_, null ohne Änderung),
+ *     pending (noch nicht einsortiert, #41)}
  */
 function adjustEntry(eid, delta) {
   ensureSchema_();
   delta = Math.round(Number(delta) || 0);
-  const res = withLock_(function () {
+  return withLock_(function () {
     const st = dataStore_();
     const i0 = storeFindEid_(st, eid);
     if (i0 < 0) throw new Error('Eintrag nicht gefunden. Bitte die Liste neu laden.');
-    const now = new Date();
+    const ct = changeTime_(), now = ct.now;
     let i = i0;
     let createdEid = '';
     if (delta > 0 && !isHandOrigin_(st.rows[i0][COL.origin])) {
@@ -3325,67 +3460,64 @@ function adjustEntry(eid, delta) {
         data: { countBefore: cur }, status: 'erledigt', sourceId: inf ? inf.sourceId : ''
       }]);
     }
-    if (applied !== 0 || createdEid) storeSave_(st);
-    const diff = applied !== 0 ? collDelta_(st, afterDataChange_(st)) : null;
+    const pending = applied !== 0 || createdEid ? lightSave_(st, ct.since) : pendingCount_(storeLiveRows_(st), ct.since);
+    const diff = applied !== 0 ? collDelta_(st) : null;
     const gkey = groupKey_(r);
     const eidNow = String(r[COL.eid]);
     return {
       token: { eid: eidNow, applied: applied, logIds: logIds, createdEid: createdEid },
-      eid: eidNow, count: next, groupCount: storeGroupCount_(st, gkey), applied: applied, gkey: gkey, delta: diff
+      eid: eidNow, count: next, groupCount: storeGroupCount_(st, gkey), applied: applied, gkey: gkey, delta: diff, pending: pending
     };
   });
-  // Die Zeilenzahl der Sammlung ändert sich nur, wenn die Gruppe über 0 springt
-  if (res.applied && (res.groupCount === 0 || res.groupCount === res.applied)) {
-    try { applyRowHeights_(); } catch (e) { /* egal */ }
-  }
-  return res;
 }
 
 /**
  * Macht adjustEntry genau rückgängig (token aus adjustEntry): Anzahl zurück, Protokolleinträge weg,
  * eine dabei angelegte Zeile „von Hand“ wird wieder gelöscht, wenn sie leer ist.
- * -> {eid, count, groupCount, gkey, delta (collDelta_; fehlt, wenn der Eintrag nicht mehr da ist)}
+ * -> {eid, count, groupCount, gkey, delta (collDelta_; fehlt, wenn der Eintrag nicht mehr da ist), pending}
  */
 function revertAdjust(token) {
   ensureSchema_();
   token = token || {};
   const applied = Math.round(Number(token.applied) || 0);
-  const res = withLock_(function () {
+  return withLock_(function () {
     const st = dataStore_();
     const i = storeFindEid_(st, token.eid);
     if (token.logIds && token.logIds.length) deleteProtoByIds_(token.logIds);
     if (i < 0) {
-      return { eid: String(token.eid || ''), count: 0, groupCount: 0, gkey: '', applied: 0 };
+      return { eid: String(token.eid || ''), count: 0, groupCount: 0, gkey: '', pending: pendingCount_(storeLiveRows_(st)) };
     }
     const r = st.rows[i];
+    const ct = changeTime_(), now = ct.now;
     const cur = Number(r[COL.count]) || 0;
     const next = Math.max(0, cur - applied);
     if (next !== cur) {
       r[COL.count] = next;
-      r[COL.changed] = new Date();
+      r[COL.changed] = now;
       storeTouch_(st, i);
     }
+    const gkey = groupKey_(r);
     if (token.createdEid) {
       const k = storeFindEid_(st, token.createdEid);
-      if (k >= 0 && (Number(st.rows[k][COL.count]) || 0) === 0) storeRemove_(st, k);
+      if (k >= 0 && (Number(st.rows[k][COL.count]) || 0) === 0) {
+        storeRemove_(st, k);
+        // Die gelöschte Zeile zählt nicht mehr als geändert: eine andere Zeile der Karte trägt die Änderung, falls die
+        // Sammlung das +1 schon einsortiert hat (#41)
+        const other = storeGroupIdx_(st, gkey)[0];
+        if (other != null) { st.rows[other][COL.changed] = now; storeTouch_(st, other); }
+      }
     }
-    storeSave_(st);
-    const diff = collDelta_(st, afterDataChange_(st));
-    const gkey = groupKey_(r);
-    return { eid: String(r[COL.eid]), count: next, groupCount: storeGroupCount_(st, gkey), gkey: gkey, applied: next - cur, delta: diff };
+    const pending = lightSave_(st, ct.since);
+    const diff = collDelta_(st);
+    return { eid: String(r[COL.eid]), count: next, groupCount: storeGroupCount_(st, gkey), gkey: gkey, delta: diff, pending: pending };
   });
-  if (res.applied && (res.groupCount === 0 || res.groupCount === res.applied)) {
-    try { applyRowHeights_(); } catch (e) { /* egal */ }
-  }
-  delete res.applied;
-  return res;
 }
 
 /**
  * Exemplar-Zeile bearbeiten. changes = {cond?, cardLang?, version?, extras?: {Name: Wert}} (nur Angegebenes ändert sich),
  * qty = wie viele Exemplare dieser Zeile (Standard: alle). Bei qty < Anzahl wird die Zeile geteilt.
  * Hat danach eine andere Zeile denselben Schlüssel, dieselbe Herkunft und dieselbe Quellzeile, wird zusammengelegt.
- * -> {ok, eid (Ergebniszeile), gkey, delta (collDelta_: alte und neue Gruppe; fehlt, wenn sich nichts änderte)}
+ * -> {ok, eid (Ergebniszeile), gkey, delta (collDelta_: alte und neue Gruppe; fehlt, wenn sich nichts änderte), pending}
  */
 function editEntry(eid, changes, qty) {
   ensureSchema_();
@@ -3416,7 +3548,7 @@ function editEntry(eid, changes, qty) {
       n = Math.min(n, count);
     }
     const whole = count === 0 || n >= count;
-    const now = new Date();
+    const ct = changeTime_(), now = ct.now;
     const oldKey = entryKey_(src);
     const next = src.slice();
     if (cond != null) next[COL.cond] = cond;
@@ -3427,7 +3559,7 @@ function editEntry(eid, changes, qty) {
       if (c != null) next[c] = extras[name] == null ? '' : String(extras[name]).trim();
     });
     const changed = next.some(function (v, c) { return c !== COL.changed && String(v) !== String(src[c]); });
-    if (!changed) return { ok: true, eid: String(src[COL.eid]), gkey: groupKey_(src) };
+    if (!changed) return { ok: true, eid: String(src[COL.eid]), gkey: groupKey_(src), pending: pendingCount_(storeLiveRows_(st), ct.since) };
     const newKey = entryKey_(next);
     next[COL.key] = newKey;
     next[COL.changed] = now;
@@ -3461,34 +3593,36 @@ function editEntry(eid, changes, qty) {
         break;
       }
     }
-    storeSave_(st);
-    const diff = collDelta_(st, afterDataChange_(st));
-    return { ok: true, eid: String(st.rows[t][COL.eid]), gkey: groupKey_(st.rows[t]), delta: diff };
+    const pending = lightSave_(st, ct.since);
+    const diff = collDelta_(st);
+    return { ok: true, eid: String(st.rows[t][COL.eid]), gkey: groupKey_(st.rows[t]), delta: diff, pending: pending };
   });
 }
 
 /**
  * Eigener Preis für eine ganze Gruppe (alle Zeilen). price > 0 setzt ihn mit heutigem Datum,
- * null/''/0 entfernt ihn. -> {gkey, price (Preis der Gruppe danach oder null), priceManual, delta (collDelta_)}
+ * null/''/0 entfernt ihn. -> {gkey, price (Preis der Gruppe danach oder null), priceManual, delta (collDelta_), pending}
  */
 function setGroupOwnPrice(gkey, price) {
   ensureSchema_();
   const p = ownPriceOf_(price);
   return withLock_(function () {
     const st = dataStore_();
-    const n = storeSetGroupOwnPrice_(st, String(gkey), p, new Date());
+    const ct = changeTime_();
+    const n = storeSetGroupOwnPrice_(st, String(gkey), p, ct.now);
     if (!n) throw new Error('Diese Karte wurde nicht gefunden. Bitte die Liste neu laden.');
-    storeSave_(st);
-    const diff = collDelta_(st, afterDataChange_(st));
+    const pending = lightSave_(st, ct.since);
+    const diff = collDelta_(st);
     const gp = groupPrice_(storeGroupIdx_(st, String(gkey)).map(function (i) { return st.rows[i]; }));
-    return { gkey: String(gkey), price: gp.price, priceManual: gp.manual, delta: diff };
+    return { gkey: String(gkey), price: gp.price, priceManual: gp.manual, delta: diff, pending: pending };
   });
 }
 
 /**
  * Freie Gruppe mit einer tcgdex-Karte verknüpfen. dataLang 'de'|'en', variant 'base'|'reverse'|'firstEdition'
  * (auch 'normal'/'holo'). Zustand, Sprache, Sonderversion, Anzahl, Herkunft, Zusatzwerte und eigener Preis bleiben.
- * Zeilen „von Hand“ mit nun gleichem Schlüssel werden zusammengelegt. -> {gkey (neu), delta (collDelta_)}
+ * Zeilen „von Hand“ mit nun gleichem Schlüssel werden zusammengelegt. Fehlen Set-Datum oder Pokédex-Nummern, holt sie das
+ * Einsortieren. -> {gkey (neu), delta (collDelta_), pending}
  */
 function linkFreeGroup(gkey, cardId, dataLang, variant) {
   ensureSchema_();
@@ -3503,14 +3637,14 @@ function linkFreeGroup(gkey, cardId, dataLang, variant) {
   const priceDate = p.cm ? dateText_(p.cm.updated) : '';
   const set = card.set || {};
   const setId = String(set.id || setIdOf_(card));
-  const setDate = setReleaseDate_(lang, setId, set);
+  const setDate = knownSetDate_(lang, setId); // fehlt es (neues Set), holt es das Einsortieren
 
   return withLock_(function () {
     const st = dataStore_();
     const idx = storeGroupIdx_(st, gkey);
     if (!idx.length) throw new Error('Diese Karte wurde nicht gefunden. Bitte die Liste neu laden.');
     if (idx.some(function (i) { return String(st.rows[i][COL.id] || ''); })) throw new Error('Diese Karte ist schon mit tcgdex verknüpft.');
-    const now = new Date();
+    const ct = changeTime_(), now = ct.now;
     const inGroup = {};
     idx.forEach(function (i) { inGroup[i] = true; });
     idx.forEach(function (i) {
@@ -3563,23 +3697,125 @@ function linkFreeGroup(gkey, cardId, dataLang, variant) {
       storeTouch_(st, target);
       storeRemove_(st, i);
     });
-    storeSave_(st);
-    storeDexIds_(dexMapOf_(card));
-    const diff = collDelta_(st, afterDataChange_(st));
+    const pending = lightSave_(st, ct.since);
+    const diff = collDelta_(st);
     const first = idx.filter(function (i) { return !st.removed[i]; })[0];
     const keyRow = first != null ? st.rows[first] : st.rows[idx[0]];
-    return { gkey: groupKey_(keyRow), delta: diff };
+    return { gkey: groupKey_(keyRow), delta: diff, pending: pending };
   });
 }
 
 /** Vorschlagsliste fürs Setfeld. */
 function getSetSuggestions() {
-  const sets = loadSets_();
+  const sets = cachedSets_();
   const names = {};
   ['de', 'en'].forEach(function (lang) {
     Object.keys(sets[lang]).forEach(function (id) { names[sets[lang][id].name] = true; });
   });
   return Object.keys(names).filter(Boolean).sort(function (a, b) { return a.localeCompare(b, 'de'); });
+}
+
+// ---------------------------------------------------------------------------
+// 6a. Einsortieren (#41)
+// ---------------------------------------------------------------------------
+
+const SORT_IN_DEX_MAX = 100; // Pokédex-Nummern von höchstens so vielen Karten pro Lauf von tcgdex, den Rest holt die Nacht
+
+/**
+ * Knopf „Einsortieren“ (Seitenleiste, Web-App, Dashboard) und Menü Pokémon > Einsortieren: alles, was seit dem letzten
+ * Mal nur gespeichert wurde, in Sammlung, Pokédex, Seltenheiten und Dashboard bringen (sortIn_).
+ * opts.ui (Seitenleiste und Web-App): ohne Meldung unten rechts, dort zeigt die Leiste das Ergebnis.
+ * -> {message, pending (danach 0), sorted (einsortierte Einträge), filled (von tcgdex ergänzte Werte)}
+ */
+function einsortieren(opts) {
+  const ui = !!(opts && opts.ui === true);
+  ensureSchema_();
+  if (!ui) notifyBusy_('Sortiere ein …');
+  let res;
+  try {
+    res = sortIn_();
+  } catch (e) {
+    if (!ui) notifyDone_('Einsortieren ging nicht: ' + e.message);
+    throw e;
+  }
+  if (!ui) notifyDone_(res.message);
+  return res;
+}
+
+/**
+ * Einsortieren: Erscheinungsdaten neuer Sets und Pokédex-Nummern neuer Karten von tcgdex holen (parallel, ohne Sperre),
+ * dann in der Sperre die Daten ergänzen und Gruppen, Seltenheiten, Pokédex und Dashboard einmal neu aufbauen
+ * (rebuildGroups_). Ist nichts offen und fehlt nichts, bleibt alles, wie es ist. Läuft auch am Ende des Preislaufs.
+ * -> {message, pending, sorted, filled}
+ */
+function sortIn_() {
+  const rows = readData_(sheet_(SHEETS.data));
+  const need = {};
+  rows.forEach(function (r) {
+    if (!isDataRow_(r) || r[COL.setDate] || !r[COL.setId]) return;
+    const id = String(r[COL.setId]);
+    if (!need[id]) need[id] = { lang: langOfRow_(r) };
+  });
+  const dates = setReleaseDates_(need);
+  const dexMap = missingDexIds_(rows);
+  const res = withLock_(function () {
+    const st = dataStore_();
+    let dated = 0;
+    st.rows.forEach(function (r, i) {
+      if (!isDataRow_(r) || r[COL.setDate] || !r[COL.setId]) return;
+      const d = dates[String(r[COL.setId])];
+      if (d) { r[COL.setDate] = d; storeTouch_(st, i); dated++; }
+    });
+    if (dated) storeSave_(st);
+    const dexed = storeDexIds_(dexMap);
+    const sorted = pendingCount_(storeLiveRows_(st));
+    if (sorted || dated || dexed) rebuildGroups_();
+    return { sorted: sorted, filled: dated + dexed };
+  });
+  // Die Sammlung kann jetzt mehr Zeilen haben (früher nach dem Hinzufügen)
+  if (res.sorted || res.filled) { try { applyRowHeights_(); } catch (e) { /* egal */ } }
+  let msg;
+  if (res.sorted) msg = res.sorted + (res.sorted === 1 ? ' Änderung' : ' Änderungen') + ' einsortiert.';
+  else if (res.filled) msg = 'Fehlende Daten von tcgdex ergänzt.';
+  else msg = 'Alles war schon einsortiert.';
+  if (res.sorted || res.filled) msg += ' Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand.';
+  return { message: msg, pending: 0, sorted: res.sorted, filled: res.filled };
+}
+
+/**
+ * Pokédex-Nummern der Karten, die das Blatt Pokédex-Nummern noch nicht kennt (das leichte Speichern merkt sie nicht):
+ * aus dem Zwischenspeicher der Suche, sonst parallel von tcgdex, höchstens SORT_IN_DEX_MAX Karten.
+ * -> {Karten-ID: [Nummern]} für storeDexIds_ (leere Liste: tcgdex kennt keine)
+ */
+function missingDexIds_(rows) {
+  const known = loadDexIds_();
+  const want = {};
+  rows.forEach(function (r) {
+    const id = String(r[COL.id] || '');
+    if (id && isDataRow_(r) && !(id in known) && !(id in want)) want[id] = langOfRow_(r);
+  });
+  const ids = Object.keys(want).slice(0, SORT_IN_DEX_MAX);
+  const out = {};
+  if (!ids.length) return out;
+  let cached = {};
+  try {
+    cached = CacheService.getScriptCache().getAll(ids.map(function (id) { return cardCacheKey_(want[id], id); })) || {};
+  } catch (e) { cached = {}; }
+  const fetch = ids.filter(function (id) {
+    let card = null;
+    try { card = JSON.parse(cached[cardCacheKey_(want[id], id)] || 'null'); } catch (e) { card = null; }
+    if (card) out[id] = dexIdsOf_(card);
+    return !card;
+  });
+  for (let k = 0; k < fetch.length; k += PRICE_BATCH) {
+    const part = fetch.slice(k, k + PRICE_BATCH);
+    const res = fetchAllJson_(part.map(function (id) { return apiUrl_(want[id], 'cards/' + encodeURIComponent(id)); }));
+    part.forEach(function (id, i) {
+      if (res[i].ok) out[id] = dexIdsOf_(res[i].data);
+      else if (res[i].notFound) out[id] = [];
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -3617,6 +3853,7 @@ function rebuildSets_() {
   sh.getRange(2, 1, rows.length, SET_HEADERS.length).setNumberFormats(
     rows.map(function () { return ['@', '@', '@', '@', '@', '0', '0', '@']; }));
   sh.getRange(2, 1, rows.length, SET_HEADERS.length).setValues(rows);
+  dropSetsCache_();
   return rows.length;
 }
 
@@ -3787,32 +4024,12 @@ function continuePriceRun() {
     if (state.pos < targets.length) Utilities.sleep(1000);
   }
 
-  try { backfillSetDates_(); } catch (e) { /* nächste Nacht wieder */ }
+  // Set-Daten, Pokédex-Nummern und alles, was seit dem letzten Paket gespeichert wurde, einsortieren (#41)
+  try { sortIn_(); } catch (e) { /* nächste Nacht wieder */ }
   writeHistory_(state.failed);
   props.deleteProperty('PRICE_RUN');
   return 'Preise für ' + targets.length + ' Karten aktualisiert' +
     (state.failed ? ', ' + state.failed + ' Abrufe fehlgeschlagen (alter Preis bleibt)' : '') + '.';
-}
-
-/** Fehlende Set-Erscheinungsdaten nachtragen (sonst stehen diese Karten beim Sortieren oben). */
-function backfillSetDates_() {
-  const rows = readData_(sheet_(SHEETS.data));
-  const dates = {};
-  rows.forEach(function (r) {
-    if (!isDataRow_(r) || r[COL.setDate] || !r[COL.setId]) return;
-    const sid = String(r[COL.setId]);
-    if (!(sid in dates)) dates[sid] = setReleaseDate_(langOfRow_(r), sid, null);
-  });
-  if (!Object.keys(dates).some(function (k) { return dates[k]; })) return;
-  withLock_(function () {
-    const sh = sheet_(SHEETS.data);
-    let n = 0;
-    readData_(sh).forEach(function (r, i) {
-      const d = dates[String(r[COL.setId])];
-      if (isDataRow_(r) && !r[COL.setDate] && d) { sh.getRange(i + 2, COL.setDate + 1).setValue(d); n++; }
-    });
-    if (n) rebuildGroups_();
-  });
 }
 
 /**
@@ -4545,13 +4762,6 @@ function dexIdsOf_(card) {
   return out;
 }
 
-/** {Karten-ID: [Nummern]} aus einer vollen tcgdex-Karte, für storeDexIds_. */
-function dexMapOf_(card) {
-  const m = {};
-  if (card && card.id) m[String(card.id)] = dexIdsOf_(card);
-  return m;
-}
-
 /** '25 644' (oder Zahl) -> [25, 644] */
 function parseDexText_(s) {
   const out = [];
@@ -4781,38 +4991,6 @@ function writeDexCards_(sh, cards, oldLast) {
   if (oldLast > cards.length) sh.getRange(cards.length + 1, DEX_CARD_COL, oldLast - cards.length, cw).clearContent();
 }
 
-/**
- * Pokédex nach einer Änderung einzelner Karten (#31): links nur die Zeilen, die sich geändert haben (gelesen und
- * verglichen, Schreiben ist das Teure), rechts der Kartenblock (er ist kurz). Passt die Liste nicht (andere Länge,
- * z. B. neue Nummern), schreibt es alles wie rebuildPokedex_. -> Index wie rebuildPokedex_, false ohne Blatt
- */
-function refreshPokedex_(rows) {
-  const sh = ss_().getSheetByName(SHEETS.dexData);
-  if (!sh) return false;
-  const idx = pokedexIndex_(rows || []);
-  const n = idx.entries.length;
-  const lw = DEX_LIST_HEADERS.length;
-  const oldLast = sh.getLastRow();
-  if (oldLast < n + 1) return rebuildPokedex_(rows);
-  const old = sh.getRange(1, 1, Math.min(oldLast, n + 2), lw).getValues();
-  if (Number(old[n][0]) !== n || (old.length > n + 1 && old[n + 1][0] !== '')) return rebuildPokedex_(rows);
-  const same = function (a, b) {
-    for (let c = 0; c < lw; c++) if (String(a[c] == null ? '' : a[c]) !== String(b[c] == null ? '' : b[c])) return false;
-    return true;
-  };
-  const list = idx.entries.map(dexListRow_);
-  let i = 0;
-  while (i < n) {
-    if (same(old[i + 1], list[i])) { i++; continue; }
-    let j = i;
-    while (j + 1 < n && !same(old[j + 2], list[j + 1])) j++;
-    sh.getRange(i + 2, 1, j - i + 1, lw).setValues(list.slice(i, j + 1));
-    i = j + 1;
-  }
-  writeDexCards_(sh, dexCardRows_(idx), oldLast);
-  return idx;
-}
-
 /** Leeres verstecktes Blatt „Pokédex-Daten“ anlegen (gefüllt wird es von rebuildGroups_). */
 function setupPokedexDataSheet_(ss) {
   if (ss.getSheetByName(SHEETS.dexData)) return;
@@ -4842,9 +5020,10 @@ function setupPokedexSheet_(ss, keepControls) {
   sh.getRange('A1').setValue('Pokédex').setFontSize(16).setFontWeight('bold');
   sh.getRange('C1').setValue('Vorhanden').setFontWeight('bold');
   setFormulaLocal_(sh.getRange('D1'), "=COUNTIF('" + SHEETS.dexData + "'!F2:F, \">0\")&\" von \"&COUNT('" + SHEETS.dexData + "'!A2:A)");
-  sh.getRange('A2').setValue('Filter in Zeile 4. Unter „Karten von“ (I4) ein Pokémon wählen oder Name bzw. Nummer eintippen, ' +
-    'dann stehen rechts deine Karten davon. Tag-Team-Karten zählen bei jedem ihrer Pokémon.')
-    .setFontColor('#5f6368').setFontSize(9);
+  setFormulaLocal_(sh.getRange('A2'), pendingHintFormula_('der Pokédex zeigt den alten Stand. Menü Pokémon > Einsortieren',
+    'Filter in Zeile 4. Unter „Karten von“ (I4) ein Pokémon wählen oder Name bzw. Nummer eintippen, ' +
+    'dann stehen rechts deine Karten davon. Tag-Team-Karten zählen bei jedem ihrer Pokémon.'));
+  sh.getRange('A2').setFontColor('#5f6368').setFontSize(9);
 
   sh.getRange('B3:D3').setValues([['Status', 'Generation', 'Suche (Name oder Nummer)']]).setFontColor('#5f6368').setFontSize(9);
   sh.getRange('I3').setValue('Karten von (Pokémon wählen oder eintippen)').setFontColor('#5f6368').setFontSize(9);
@@ -4892,7 +5071,7 @@ function setupPokedexSheet_(ss, keepControls) {
     .whenFormulaSatisfied('=($A6<>"")*($E6=0)')
     .setFontColor('#9aa0a6')
     .setRanges([sh.getRange('A6:F')]).build();
-  sh.setConditionalFormatRules([grey]);
+  sh.setConditionalFormatRules([grey, pendingRule_(sh.getRange('A2:P2'), 2)]);
   sh.getRange('A5:F').protect().setDescription('Pokédex – wird per Formel berechnet').setWarningOnly(true);
   sh.getRange('H5:P').protect().setDescription('Pokédex – wird per Formel berechnet').setWarningOnly(true);
   applyDexRowHeights_(sh);
@@ -5071,7 +5250,7 @@ function collCompare_(a, b, sort, desc) {
 // Bilder mit zugewiesener Funktion (Sheet.insertImage + assignScript), die Einrichtung legt sie selbst an. Die Bilder
 // kommen aus assets/dashboard/ im Repo (gezeichnet mit tools/dashboard-knoepfe.js). In der Sheets-App am Handy
 // reagieren Bilder nicht auf Antippen, dort zeigt das Dashboard nur die Zahlen. Die Kacheln rechnet refreshDashboard_
-// nach jeder Änderung an Daten (aus rebuildGroups_) und nach jedem Preislauf (aus writeHistory_) neu.
+// bei jedem Einsortieren (aus rebuildGroups_, #41) und nach jedem Preislauf (aus writeHistory_) neu.
 
 /**
  * Knöpfe in Lesereihenfolge: Aktionen (bis zu 8, je 4 in einer Reihe), dann die Blätter (nav, eine Reihe).
@@ -5079,6 +5258,7 @@ function collCompare_(a, b, sort, desc) {
  */
 const DASH_BUTTONS = [
   { key: 'erfassen', label: 'Karten erfassen', fn: 'kartenErfassen' },
+  { key: 'einsortieren', label: 'Einsortieren', fn: 'einsortieren' },
   { key: 'preise', label: 'Preise aktualisieren', fn: 'preiseJetztAktualisieren' },
   { key: 'import', label: 'Importieren', fn: 'importAnzeigen' },
   { key: 'updates', label: 'Updates', fn: 'updatesAnzeigen' },
@@ -5095,7 +5275,7 @@ const DASH_BUTTONS = [
  * Version gleich. Neue Bilder: Commit hier eintragen und DASH_ASSET_VERSION erhöhen, dann ersetzt das Update der
  * Tabelle (upgradeIfNeeded_) oder „Ansicht neu aufbauen“ die alten Knöpfe.
  */
-const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/9a3c8ea9774f452de13ed9df18f18f90bf3193eb/assets/dashboard/';
+const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/4e5a3f485d3505b0ae67ead71fa0c69aacd7fc0c/assets/dashboard/';
 const DASH_ASSET_VERSION = '1';
 const DASH_ALT_RE = /^Dashboard-Knopf ([\w-]+) v(\S+)$/;
 const DASH_META = 'pokemonToolDashboard'; // Entwickler-Metadaten am Blatt: das Dashboard des Tools
@@ -5186,6 +5366,10 @@ function setupDashboardSheet_(ss) {
   sh.getRange('O6').setFontSize(10).setFontWeight('normal').setFontColor(c.sub);
   setFormulaLocal_(sh.getRange('K7'), '=SPARKLINE(' + hl + (DASH_DAYS + 3) + ':' + hl + (DASH_DAYS + 4) + ', ' + ol + '7:' + vl + '10)');
   sh.hideColumns(hc, 3);
+
+  // Unter den Kacheln, solange Änderungen nicht einsortiert sind (#41); sonst leer
+  setFormulaLocal_(sh.getRange('C9'), pendingHintFormula_('die Zahlen zeigen den alten Stand. Knopf Einsortieren unten', ''));
+  sh.getRange('C9').setFontSize(10).setFontWeight('bold').setFontColor(c.warn);
 
   // Abschnitte und Hinweis
   [[10, 'Aktionen'], [15, 'Blätter']].forEach(function (x) {

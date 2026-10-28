@@ -118,12 +118,17 @@ t.section('Einrichtung');
 }
 
 // ---------------------------------------------------------------------------
-t.section('Hinzufügen merkt die Nummern, Pokédex-Daten');
+t.section('Einsortieren merkt die Nummern, Pokédex-Daten');
 {
   const env = setup();
   add(env, 'swsh3-025', { qty: 2 });
   add(env, 'sm9-33');
   add(env, 'swsh1-178');
+  eq('Hinzufügen speichert nur Daten: noch keine Nummern, Pokédex leer (#41)',
+    [env.objects('Pokédex-Nummern').length, env.objects('Pokédex-Daten').filter(o => o.Exemplare > 0).length], [0, 0]);
+  env.fetchLog.length = 0;
+  env.sortIn();
+  ok('Einsortieren: Nummern aus dem Zwischenspeicher, kein Kartenabruf', !env.fetchLog.some(u => /\/cards\//.test(u)), env.fetchLog);
   const ids = env.objects('Pokédex-Nummern');
   eq('Nummern gemerkt (Trainer leer)', ids.map(o => [o['Karten-ID'], String(o['Pokédex-Nr.'])]),
     [['swsh3-025', '6'], ['sm9-33', '25 644'], ['swsh1-178', '']]);
@@ -141,6 +146,8 @@ t.section('Hinzufügen merkt die Nummern, Pokédex-Daten');
   // −1 bis 0: Pokémon fehlt wieder, Kartenblock leer für Nr. 6
   const eids = env.data().filter(r => r.id === 'swsh3-025').map(r => r.eid);
   env.ctx.adjustEntry(eids[0], -2);
+  eq('−2 nur gespeichert: Glurak steht noch im Pokédex', dexRow(env, 6).Exemplare, 2);
+  env.sortIn();
   eq('0 Exemplare: Glurak fehlt wieder', [dexRow(env, 6).Exemplare, dexCards(env).filter(r => r[0] === 6).length], [0, 0]);
 
   // getPokedex fürs UI
@@ -187,6 +194,7 @@ function sortEnv() {
   add(env, 'base1-4', { qty: 1 });                // Glurak Grundset, Rare (3), 1999
   const zero = env.ctx.addFreeCard({ name: 'Bisasam', setName: 'Alt', number: '1/1', qty: 1 });
   env.ctx.adjustEntry(zero.eid, -1);              // 0 Exemplare: immer am Ende
+  env.sortIn();                                   // Set-Daten und neue Seltenheiten kommen beim Einsortieren (#41)
   return env;
 }
 {

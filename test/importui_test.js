@@ -310,6 +310,7 @@ function boot(mode, opts) {
     async startup() {
       await E.respond('getSetSuggestions'); await E.respond('getUiConfig'); await E.respond('getUpdateInfo', { value: null });
       await flush(); await E.respond('getFileVersions', { value: null });
+      await E.respond('getCollection', { value: { groups: [] } }); // Vorladen der Sammlung (#39 V3)
     },
     async openImport() { E.click(E.$('tabImport')); await E.respond('importState'); },
     step() { const m = (E.main().querySelector('.imp-sub') || {}).textContent || ''; const r = m.match(/Schritt (\d) von 8/); return r ? Number(r[1]) : 0; },
@@ -501,7 +502,7 @@ async function toStep3(E) {
   // ---- Web-Modus: lädt ohne Fehler, kein Import-Tab ----
   {
     const E = boot('web');
-    ok('Web: nur Start-Aufrufe aus Ui.html', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
+    ok('Web: nur Start-Aufrufe aus Ui.html', J(E.names().sort()) === J(['getCollection', 'getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
     await E.startup();
     ok('Web: Import-Tab versteckt', E.$('tabImport').classList.contains('hidden'));
     ok('Web: ohne Import-Teil (#36 A3)', !E.$('paneImport') && typeof E.win.impInit === 'undefined' && typeof E.win.impInitCalls === 'undefined');
@@ -513,13 +514,14 @@ async function toStep3(E) {
   // ---- Seitenleiste: Laden ohne Serveraufrufe aus ImportUi ----
   const E = boot('sidebar', { setup: S => { S.draft = { sourceId: 'SRC1', sourceName: X1 + 'Ordner', sourceUrl: 'https://docs.google.com/spreadsheets/d/SRC1/edit', kind: 'sheet', tab: 'Karten', stage: 'pruefung', mode: 'neu', total: 5, recognizePos: 5 }; } });
   const { $ } = E;
-  ok('Sidebar: beim Laden nur getSetSuggestions, getUiConfig, getUpdateInfo', J(E.names().sort()) === J(['getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
+  ok('Sidebar: beim Laden nur getSetSuggestions, getUiConfig, getUpdateInfo, getCollection', J(E.names().sort()) === J(['getCollection', 'getSetSuggestions', 'getUiConfig', 'getUpdateInfo']), E.names());
   await E.startup();
   ok('Sidebar: Import-Tab sichtbar, Bereich noch leer', !$('tabImport').classList.contains('hidden') && $('impMain').innerHTML === '');
   ok('Sidebar: impInit noch nicht aufgerufen', E.win.impInitCalls === 0);
 
   // ---- Übersicht ----
   E.click($('tabImport'));
+  ok('Import-Tab allein: Sammlung bleibt geladen (#39 V3)', E.win.coll.all && !E.win.coll.stale);
   ok('Import-Tab: impInit ruft importState genau einmal', E.calls('importState').length === 1 && E.pending.length === 1, E.names());
   ok('Übersicht: Spinner während des Ladens', /Lade die Importe/.test(E.main().textContent));
   await E.respond('importState');
@@ -901,8 +903,10 @@ async function toStep3(E) {
   ok('Importieren: alles gesperrt', E.btn(P, 'Abbrechen').disabled && $('impHmS0').disabled);
   await E.respond('importCommit', { error: 'Gerade läuft schon ein Import oder Zurücknehmen. Bitte kurz warten.' });
   ok('Commit-Fehler: Meldung, wieder frei, Auswahl bleibt', /Gerade läuft schon/.test(E.act()) && !E.btn(P, 'Importieren').disabled && E.radioVal('impHm1') === 'extra' && $('impRb1').checked);
+  E.win.coll.stale = false;
   E.click(E.btn(P, 'Importieren'));
   await E.respond('importCommit');
+  ok('Commit: Sammlung lädt beim nächsten Öffnen neu', E.win.coll.stale === true);
   ok('Commit: loadUiConfig + importState, Meldung escaped', E.calls('getUiConfig').length === 1 && E.calls('importState').length === 1 &&
     E.msg().indexOf('Import 5 ist fertig: 7 Exemplare übernommen. ' + X3) === 0 && E.clean());
   await E.settle();
@@ -948,7 +952,9 @@ async function toStep3(E) {
   E.click($('impUdGo'));
   E.click($('impUdGo'));
   ok('importUndo einmal mit Entscheidungen', E.calls('importUndo').length === 1 && J(E.calls('importUndo')[0].args) === J([4, { E10: 'keep', E11: 'keep' }]), E.calls('importUndo').map(c => c.args));
+  E.win.coll.stale = false;
   await E.respond('importUndo');
+  ok('Zurücknehmen: Sammlung lädt beim nächsten Öffnen neu', E.win.coll.stale === true);
   ok('Zurückgenommen: loadUiConfig + importState, Meldung', E.calls('getUiConfig').length === 1 && E.calls('importState').length === 1 && /Import 4 ist zurückgenommen/.test(E.msg()));
   await E.settle();
   // ohne geänderte Exemplare: sofort frei; Abbrechen
