@@ -235,7 +235,7 @@ var LANGS = [
   { code: 'KO', label: 'Koreanisch' }, { code: 'ZH', label: 'Chinesisch' }
 ];
 var UI_CONFIG = { versions: [], extras: [], viewExtras: [] };
-var state = { lastQuery: null, lastRes: null, current: null, lastEid: null, lastKey: null, groups: [], open: {} };
+var state = { lastQuery: null, lastRes: null, current: null, groups: [], open: {} };
 var searchGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
 
 function $(id) { return document.getElementById(id); }
@@ -594,8 +594,6 @@ function drawAdds() {
   var last = lastAdd(), lastOk = null;
   adds.forEach(function (a) { if (a.status === 'ok') lastOk = a; });
   adds = adds.filter(function (a) { return a.status !== 'ok' || a === lastOk; }); // gespeicherte vergessen, bis auf die neueste
-  state.lastEid = last && last.status === 'ok' ? last.res.eid || null : null;
-  state.lastKey = last && last.status === 'ok' ? last.res.key || null : null;
   var html = '';
   adds.forEach(function (a) {
     if (a.status !== 'err') return;
@@ -613,9 +611,7 @@ function drawAdds() {
     html += '<div class="notes lasthead">Zuletzt hinzugefügt' + (ok ? ' (antippen zeigt die Karte in der Sammlung)' : '') + '</div>' +
       '<div class="item">' + imgTag(cardImg(last.image, 'low')) +
       '<div class="info' + (ok ? ' tap" role="button" tabindex="0" onclick="openAdded(' + last.n + ')" onkeydown="addedKey(event,' + last.n + ')"' : '"') + '>' +
-      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div>' +
-      (ok && r.eid ? '<div class="ctl"><button class="btn" onclick="againPlusOne(this)"' + (last.plus ? ' disabled' : '') + '>' +
-        (last.plus ? 'Speichere …' : 'Nochmal +1') + '</button></div>' : '') + '</div>';
+      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div></div>';
   }
   if (pending > 1) html += '<div class="notes">Noch ' + pending + ' Karten werden gespeichert …</div>';
   if (pending) html += '<div class="hint">' + (MODE === 'sidebar' ? 'Seitenleiste' : 'Seite') + ' bitte offen lassen, bis alles gespeichert ist.</div>';
@@ -653,26 +649,6 @@ function addedKey(ev, n) {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
   ev.preventDefault();
   openAdded(n);
-}
-
-function againPlusOne(btn) {
-  var a = lastAdd();
-  if (!a || a.status !== 'ok' || !a.res.eid || a.plus) return;
-  var eid = a.res.eid;
-  a.plus = true;
-  drawAdds();
-  enqueue({
-    send: function () { return call('adjustEntry', eid, 1); },
-    done: function (res) {
-      a.plus = false;
-      if (res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } else markStale();
-      if (res.eid) a.res.eid = res.eid;
-      a.res.count = res.count;
-      a.res.message = 'Noch eine dazu, jetzt ' + res.count + ' Stück.';
-      drawAdds();
-    },
-    fail: function (e) { a.plus = false; drawAdds(); setMsg('addMsg', esc(errText(e)), 'err'); }
-  });
 }
 
 // Freie Karte (tcgdex kennt sie nicht)

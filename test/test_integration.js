@@ -383,8 +383,8 @@ function seedImport(env) {
   E.click($('tabAdd'));
   t.ok('keine Skriptfehler (Start)', E.errors.length === 0, E.errors);
 
-  // ---- 1. Karte hinzufügen (Grundwerte), Nochmal +1 ----
-  t.section('Hinzufügen: Grundwerte und Nochmal +1');
+  // ---- 1. Karte hinzufügen (Grundwerte), dieselbe Karte noch einmal ----
+  t.section('Hinzufügen: Grundwerte und dieselbe Karte noch einmal');
   E.type($('fName'), 'Glurak'); E.type($('fNumber'), '025');
   await E.clickSettle(E.btn($('searchForm'), 'Suchen'));
   t.ok('Einzeltreffer -> Bestätigung mit echten Details', !!$('cAdd') && /Flammende Finsternis · 025\/189/.test($('addResults').textContent), $('addResults').textContent.slice(0, 200));
@@ -401,13 +401,17 @@ function seedImport(env) {
     handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA);
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
   checkSheets(env, 'nach addCard');
-  await E.clickSettle(E.btn($('addLast'), 'Nochmal +1'));
-  t.ok('Nochmal +1 -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
-  t.ok('Daten: 3 Stück', dataRows(env).find(r => r.eid === handA.eid).count === 3);
-  t.ok('Nochmal +1 nutzt adjustEntry', J(E.lastCall('adjustEntry').args) === J([handA.eid, 1]));
+  t.ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1'));
+  // dieselbe Karte noch einmal über das Formular: zählt in dieselbe Zeile
+  E.type($('fName'), 'Glurak'); E.type($('fNumber'), '025');
+  await E.clickSettle(E.btn($('searchForm'), 'Suchen'));
+  E.pick($('cCond'), 'NM');
+  await E.clickSettle($('cAdd'));
+  t.ok('noch einmal hinzugefügt -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
+  t.ok('Daten: 3 Stück in derselben Zeile', dataRows(env).find(r => r.eid === handA.eid).count === 3 && E.lastCall('addCard').res.eid === handA.eid);
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
   t.ok('Gruppen: 3× DE NM, Preis 1,5, Preisstand Trend', G && G['Exemplare'] === '3× DE NM' && G['Anzahl'] === 3 && G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
-  checkSheets(env, 'nach Nochmal +1');
+  checkSheets(env, 'nach dem zweiten Hinzufügen');
 
   // ---- 2. Karte mit Sprache, Sonderversion, eigenem Preis ----
   t.section('Hinzufügen: Sprache, Sonderversion, eigener Preis');
@@ -518,7 +522,7 @@ function seedImport(env) {
   const opts = [...$('gc' + gi).querySelectorAll('.btn.opt')].map(b => b.textContent);
   t.ok('Auswahl „Welches Exemplar?“ mit beiden Zeilen', /Welches Exemplar\?/.test($('gc' + gi).textContent) && opts.length === 3 &&
     opts[0] === '3× DE NM · von Hand' && opts[1] === '1× DE · Pokemon Ordner, Import 3' && opts[2] === 'Abbrechen', opts);
-  t.ok('noch kein Serveraufruf', E.calls('adjustEntry').length === 1);
+  t.ok('noch kein Serveraufruf', E.calls('adjustEntry').length === 0);
   await E.clickSettle([...$('gc' + gi).querySelectorAll('.btn.opt')][1]);
   let adj = E.lastCall('adjustEntry');
   t.eq('adjustEntry(Import-Zeile, -1)', adj.args, [imp.eidA, -1]);

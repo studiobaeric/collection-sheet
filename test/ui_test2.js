@@ -501,17 +501,12 @@ function boot(mode, opts) {
     ok('addCard sendet cardLang/version/ownPrice', J(req) === J({ id: 'swsh3-025', lang: 'de', variant: 'reverse', condition: 'NM', qty: 2, inputName: 'Glurak', cardLang: 'EN', version: 'Snowflake', ownPrice: 1.5 }), req);
     ok('letzte Karte darunter: speichert …', /Zuletzt hinzugefügt/.test($('addLast').textContent) && /Glurak/.test($('addLast').textContent) &&
       /Flammende Finsternis · 025\/\d+ · Reverse Holo/.test($('addLast').textContent) && /speichert/.test($('addLast').textContent), $('addLast').textContent);
-    ok('beim Speichern nicht antippbar, kein Nochmal +1', !$('addLast').querySelector('.info.tap') && !E.btn($('addLast'), 'Nochmal +1'));
+    ok('beim Speichern nicht antippbar', !$('addLast').querySelector('.info.tap'));
     ok('Hinweis: Seitenleiste offen lassen', /Seitenleiste bitte offen lassen/.test($('addLast').textContent));
     const r = await E.respond('addCard');
-    ok('gespeichert: jetzt 2 Stück, Nochmal +1, antippbar', /hinzugefügt, jetzt 2 Stück/.test($('addLast').textContent) &&
-      !!E.btn($('addLast'), 'Nochmal +1') && !!$('addLast').querySelector('.info.tap') && !/offen lassen/.test($('addLast').textContent), $('addLast').textContent);
-    ok('state.lastEid gesetzt', E.win.state.lastEid === r.res.eid);
-    E.click(E.btn($('addLast'), 'Nochmal +1'));
-    ok('Nochmal +1 nutzt adjustEntry(eid, 1)', J(E.calls('adjustEntry')[0].args) === J([r.res.eid, 1]), E.calls('adjustEntry')[0].args);
-    ok('Nochmal +1 gesperrt, solange es speichert', E.btn($('addLast'), 'Speichere …').disabled);
-    await E.respond('adjustEntry');
-    ok('Nochmal +1: neue Anzahl', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
+    ok('gespeichert: jetzt 2 Stück, antippbar', /hinzugefügt, jetzt 2 Stück/.test($('addLast').textContent) &&
+      !!$('addLast').querySelector('.info.tap') && !/offen lassen/.test($('addLast').textContent), $('addLast').textContent);
+    ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1') && !$('addLast').querySelector('button') && typeof E.win.againPlusOne === 'undefined');
 
     // Standardwerte: DE, keine Version, kein eigener Preis
     E.type($('fName'), 'Glurak');
@@ -688,7 +683,7 @@ function boot(mode, opts) {
     ok('addFreeCard-Argumente', J(req) === J({ name: 'Unbekannt', setName: 'Ordner', number: '12', variant: 'holo', condition: 'EX', qty: 3, cardLang: 'JP', version: 'Staff', ownPrice: 2.5 }), req);
     ok('freie Karte darunter: speichert …', /freie Karte · Ordner · 12 · Holo/.test($('addLast').textContent) && /speichert/.test($('addLast').textContent), $('addLast').textContent);
     const r = await E.respond('addFreeCard');
-    ok('freie Karte gespeichert', /hinzugefügt, jetzt 3 Stück/.test($('addLast').textContent) && E.win.state.lastEid === r.res.eid, $('addLast').textContent);
+    ok('freie Karte gespeichert', /hinzugefügt, jetzt 3 Stück/.test($('addLast').textContent) && !!$('addLast').querySelector('.info.tap') && r.res.eid, $('addLast').textContent);
     ok('neue Version gemerkt', /value="Staff"/.test($('versionList').innerHTML));
     // Serverfehler: zweimal von selbst wiederholen, dann rote Zeile
     E.type($('fName'), 'Unbekannt');

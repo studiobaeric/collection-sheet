@@ -15,6 +15,7 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Hinzufügen mit Bildern wartet nicht mehr auf die Zeilenhöhen
 - Tab Sammlung lädt schon beim Öffnen, danach ohne Warten
 - Import-Tab öffnen lädt die Sammlung nicht mehr neu
+- Knopf „Nochmal +1“ nach dem Hinzufügen entfernt
 
 ## [1.1.2] – 2026-10-27
 
