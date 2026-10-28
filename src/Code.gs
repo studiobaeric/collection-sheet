@@ -4762,13 +4762,6 @@ function dexIdsOf_(card) {
   return out;
 }
 
-/** {Karten-ID: [Nummern]} aus einer vollen tcgdex-Karte, für storeDexIds_. */
-function dexMapOf_(card) {
-  const m = {};
-  if (card && card.id) m[String(card.id)] = dexIdsOf_(card);
-  return m;
-}
-
 /** '25 644' (oder Zahl) -> [25, 644] */
 function parseDexText_(s) {
   const out = [];
@@ -5282,7 +5275,7 @@ const DASH_BUTTONS = [
  * Version gleich. Neue Bilder: Commit hier eintragen und DASH_ASSET_VERSION erhöhen, dann ersetzt das Update der
  * Tabelle (upgradeIfNeeded_) oder „Ansicht neu aufbauen“ die alten Knöpfe.
  */
-const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/9a3c8ea9774f452de13ed9df18f18f90bf3193eb/assets/dashboard/';
+const DASH_ASSETS = 'https://raw.githubusercontent.com/studiobaeric/collection-sheet/4e5a3f485d3505b0ae67ead71fa0c69aacd7fc0c/assets/dashboard/';
 const DASH_ASSET_VERSION = '1';
 const DASH_ALT_RE = /^Dashboard-Knopf ([\w-]+) v(\S+)$/;
 const DASH_META = 'pokemonToolDashboard'; // Entwickler-Metadaten am Blatt: das Dashboard des Tools

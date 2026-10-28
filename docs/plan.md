@@ -99,7 +99,7 @@ Die Suche läuft in bis zu drei Stufen: deutsch, englisch mit übersetztem Namen
 5. Kein deutscher Treffer: Name über das Blatt Übersetzung ins Englische (erst exakt, sonst Grundname plus Zusatz wie ex, V, VMAX, VSTAR, GX), dann dieselbe Suche gegen `/v2/en`.
 6. Immer noch nichts: Set-Auswahl mit Logos (vorbelegt, falls ein Set eingegeben wurde), dann `GET /v2/en/sets/<setId>/<Nummer>`.
 7. Bestätigung: großes Bild (`high.webp`), Name, Set, Nummer, Seltenheit, aktueller Trendpreis; Checkboxen Reverse Holo und 1. Edition (nur wenn vorhanden), Zustand-Dropdown (leer), Anzahl 1. Englische Ersatzdaten tragen einen sichtbaren Hinweis.
-8. Speichern: unter Lock den Schlüssel suchen, Anzahl erhöhen oder neue Zeile mit allen Daten und Preis anlegen. Meldung wie „Glurak, Reverse Holo, NM hinzugefügt, jetzt 3 Stück" (der Knopf Nochmal +1 dazu ist seit 1.1.3 entfernt, #34). Danach wird das Formular geleert und der Cursor steht wieder im Namensfeld.
+8. Speichern: unter Lock den Schlüssel suchen, Anzahl erhöhen oder neue Zeile mit allen Daten und Preis anlegen. Meldung wie „Glurak, Reverse Holo, NM hinzugefügt, jetzt 3 Stück" (der Knopf Nochmal +1 dazu ist seit 1.1.3 entfernt, #34). Danach wird das Formular geleert und der Cursor steht wieder im Namensfeld. Seit 1.1.3 (#41) schreibt das Speichern nur ins Blatt Daten, so wartet die nächste Suche nicht; die Blätter Sammlung, Pokédex und Dashboard ziehen beim Einsortieren nach (Knopf in Seitenleiste, Web-App und Dashboard, Menü oder nachts nach dem Preislauf). Bis dahin zeigt ein roter Hinweis, wie viele Änderungen noch nicht einsortiert sind. Das gilt auch für +1/−1, Bearbeiten, eigenen Preis, Verknüpfen und Rückgängig.
 
 ## Ablauf Entfernen
 
@@ -158,7 +158,8 @@ Ein Menüpunkt Übersetzung und Sets aktualisieren baut beide versteckten Blätt
 Set-Cache:
 
 - Lädt `GET /v2/de/sets` und `GET /v2/en/sets` mit Set-ID, Name, Logo, Symbol und `cardCount`.
-- Das Erscheinungsdatum steht nur im vollen Set-Objekt. Es wird beim ersten Auftauchen eines Sets in der Sammlung einmal über `GET /v2/<Sprache>/sets/<setId>` geholt und gespeichert.
+- Das Erscheinungsdatum steht nur im vollen Set-Objekt. Es wird beim ersten Auftauchen eines Sets in der Sammlung einmal über `GET /v2/<Sprache>/sets/<setId>` geholt und gespeichert (seit 1.1.3 beim Einsortieren, #41).
+- Seit 1.1.3 (#38 S3) liegt die Setliste bis zu 6 Stunden im Zwischenspeicher und Trefferlisten nach Name 3 Stunden, so liest die Suche kein Blatt.
 - Liefert die Vorschlagsliste im Setfeld, den Abgleich der Setgröße bei 025/165 und die Logos für die Set-Auswahl der letzten Suchstufe.
 
 ## Fehlerfälle und Grenzen
