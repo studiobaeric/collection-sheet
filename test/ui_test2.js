@@ -207,6 +207,7 @@ function makeServer() {
     if ('cond' in changes) t.cond = changes.cond;
     if ('cardLang' in changes) t.lang = changes.cardLang;
     if ('version' in changes) t.version = changes.version;
+    if ('variant' in changes) t.variant = changes.variant;
     if (changes.extras) Object.assign(t.extras, changes.extras);
     const other = S.rows.find(r => r !== t && S.key(r) === S.key(t) && r.origin === t.origin && r.fp === t.fp);
     if (other) { other.count += t.count; S.rows.splice(S.rows.indexOf(t), 1); t = other; }
@@ -1160,7 +1161,7 @@ function boot(mode, opts) {
     E.type($('eQty' + gi), '1');
     // inzwischen ein Exemplar DE NM über „+ Exemplar“ dazu: die Karte zeichnet neu, das Formular bleibt
     E.click(E.btn($('gx' + gi), '+ Exemplar'));
-    await E.respond('getCardDetail');
+    await E.respond('getCardDetail', { last: true }); // die erste Anfrage holt die Varianten fürs Bearbeiten (#54)
     E.pick($('cCond'), 'NM');
     E.click($('cAdd'));
     await E.respond('addCard');
@@ -1224,6 +1225,55 @@ function boot(mode, opts) {
     await E.respond('adjustEntry');
     ok('nächste Änderung räumt die Fehlermeldung weg', !/Nicht gespeichert/.test($('gh' + vi).textContent));
     ok('keine Skriptfehler (Bearbeiten)', E.errors.length === 0, E.errors);
+  }
+
+  // ---- Bearbeiten: Variante (#54) ----
+  {
+    const E = boot('sidebar');
+    const { $, G, S } = E;
+    await E.startup();
+    await E.openColl();
+    const gi = E.gi('Glurak');
+    E.expand(gi);
+    E.click(E.btn(E.erow(gi, 0), 'Bearbeiten'));
+    ok('Varianten werden geladen', /Varianten werden geladen/.test($('ge' + gi).textContent) && J(E.calls('getCardDetail')[0].args) === J(['swsh3-025', 'de']));
+    await E.respond('getCardDetail');
+    ok('Haken wie beim Hinzufügen: nur Reverse Holo, nicht gesetzt', !!$('eRev' + gi) && !$('eRev' + gi).checked && !$('eFirst' + gi), $('ge' + gi).innerHTML);
+    E.pick($('eCond' + gi), 'LP'); // Formular bleibt beim Neuzeichnen
+    $('eRev' + gi).checked = true; $('eRev' + gi).dispatchEvent(new E.win.Event('change', { bubbles: true }));
+    E.type($('eQty' + gi), '1');
+    E.click(E.btn($('ge' + gi), 'Speichern'));
+    const a = E.calls('editEntry')[0].args;
+    ok('editEntry mit variant: reverse', J(a) === J([G.gHand.eid, { cond: 'LP', variant: 'reverse' }, 1]), a);
+    await E.respond('editEntry');
+    const ri = E.gIdx(g => g.name === 'Glurak' && g.variant === 'reverse');
+    ok('Reverse Holo: eigene Karte', ri >= 0 && S.rows.some(r => r.variant === 'reverse' && r.count === 1 && r.cond === 'LP'), S.rows.map(r => [r.variant, r.count]));
+    // zurück: Haken vorbelegt, abwählen -> Grundvariante der Karte
+    ok('neue Karte gleich offen', !$('gx' + ri).classList.contains('hidden'));
+    E.click(E.btn(E.erow(ri, 0), 'Bearbeiten'));
+    await E.respond('getCardDetail');
+    ok('Reverse-Haken vorbelegt', $('eRev' + ri).checked);
+    $('eRev' + ri).checked = false; $('eRev' + ri).dispatchEvent(new E.win.Event('change', { bubbles: true }));
+    E.click(E.btn($('ge' + ri), 'Speichern'));
+    ok('abgewählt: variant = Grundvariante (normal)', E.calls('editEntry')[0].args[1].variant === 'normal', E.calls('editEntry')[0].args);
+    await E.respond('editEntry');
+    // ohne Varianten (Fehler): nichts zu wählen, die übrigen Felder gehen
+    const pi = E.gi('Pikachu');
+    E.expand(pi);
+    E.click(E.btn($('gr' + pi), 'Bearbeiten'));
+    await E.respond('getCardDetail');
+    ok('Varianten nicht ladbar: Hinweis, kein Haken', /konnten nicht geladen werden/.test($('ge' + pi).textContent) && !$('eRev' + pi), $('ge' + pi).textContent);
+    E.click(E.btn($('ge' + pi), 'Abbrechen'));
+    // freie Karte: Auswahl Variante
+    const fi = E.gIdx(g => g.isFree);
+    E.expand(fi);
+    E.click(E.btn($('gr' + fi), 'Bearbeiten'));
+    ok('freie Karte: Auswahl statt Haken, kein Laden', !!$('eVar' + fi) && $('eVar' + fi).value === 'normal' && E.calls('getCardDetail').length === 0);
+    E.pick($('eVar' + fi), 'holo');
+    E.click(E.btn($('ge' + fi), 'Speichern'));
+    ok('freie Karte: variant holo', E.calls('editEntry')[0].args[1].variant === 'holo', E.calls('editEntry')[0].args);
+    await E.respond('editEntry');
+    ok('keine Skriptfehler (Variante)', E.errors.length === 0, E.errors);
   }
 
   // ---- Eigener Preis: hinter dem Link „Eigener Preis …“ in der Karteninfo (#52) ----

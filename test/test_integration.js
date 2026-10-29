@@ -362,7 +362,7 @@ function seedImport(env) {
     const code = fs.readFileSync(path.join(SRC, 'Code.gs'), 'utf8');
     const sig = n => { const m = code.match(new RegExp('function ' + n + '\\(([^)]*)\\)')); return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : null; };
     t.eq('adjustEntry(eid, delta)', sig('adjustEntry'), ['eid', 'delta']);
-    t.eq('editEntry(eid, changes, qty)', sig('editEntry'), ['eid', 'changes', 'qty']);
+    t.eq('editEntry(eid, changes, qty, cards)', sig('editEntry'), ['eid', 'changes', 'qty', 'cards']);
     t.eq('setGroupOwnPrice(gkey, price)', sig('setGroupOwnPrice'), ['gkey', 'price']);
     t.eq('linkFreeGroup(gkey, cardId, dataLang, variant, cards)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant', 'cards']);
     t.eq('getCardDetail(id, lang)', sig('getCardDetail'), ['id', 'lang']);

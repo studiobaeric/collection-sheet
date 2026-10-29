@@ -1549,11 +1549,64 @@ function openEdit(i, j) {
   var ex = r.extras || {};
   var names = UI_CONFIG.extras.slice();
   Object.keys(ex).forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
-  g.edit = {
+  var e = g.edit = {
     eid: r.eid, cond: r.cond || '', lang: r.lang || 'DE', version: g.version || '', qty: r.count,
-    names: names, extras: names.map(function (n) { return ex[n] == null ? '' : String(ex[n]); })
+    names: names, extras: names.map(function (n) { return ex[n] == null ? '' : String(ex[n]); }),
+    variant: editVariantOf(g), vcard: null, vload: g.isFree ? '' : 'load'
   };
+  e.variant0 = e.variant;
   draw(i, g, 're');
+  // Variante (#54): welche Haken die Karte hat, steht in ihren tcgdex-Daten (wie beim Hinzufügen)
+  if (!g.isFree && g.id) {
+    cardAny({ id: g.id, lang: /^en/i.test(g.source || '') ? 'en' : 'de', image: g.image }).then(function (c) {
+      if (g.edit !== e) return;
+      e.vcard = c; e.vload = c ? 'ok' : 'err';
+      redraw(g, 're', true);
+    }, function () {
+      if (g.edit !== e) return;
+      e.vload = 'err';
+      redraw(g, 're', true);
+    });
+  }
+}
+
+/** Variante im Bearbeiten: freie Karte ihr Code, sonst 'reverse' | 'firstEdition' | 'base' (Haken wie beim Hinzufügen) */
+function editVariantOf(g) {
+  if (g.isFree) return g.variant || 'normal';
+  return g.variant === 'reverse' || g.variant === 'firstEdition' ? g.variant : 'base';
+}
+function editVariantPick(i, which, on) {
+  var g = state.groups[i];
+  if (!g || !g.edit) return;
+  g.edit.variant = on ? which : 'base';
+  var other = $(which === 'reverse' ? 'eFirst' + i : 'eRev' + i);
+  if (on && other) other.checked = false; // schließen sich aus wie beim Hinzufügen
+}
+/** Haken bzw. Auswahl für die Variante im Bearbeiten */
+function editVariantHtml(g, i) {
+  var e = g.edit;
+  if (g.isFree) {
+    return '<label for="eVar' + i + '">Variante</label><select id="eVar' + i + '" onchange="editField(' + i + ',\'variant\',this.value)">' + variantOptions(e.variant) + '</select>';
+  }
+  if (e.vload === 'load') return '<div class="hint">Varianten werden geladen …</div>';
+  var c = e.vcard;
+  if (e.vload === 'err' || !c) return '<div class="hint">Varianten konnten nicht geladen werden, die Variante bleibt.</div>';
+  var html = '';
+  if (c.canReverse || e.variant === 'reverse') {
+    html += '<label class="check"><input type="checkbox" id="eRev' + i + '"' + (e.variant === 'reverse' ? ' checked' : '') + ' onchange="editVariantPick(' + i + ',\'reverse\',this.checked)"> Reverse Holo</label>';
+  }
+  if (c.canFirstEdition || e.variant === 'firstEdition') {
+    html += '<label class="check"><input type="checkbox" id="eFirst' + i + '"' + (e.variant === 'firstEdition' ? ' checked' : '') + ' onchange="editVariantPick(' + i + ',\'firstEdition\',this.checked)"> 1. Edition</label>';
+  }
+  return html;
+}
+/** Gewählte Variante als Code fürs Speichern; null = unverändert */
+function editVariantCode(g) {
+  var e = g.edit;
+  if (e.variant === e.variant0) return null;
+  if (g.isFree) return e.variant;
+  if (e.variant !== 'base') return e.variant;
+  return (e.vcard && e.vcard.baseVariant) || null;
 }
 
 function editField(i, field, value) { var g = state.groups[i]; if (g && g.edit) g.edit[field] = value; }
@@ -1567,6 +1620,7 @@ function editHtml(g, i) {
   var html = '<div class="box"><h3>Bearbeiten: ' + rowLabel(r) + '</h3>' +
     '<div class="row"><div><label for="eCond' + i + '">Zustand</label><select id="eCond' + i + '" onchange="editField(' + i + ',\'cond\',this.value)">' + condOptions(e.cond) + '</select></div>' +
     '<div><label for="eLang' + i + '">Sprache</label><select id="eLang' + i + '" onchange="editField(' + i + ',\'lang\',this.value)">' + langOptions(e.lang) + '</select></div></div>' +
+    editVariantHtml(g, i) +
     '<label for="eVer' + i + '">Sonderversion</label><input type="text" id="eVer' + i + '" list="versionList" autocomplete="off" placeholder="leer = keine" value="' + esc(e.version) + '" oninput="editField(' + i + ',\'version\',this.value)">';
   e.names.forEach(function (n, k) {
     html += '<label for="eX' + i + '_' + k + '">' + esc(n) + '</label><input type="text" id="eX' + i + '_' + k + '" autocomplete="off" value="' + esc(e.extras[k]) + '" oninput="editExtra(' + i + ',' + k + ',this.value)">';
@@ -1597,9 +1651,13 @@ function predictEdit(g, eid, ch, qty) {
   if (ch.cardLang != null) t.lang = ch.cardLang;
   if (ch.extras) Object.keys(ch.extras).forEach(function (k) { t.extras[k] = ch.extras[k]; });
   t.pending = true;
-  if (ch.version != null && ch.version !== (g.version || '')) {
-    if (g.rows.length === 1) g.version = ch.version;
-    else g.rows.splice(g.rows.indexOf(t), 1);
+  var newVer = ch.version != null && ch.version !== (g.version || '');
+  var newVar = ch.variant != null && ch.variant !== (g.variant || '');
+  if (newVer || newVar) { // das Exemplar gehört jetzt zu einer anderen Karte (#54: auch bei anderer Variante)
+    if (g.rows.length === 1) {
+      if (newVer) g.version = ch.version;
+      if (newVar) { g.variant = ch.variant; g.variantLabel = VARIANT_LABELS[ch.variant] || ch.variant; }
+    } else g.rows.splice(g.rows.indexOf(t), 1);
   }
   g.count = sumCounts(g.rows);
   g.exemplare = exemplareText(g.rows);
@@ -1616,6 +1674,8 @@ function saveEdit(i) {
   if (e.lang !== (r.lang || 'DE')) { changes.cardLang = e.lang; any = true; }
   var ver = String(e.version || '').trim();
   if (ver !== (g.version || '')) { changes.version = ver; any = true; }
+  var vc = editVariantCode(g);
+  if (vc && vc !== (g.variant || '')) { changes.variant = vc; any = true; }
   var ex = {}, anyEx = false;
   e.names.forEach(function (n, k) {
     var v = String(e.extras[k] || '').trim();
@@ -1636,7 +1696,10 @@ function saveEdit(i) {
   enqueue({
     g: g,
     predict: function (x) { predictEdit(x, eid, changes, qty); },
-    send: function () { return call('editEntry', eid, changes, qty); },
+    send: function () {
+      var given = changes.variant && !g.isFree ? directCards(g.id) : [];
+      return given.length ? call('editEntry', eid, changes, qty, given) : call('editEntry', eid, changes, qty);
+    },
     done: function (res) {
       if (res && res.delta) applyDelta(res.delta, g, res.gkey);
       else { showBase(g); redraw(g, 'all', true); } // auf dem Server war nichts zu ändern

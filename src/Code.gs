@@ -4405,15 +4405,18 @@ function revertAdjust(token) {
 }
 
 /**
- * Exemplar-Zeile bearbeiten. changes = {cond?, cardLang?, version?, extras?: {Name: Wert}} (nur Angegebenes ändert sich),
- * qty = wie viele Exemplare dieser Zeile (Standard: alle). Bei qty < Anzahl wird die Zeile geteilt.
+ * Exemplar-Zeile bearbeiten. changes = {cond?, cardLang?, version?, variant?, extras?: {Name: Wert}} (nur Angegebenes
+ * ändert sich), qty = wie viele Exemplare dieser Zeile (Standard: alle). Bei qty < Anzahl wird die Zeile geteilt.
+ * variant (#54): Code wie in VARIANT_LABELS; bei tcgdex-Karten nur eine Variante, die die Karte laut tcgdex hat, mit
+ * dem Trendpreis dieser Variante. cards wie bei addCard (optional, Kartendaten aus dem Browser).
  * Hat danach eine andere Zeile denselben Schlüssel, dieselbe Herkunft und dieselbe Quellzeile, wird zusammengelegt.
  * -> {ok, eid (Ergebniszeile), gkey, delta (collDelta_: alte und neue Gruppe; fehlt, wenn sich nichts änderte)}
  */
-function editEntry(eid, changes, qty) {
+function editEntry(eid, changes, qty, cards) {
   tmrStart_('editEntry');
   ensureSchema_();
   changes = changes || {};
+  const vNew = editVariant_(eid, changes.variant, cards);
   let cond = null, lang = null, version = null;
   if (changes.cond !== undefined && changes.cond !== null) {
     cond = condCode_(changes.cond);
@@ -4447,6 +4450,13 @@ function editEntry(eid, changes, qty) {
     if (cond != null) next[COL.cond] = cond;
     if (lang != null) next[COL.lang] = lang;
     if (version != null) next[COL.version] = version;
+    if (vNew && String(src[COL.variant] || '') !== vNew.variant) {
+      next[COL.variant] = vNew.variant;
+      if (!vNew.free) {
+        next[COL.price] = vNew.price == null ? '' : vNew.price;
+        next[COL.priceDate] = vNew.date;
+      }
+    }
     Object.keys(extras).forEach(function (name) {
       const c = extraCols[String(name).trim()];
       if (c != null) next[c] = extras[name] == null ? '' : String(extras[name]).trim();
@@ -4492,6 +4502,33 @@ function editEntry(eid, changes, qty) {
   }, true);
   tmrDone_();
   return out;
+}
+
+/**
+ * Neue Variante fürs Bearbeiten (#54), vor der Sperre: null = keine Änderung, sonst {variant, free} oder
+ * {variant, price, date} mit dem Trendpreis der Variante. Prüft bei tcgdex-Karten, ob es die Variante gibt.
+ */
+function editVariant_(eid, variant, cards) {
+  if (variant === undefined || variant === null || variant === '') return null;
+  const want = String(variant);
+  if (!VARIANT_LABELS[want]) throw new Error('Unbekannte Variante „' + want + '“.');
+  const st = dataStore_();
+  const i = storeFindEid_(st, eid);
+  if (i < 0) throw new Error('Eintrag nicht gefunden. Bitte die Liste neu laden.');
+  const r = st.rows[i];
+  if (String(r[COL.variant] || '') === want) return null;
+  const id = String(r[COL.id] || '');
+  if (!id) return { variant: want, free: true };
+  const lang = /^en/i.test(String(r[COL.source] || '')) ? 'en' : 'de';
+  const given = givenCards_(cards);
+  const card = fetchCard_(lang, id, null, given);
+  if (!card) throw new Error('Karte ' + id + ' nicht gefunden, nichts geändert.');
+  const v = card.variants || {};
+  if (want !== baseVariant_(v) && !v[want]) {
+    throw new Error('Diese Karte gibt es laut tcgdex nicht als ' + VARIANT_LABELS[want] + ', nichts geändert.');
+  }
+  const p = cardmarketWithFallback_(card, lang, given);
+  return { variant: want, price: priceFor_(p.cm, want), date: p.cm ? dateText_(p.cm.updated) : '' };
 }
 
 /**
