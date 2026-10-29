@@ -454,11 +454,26 @@ class Sheet {
     if (this.fxGen !== env.gen) { this.fx = {}; this.fxGen = env.gen; }
     const key = r0 + ',' + c0;
     const hit = this.fx[key];
-    if (hit === 'busy') return null;
+    const id = this.name + '!' + key;
+    if (hit === 'busy') { (env.fxCycle = env.fxCycle || new Set()).add(id); return null; }
     if (hit) return hit;
     this.fx[key] = 'busy';
+    // Sheets rechnet nur, was eine Formel braucht; hier rechnet ein Lesen alle Formeln links oberhalb. Liest eine Formel
+    // dabei eine, die weiter oben noch rechnet, ist ihr Ergebnis vorläufig und wird verworfen, sobald diese fertig ist.
+    const outer = env.fxCycle;
+    env.fxCycle = null;
     let res = null;
-    try { res = evalFormulaCell(this, r0, c0, this.formulas[key]); } finally { this.fx[key] = res || undefined; }
+    try { res = evalFormulaCell(this, r0, c0, this.formulas[key]); } finally {
+      const cyc = env.fxCycle;
+      if (cyc) cyc.delete(id);
+      this.fx[key] = res || undefined;
+      const prov = env.fxProv || (env.fxProv = new Map());
+      if (cyc && cyc.size) {
+        cyc.forEach(k => { if (!prov.has(k)) prov.set(k, []); prov.get(k).push([this, key, this.fx]); });
+        env.fxCycle = outer || new Set(); cyc.forEach(k => env.fxCycle.add(k));
+      } else env.fxCycle = outer;
+      if (prov.has(id)) { prov.get(id).forEach(([sh, k, fx]) => { if (sh.fx === fx) delete fx[k]; }); prov.delete(id); }
+    }
     return res;
   }
   fmt(R, C) { const row = this.f[R - 1]; return row ? row[C - 1] : undefined; }

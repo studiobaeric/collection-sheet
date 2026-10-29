@@ -52,6 +52,7 @@ const SHEETS = {
   dex: 'Pokédex',
   dexData: 'Pokédex-Daten',
   dexIds: 'Pokédex-Nummern',
+  dexForms: 'Pokédex-Formen',
   rarity: 'Seltenheiten',
   settings: 'Tool-Einstellungen',
   takenOver: 'Übernommen'
@@ -1818,7 +1819,10 @@ function onEdit(e) {
     if (name === SHEETS.data) { afterEdit_(); return; }
     if (name === SHEETS.sets) { dropSetsCache_(); return; }
     if (LOOKUP_SHEETS.indexOf(name) >= 0) { dropLookups_(); return; }
-    if (name === SHEETS.dex) { if (e.range.getRow() === 4) applyDexRowHeights_(sh); return; }
+    if (name === SHEETS.dex) {
+      if (e.range.getRow() === 4) { syncDexFormBoxes_(sh, e.range); applyDexRowHeights_(sh); }
+      return;
+    }
     if (name !== SHEETS.view || e.range.getRow() !== 4) return;
     // nur der Bilder-Schalter (H4) ändert die Zeilenhöhen; Suche, Set, Sortierung und 0er zeigen starten kein Skript (#39 V1)
     if (e.range.getColumn() <= 8 && e.range.getLastColumn() >= 8) applyRowHeights_(sh);
@@ -1952,13 +1956,14 @@ function setupSheets_(ss, keepControls, step) {
  */
 function setupFormulaSheets_(ss, keepControls, step) {
   step = step || function () {};
-  setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4], true);
+  setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4, 5, 6], true);
   setupRaritySheet_(ss);
   step('Sammlung aufbauen');
   withLock_(function () {
     setupGroupsSheet_(ss);
     afterDataChange_();
   });
+  setupDexFormsSheet_(ss);
   setupPokedexDataSheet_(ss);
   setupViewSheet_(ss, !!keepControls);
   step('Pokédex aufbauen');
@@ -2264,7 +2269,7 @@ function groupFormatRow_(width) {
 function formulaSheets_(names) {
   const out = {
     data: SHEETS.data, groups: SHEETS.groups, cardHist: SHEETS.cardHist, dexIds: SHEETS.dexIds,
-    dexData: SHEETS.dexData, hist: SHEETS.hist
+    dexData: SHEETS.dexData, hist: SHEETS.hist, dexForms: SHEETS.dexForms, dex: SHEETS.dex
   };
   Object.keys(names || {}).forEach(function (k) { out[k] = names[k]; });
   return out;
@@ -2515,45 +2520,55 @@ function groupsFormula_(extras, names) {
 function dexStatsFormula_(names) {
   const n = formulaSheets_(names);
   const g = function (h) { return gref_(n, h); };
+  const fms = fref_(n.dexForms, 'A2:I');
   const pairs = [
     ['nrs', fref_(n.dexData, 'A2:A')],
+    ['kys', fref_(n.dexData, 'I2:I')],
     ['src', 'IFERROR(' + filterRows_('HSTACK(' + g('Pokédex-Nr.') + ' & "", ' + g('Anzahl') + ', ' + g('Wert (EUR)') + ')',
       [g('Gruppenschlüssel') + '<>""', g('Anzahl') + '>0', g('Pokédex-Nr.') + '<>""']) + ', HSTACK("0", 0, 0))'],
     ['grd', 'SPLIT(CHOOSECOLS(src, 1), " ")'],
     ['one', 'SEQUENCE(1, COLUMNS(grd), 1, 0)'],
-    ['nrc', 'IFERROR(VALUE(TOCOL(grd)), 0)'],
-    ['lng', 'HSTACK(nrc, TOCOL(MMULT(CHOOSECOLS(src, 2), one)), TOCOL(MMULT(CHOOSECOLS(src, 3), one)))'],
-    ['hit', filterRows_('lng', 'nrc>0')],
+    ['raw', 'TOCOL(IFERROR(TO_TEXT(grd), ""))'],
+    // Kennung -> Zeile, zu der die Karte zählt (#55): Form ('6_2'), sonst Grundform ('6_1'), sonst Art ('6')
+    ['zto', 'IF(raw="", "", IF(REGEXMATCH(raw, "_"), IFERROR(VLOOKUP(raw, ' + fms + ', 9, FALSE), REGEXEXTRACT(raw, "^[0-9]+")), ' +
+      'IFERROR(VLOOKUP(raw & "_1", ' + fms + ', 9, FALSE), raw)))'],
+    ['lng', 'HSTACK(zto, TOCOL(MMULT(CHOOSECOLS(src, 2), one)), TOCOL(MMULT(CHOOSECOLS(src, 3), one)))'],
+    ['hit', filterRows_('lng', 'zto<>""')],
     ['agq', 'QUERY(hit, "select Col1, count(Col1), sum(Col2), sum(Col3) group by Col1 label Col1 \'\', count(Col1) \'\', ' +
       'sum(Col2) \'\', sum(Col3) \'\'", 0)'],
-    ['res', 'IFERROR(VLOOKUP(nrs, agq, SEQUENCE(1, 3, 2), FALSE), 0)']
+    ['res', 'IFERROR(VLOOKUP(kys, agq, SEQUENCE(1, 3, 2), FALSE), 0)']
   ];
   const col = function (x) { return 'IF(nrs="", "", ' + x + ')'; };
   return '=ARRAYFORMULA(' + letFormula_(pairs, 'HSTACK(' + col('CHOOSECOLS(res, 1)') + ', ' + col('CHOOSECOLS(res, 2)') + ', ' +
     col(round2Formula_('CHOOSECOLS(res, 3)')) + ')') + ')';
 }
 
-/** Formel der Pokémon-Liste (Pokédex A6): Pokédex-Daten A:G nach Status (B4), Generation (C4) und Suche (D4), ohne LAMBDA. */
+/**
+ * Formel der Pokémon-Liste (Pokédex A6): die sichtbaren Zeilen von Pokédex-Daten (Arten und eingeblendete Formen, #55)
+ * nach Nummer und Form, gefiltert nach Status (B4), Generation (C4) und Suche (D4), ohne LAMBDA. „6“ findet alle Zeilen
+ * von Glurak.
+ */
 function dexListFormula_(names) {
   const n = formulaSheets_(names);
   const d = function (a1) { return fref_(n.dexData, a1); };
   const pairs = [
-    ['dat', 'FILTER(' + d('A2:G') + ', ' + d('A2:A') + '<>"")'],
+    ['dat', 'SORT(FILTER(' + d('A2:M') + ', ' + d('A2:A') + '<>"", ' + d('K2:K') + '=1), 1, TRUE, 13, TRUE)'],
     ['qry', 'TRIM(D4)'],
     ['nqq', 'REGEXREPLACE(qry, "^#?0*", "")'],
     ['cps', 'CHOOSECOLS(dat, 6)'],
     ['sts', '(B4="")+(B4="' + DEX_STATUS[0] + '")+(B4="' + DEX_STATUS[2] + '")*(cps>0)+(B4="' + DEX_STATUS[1] + '")*(cps=0)'],
     ['gen', '(C4="")+(C4="Alle")+(TO_TEXT(CHOOSECOLS(dat, 4))=TO_TEXT(C4))'],
-    ['hit', '(qry="")+(TO_TEXT(CHOOSECOLS(dat, 1))=nqq)+ISNUMBER(SEARCH(qry, CHOOSECOLS(dat, 2)))+' +
+    ['hit', '(qry="")+(TO_TEXT(CHOOSECOLS(dat, 1))=nqq)+(TO_TEXT(CHOOSECOLS(dat, 12))=nqq)+ISNUMBER(SEARCH(qry, CHOOSECOLS(dat, 2)))+' +
       'ISNUMBER(SEARCH(qry, CHOOSECOLS(dat, 3)))']
   ];
-  return '=IFERROR(ARRAYFORMULA(' + letFormula_(pairs, 'CHOOSECOLS(FILTER(dat, sts*gen*hit>0), 1, 2, 4, 5, 6, 7)') + '), ' +
+  return '=IFERROR(ARRAYFORMULA(' + letFormula_(pairs, 'CHOOSECOLS(FILTER(dat, sts*gen*hit>0), 12, 2, 4, 5, 6, 7)') + '), ' +
     '"Keine Pokémon gefunden")';
 }
 
 /**
  * Formel der Kartenliste (Pokédex H6): Karten mit Exemplaren des Pokémon aus I4 (Auswahl „#25 Pikachu“, Name oder
  * Nummer), direkt aus Gruppen, sortiert wie die Sammlung nach Set. Bilder per IMAGE über die ganze Spalte (ohne MAP).
+ * Formen (#55): Eine Art zeigt alle ihre Karten, eine Form nur ihre, die Grundform dazu die der ausgeblendeten Formen.
  */
 function dexCardFormula_(names) {
   const n = formulaSheets_(names);
@@ -2564,10 +2579,15 @@ function dexCardFormula_(names) {
     .map(function (h) { return GCOL[h] + ', TRUE'; }).join(', ');
   const pairs = [
     ['sel', 'TRIM(I4)'],
-    ['pnr', 'IFERROR(INDEX(' + d('A2:A') + ', MATCH(sel, ' + d('B2:B') + ', 0)), IFERROR(INDEX(' + d('A2:A') + ', ' +
-      'MATCH(sel, ' + d('C2:C') + ', 0)), VALUE(REGEXEXTRACT(sel, "[0-9]+"))))'],
+    ['rix', 'IFERROR(MATCH(sel, ' + d('H2:H') + ', 0), IFERROR(MATCH(sel, ' + d('B2:B') + ', 0), IFERROR(MATCH(sel, ' + d('C2:C') +
+      ', 0), MATCH(VALUE(REGEXEXTRACT(sel, "[0-9]+")), ' + d('A2:A') + ', 0))))'],
+    ['pnr', 'INDEX(' + d('A2:A') + ', rix)'],
+    ['tkn', 'INDEX(' + d('I2:I') + ', rix)'],
+    ['oth', 'TEXTJOIN("", TRUE, IFERROR(FILTER("|" & ' + fref_(n.dexForms, 'A2:A') + ', ' + fref_(n.dexForms, 'I2:I') + '=tkn, ' +
+      fref_(n.dexForms, 'A2:A') + '<>tkn), ""))'],
+    ['rgx', 'IF(REGEXMATCH(tkn, "_1$"), " (" & pnr & oth & ") ", IF(REGEXMATCH(tkn, "_"), " " & tkn & " ", " " & pnr & "(_[0-9]+)? "))'],
     ['dat', filterRows_(fref_(n.groups, 'A2:' + colLetter_(GROUP_HEADERS.length)), [g('Gruppenschlüssel') + '<>""',
-      g('Anzahl') + '>0', 'REGEXMATCH(" " & ' + g('Pokédex-Nr.') + ' & " ", " " & pnr & " ")'])],
+      g('Anzahl') + '>0', 'REGEXMATCH(" " & ' + g('Pokédex-Nr.') + ' & " ", rgx)'])],
     ['srt', 'SORT(dat, ' + sortBy + ')'],
     ['url', c('Bild-URL')],
     ['prs', c('Preis (EUR)')]
@@ -2593,8 +2613,9 @@ function dmyFormula_(x, short) {
 function dashFormulas_(names) {
   const n = formulaSheets_(names);
   const g = function (h) { return gref_(n, h); };
-  const own = 'COUNTIF(' + fref_(n.dexData, 'F2:F') + ', ">0")';
-  const all = 'COUNT(' + fref_(n.dexData, 'A2:A') + ')';
+  // wie das Blatt Pokédex: die sichtbaren Zeilen (Arten und eingeblendete Formen, #55)
+  const own = 'SUMPRODUCT((' + fref_(n.dexData, 'K2:K') + '=1)*(' + fref_(n.dexData, 'F2:F') + '>0))';
+  const all = 'SUM(' + fref_(n.dexData, 'K2:K') + ')';
   const hd = fref_(n.hist, 'A2:A'), ht = fref_(n.hist, 'B2:B');
   const hl = colLetter_(DASH_HELPER_COL);
   const days = 'IF(ISNUMBER(' + hd + ')*ISNUMBER(' + ht + '), INT(' + hd + '), 0)';
@@ -2749,9 +2770,10 @@ function planDex_(st, look, card) {
   });
   if (!ids && !Object.keys(heads).length) return null;
   if (ids) look.dexIds[id] = ids;
-  const want = dexMapOf_(storeLiveRows_(st).filter(function (r) { return isDataRow_(r) && heads[dexKey_(groupKey_(r))]; }), look.dexIds);
+  const want = dexMapOf_(storeLiveRows_(st).filter(function (r) { return isDataRow_(r) && heads[dexKey_(groupKey_(r))]; }), look.dexIds,
+    dexFormCtx_(look));
   const ss = ss_();
-  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4], true);
+  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4, 5, 6], true);
   let vals;
   try { vals = sh.getRange('A:E').getValues(); } catch (e) { ensureCols_(sh, 5); vals = sh.getRange('A:E').getValues(); }
   const rowA = {}, rowD = {};
@@ -4160,7 +4182,10 @@ function searchCollection(query, setText, opts) {
     dex: dexNr || null,
     groups: groups.slice(0, MAX_GROUPS).map(function (g) {
       const o = groupForUi_(g.gkey, g.rows, st.headers, info, refs);
-      if (needDex) o.dex = g.dex;
+      if (needDex) {
+        o.dex = g.dex;
+        o.dexf = look.dexForms ? dexTokensOfRow_(g.p, cache, dexFormCtx_(look)) : g.dex.map(String); // Formen (#55)
+      }
       return o;
     })
   };
@@ -4201,7 +4226,7 @@ function collCtx_() {
 // diesen Blättern (onEdit, beiStrukturAenderung) und die Einrichtung. Das Speichern trägt neue Pokédex-Nummern und
 // Seltenheiten selbst nach (saveStore_).
 const LOOKUP_KEY = 'nachschlag';
-const LOOKUP_SHEETS = [SHEETS.imports, SHEETS.cardHist, SHEETS.dexIds, SHEETS.rarity];
+const LOOKUP_SHEETS = [SHEETS.imports, SHEETS.cardHist, SHEETS.dexIds, SHEETS.rarity, SHEETS.dexForms];
 const LOOKUP_SECS = 21600; // 6 Stunden, mehr erlaubt CacheService nicht
 
 /** Neuer Stand: Alles bisher Gemerkte gilt nicht mehr und läuft von selbst ab. */
@@ -4218,13 +4243,14 @@ function lookups_() {
   let gen = '';
   try { gen = CacheService.getScriptCache().get(LOOKUP_KEY) || ''; } catch (e) { gen = ''; }
   let look = gen ? cacheGetJson_(LOOKUP_KEY + ':' + gen) : null;
-  const hit = !!(look && look.info && look.refs && look.dexIds && look.ranks);
+  const hit = !!(look && look.info && look.refs && look.dexIds && look.ranks && look.dexForms);
   if (!hit) {
     if (!gen) {
       gen = hex10_();
       try { CacheService.getScriptCache().put(LOOKUP_KEY, gen, LOOKUP_SECS); } catch (e) { /* ohne Zwischenspeicher weiter */ }
     }
-    look = { info: importInfo_(), refs: loadCardHistRefs_(), dexIds: loadDexIds_(), ranks: rarityRanks_() };
+    const ds = loadDexSheet_(true);
+    look = { info: importInfo_(), refs: loadCardHistRefs_(), dexIds: ds.ids, ranks: rarityRanks_(), dexForms: loadDexFormsLook_(ds.manual) };
     look.gen = gen;
     putLookups_(look);
   }
@@ -4237,7 +4263,8 @@ function lookups_() {
 /** Nachschlagewerte unter ihrem Stand merken, z. B. nachdem das Speichern neue Pokédex-Nummern eingetragen hat. */
 function putLookups_(look) {
   if (!look || !look.gen) return;
-  cachePutJson_(LOOKUP_KEY + ':' + look.gen, { info: look.info, refs: look.refs, dexIds: look.dexIds, ranks: look.ranks }, LOOKUP_SECS);
+  cachePutJson_(LOOKUP_KEY + ':' + look.gen, { info: look.info, refs: look.refs, dexIds: look.dexIds, ranks: look.ranks,
+    dexForms: look.dexForms }, LOOKUP_SECS);
 }
 
 /**
@@ -4259,6 +4286,7 @@ function collGroup_(gkey, rows, headers, ctx) {
   let added = null;
   rows.forEach(function (r) { const x = timeOf_(r[COL.added]); if (isFinite(x) && (added == null || x > added)) added = x; });
   o.dex = dexOfRow_(p, ctx.dexIds);
+  o.dexf = ctx.dexForms ? dexTokensOfRow_(p, ctx.dexIds, dexFormCtx_(ctx)) : o.dex.map(String); // Kennungen mit Form (#55)
   // Set-Symbol statt Set-Name (#47): Symbol aus dem Set-Cache, Promo-Sets (Name enthält „Promo“) zeigen einen Stern
   const sd = ctx.sets.de && ctx.sets.de[setId], se = ctx.sets.en && ctx.sets.en[setId];
   o.setId = setId;
@@ -4427,6 +4455,7 @@ function editEntry(eid, changes, qty, cards) {
   if (changes.version !== undefined && changes.version !== null) version = versionText_(changes.version);
   const extras = changes.extras && typeof changes.extras === 'object' ? changes.extras : {};
   const extraNames = Object.keys(extras).map(function (n) { return String(n).trim(); }).filter(Boolean);
+  const forms = Array.isArray(changes.forms) ? changes.forms.map(String).filter(Boolean) : null;
 
   const out = withLock_(function () {
     const st = dataStore_();
@@ -4461,8 +4490,13 @@ function editEntry(eid, changes, qty, cards) {
       const c = extraCols[String(name).trim()];
       if (c != null) next[c] = extras[name] == null ? '' : String(extras[name]).trim();
     });
+    const formOut = forms ? editForms_(st, src, forms, look) : null;
     const changed = next.some(function (v, c) { return c !== COL.changed && String(v) !== String(src[c]); });
-    if (!changed) return { ok: true, eid: String(src[COL.eid]), gkey: groupKey_(src) };
+    if (!changed) {
+      const res0 = { ok: true, eid: String(src[COL.eid]), gkey: groupKey_(src) };
+      if (formOut) res0.dexf = formOut;
+      return res0;
+    }
     const newKey = entryKey_(next);
     next[COL.key] = newKey;
     next[COL.changed] = now;
@@ -4498,10 +4532,47 @@ function editEntry(eid, changes, qty, cards) {
     }
     saveStore_(st, look);
     const diff = collDelta_(st, look);
-    return { ok: true, eid: String(st.rows[t][COL.eid]), gkey: groupKey_(st.rows[t]), delta: diff };
+    const res = { ok: true, eid: String(st.rows[t][COL.eid]), gkey: groupKey_(st.rows[t]), delta: diff };
+    if (formOut) res.dexf = formOut;
+    return res;
   }, true);
   tmrDone_();
   return out;
+}
+
+/**
+ * Form von Hand (#55, Bearbeiten): Kennungen der Karte der Zeile src merken (Pokédex-Nummern F:G) und die Karte in
+ * Pokédex-Nummern E nachtragen, damit Blatt Pokédex und Dashboard gleich mitzählen. Nur Kennungen, die zu den
+ * Pokémon der Karte passen und die es gibt. Innerhalb der Sperre. -> die Kennungen der Karte danach
+ */
+function editForms_(st, src, forms, look) {
+  const fx = dexFormCtx_(look);
+  const nums = dexOfRow_(src, look.dexIds);
+  const keep = forms.filter(function (t) {
+    return nums.indexOf(dexTokenNr_(t)) >= 0 && fx.ix.byNr[dexTokenNr_(t)] && (t === String(dexTokenNr_(t)) || fx.ix.byToken[t]);
+  });
+  if (!keep.length) return dexTokensOfRow_(src, look.dexIds, fx);
+  const key = dexKey_(groupKey_(src));
+  const man = (fx.manual[key] || []).filter(function (t) {
+    return !keep.some(function (k) { return dexTokenNr_(k) === dexTokenNr_(t); });
+  }).concat(keep);
+  setDexManual_(key, man);
+  fx.manual[key] = man;
+  if (look.dexForms) { look.dexForms.manual[key] = man; putLookups_(look); }
+  const toks = dexTokensOfRow_(src, look.dexIds, fx);
+  // Pokédex-Nummern E für diese Karte
+  const sh = ss_().getSheetByName(SHEETS.dexIds);
+  const last = sh.getLastRow();
+  const vals = last >= 2 ? sh.getRange(2, 4, last - 1, 1).getValues() : [];
+  let row = -1, end = 1;
+  vals.forEach(function (r, i) {
+    const k = String(r[0] == null ? '' : r[0]);
+    if (k) end = i + 2;
+    if (k === key && row < 0) row = i + 2;
+  });
+  if (row < 0) { row = end + 1; growRows_(sh, row); }
+  sh.getRange(row, 4, 1, 2).setNumberFormat('@').setValues([[key, toks.join(' ')]]);
+  return toks;
 }
 
 /**
@@ -4668,7 +4739,13 @@ function getSetSuggestions() {
 function buildTranslationAndSets_() {
   const nSets = rebuildSets_();
   const nTr = rebuildTranslation_();
-  return nSets + ' Sets und ' + nTr + ' Namenspaare geladen.';
+  let forms = '';
+  try {
+    forms = ' ' + refreshDexForms_(true) + ' Pokédex-Formen geladen.';
+  } catch (e) {
+    forms = ' Pokédex-Formen konnten nicht geladen werden (' + e.message + ').';
+  }
+  return nSets + ' Sets und ' + nTr + ' Namenspaare geladen.' + forms;
 }
 
 function rebuildSets_() {
@@ -4787,6 +4864,7 @@ function naechtlicherPreislauf() {
   // Lebenszeichen für triggersMissing_: Dieser Auslöser läuft, auch wenn der Preislauf danach scheitert
   try { settingSet_('NIGHTLY_AT', Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm')); } catch (e) { /* weiter */ }
   startPriceRun_();
+  try { refreshDexForms_(false); } catch (e) { /* PokeAPI nicht erreichbar: die alte Formenliste bleibt (#55) */ }
   try { checkForUpdate_(); } catch (e) { /* ohne Netz oder GitHub weiter */ }
   // eine neue Version gleich im Dashboard zeigen
   try { refreshDashboardHeader_(); } catch (e) { /* beim nächsten Aufbau des Dashboards */ }
@@ -5373,9 +5451,11 @@ function apiPruefen() {
 // Blatt „Pokédex-Daten“ (versteckt): A:D und H je Pokémon eine Zeile (schreibt die Einrichtung), E:G (Karten,
 // Exemplare, Wert) rechnet eine Formel aus Gruppen. Das Blatt „Pokédex“ filtert per Formel.
 
-const DEX_IDS_HEADERS = ['Karten-ID', 'Pokédex-Nr.', 'Abgerufen am', 'Sammlung: Karte', 'Sammlung: Pokédex-Nr.'];
+const DEX_IDS_HEADERS = ['Karten-ID', 'Pokédex-Nr.', 'Abgerufen am', 'Sammlung: Karte', 'Sammlung: Pokédex-Nr.',
+  'Form von Hand: Karte', 'Form von Hand'];
 const DEX_MAP_RANGE = 'D2:E'; // Pokédex-Nummern: Karte der Sammlung -> Nummern
-const DEX_LIST_HEADERS = ['Nr.', 'Name', 'Name englisch', 'Generation', 'Karten', 'Exemplare', 'Wert (EUR)', 'Auswahl'];
+const DEX_LIST_HEADERS = ['Nr.', 'Name', 'Name englisch', 'Generation', 'Karten', 'Exemplare', 'Wert (EUR)', 'Auswahl',
+  'Kennung', 'Gruppe', 'Sichtbar', 'Anzeige-Nr.', 'Form', 'Auswahl sichtbar'];
 const DEX_VIEW_HEADERS = ['Nr.', 'Name', 'Generation', 'Karten', 'Exemplare', 'Wert (EUR)'];
 const DEX_VIEW_CARD_HEADERS = ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Seltenheit', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)'];
 const DEX_STATUS = ['Alle', 'Fehlend', 'Vorhanden'];
@@ -5635,7 +5715,8 @@ function dexIdsOf_(card) {
 /** '25 644' (oder Zahl) -> [25, 644] */
 function parseDexText_(s) {
   const out = [];
-  String(s == null ? '' : s).split(/[^0-9]+/).forEach(function (x) {
+  String(s == null ? '' : s).split(/[^0-9_]+/).forEach(function (x) {
+    x = x.split('_')[0]; // Kennung einer Form: '6_2' -> 6 (#55)
     const n = Number(x);
     if (x && n > 0 && out.indexOf(n) < 0) out.push(n);
   });
@@ -5675,12 +5756,22 @@ function dexFromName_(name) {
 
 /** Gemerkte Pokédex-Nummern: {Karten-ID: [Nummern]}; leere Liste = tcgdex kennt keine. */
 function loadDexIds_() {
-  const out = {};
+  return loadDexSheet_(false).ids;
+}
+
+/** Pokédex-Nummern in einem Rutsch: {ids: wie loadDexIds_, manual: wie readDexManual_ (nur mit withManual)} */
+function loadDexSheet_(withManual) {
+  const out = { ids: {}, manual: {} };
   const sh = ss_().getSheetByName(SHEETS.dexIds);
-  if (!sh || sh.getLastRow() < 2) return out;
-  sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r) {
+  const last = sh ? sh.getLastRow() : 0;
+  if (last < 2) return out;
+  let vals;
+  try { vals = sh.getRange(2, 1, last - 1, withManual ? 7 : 2).getValues(); } catch (e) { vals = sh.getRange(2, 1, last - 1, 2).getValues(); }
+  vals.forEach(function (r) {
     const id = String(r[0] == null ? '' : r[0]).trim();
-    if (id) out[id] = parseDexText_(r[1]);
+    if (id) out.ids[id] = parseDexText_(r[1]);
+    const k = r.length > 5 ? String(r[5] == null ? '' : r[5]) : '';
+    if (k && !(k in out.manual)) out.manual[k] = String(r[6] == null ? '' : r[6]).split(/\s+/).filter(Boolean);
   });
   return out;
 }
@@ -5698,7 +5789,7 @@ function storeDexIds_(map) {
   const ids = Object.keys(map || {}).filter(function (id) { return id && Array.isArray(map[id]); });
   if (!ids.length) return 0;
   const ss = ss_();
-  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4], true);
+  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4, 5, 6], true);
   const last = Math.max(1, sh.getLastRow());
   const old = last >= 2 ? sh.getRange(2, 1, last - 1, 2).getValues() : [];
   const rowOf = {};
@@ -5736,13 +5827,18 @@ function dexKey_(gkey) {
   return String(gkey == null ? '' : gkey).replace(/\|[^|]*\|[^|]*$/, '').replace(/[~*?]/g, '_');
 }
 
-/** Nummern je Karte der Sammlung: {dexKey_: '25 644'} aus den Daten-Zeilen, je Gruppe wie dexOfRow_ ihrer ersten Zeile. */
-function dexMapOf_(rows, cache) {
+/**
+ * Kennungen je Karte der Sammlung: {dexKey_: '25 644'} bzw. mit Form '6_2' (#55), aus den Daten-Zeilen, je Gruppe wie
+ * dexTokensOfRow_ ihrer ersten Zeile. fx: dexFormCtx_() (fehlt: wird gelesen, wenn es Zeilen gibt).
+ */
+function dexMapOf_(rows, cache, fx) {
   const out = {};
-  groupRows_(rows).forEach(function (g) {
+  const groups = groupRows_(rows);
+  if (groups.length && !fx) fx = dexFormCtx_();
+  groups.forEach(function (g) {
     const k = dexKey_(g.gkey);
     if (k in out) return;
-    out[k] = dexOfRow_(orderGroupRows_(g.idx.map(function (i) { return rows[i]; }))[0], cache).join(' ');
+    out[k] = dexTokensOfRow_(orderGroupRows_(g.idx.map(function (i) { return rows[i]; }))[0], cache, fx).join(' ');
   });
   return out;
 }
@@ -5755,7 +5851,7 @@ function dexMapOf_(rows, cache) {
  */
 function syncDexMap_(rows, cache) {
   const ss = ss_();
-  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4], true);
+  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4, 5, 6], true);
   const want = dexMapOf_(rows || [], cache || loadDexIds_());
   const last = sh.getLastRow();
   const old = last >= 2 && sh.getMaxColumns() >= 5 ? sh.getRange(2, 4, last - 1, 2).getValues() : [];
@@ -5825,10 +5921,10 @@ function dexStaticRows_(max) {
  * -> {entries: [{nr, name, nameEn, gen, cards, copies, value}] für 1 bis 1025 (oder weiter, wenn tcgdex neuere
  *     Nummern liefert)}. Karten = Gruppen (Karte + Variante + Sonderversion) mit mindestens einem Exemplar.
  */
-function pokedexIndex_(rows) {
+function pokedexIndex_(rows, fx) {
   const cache = loadDexIds_();
   const names = dexNames_();
-  const stats = {};
+  const stats = {}, toks = {};
   let max = names.de.length;
   groupRows_(rows).forEach(function (g) {
     const rs = g.idx.map(function (i) { return rows[i]; });
@@ -5838,6 +5934,14 @@ function pokedexIndex_(rows) {
     const nums = dexOfRow_(p, cache);
     if (!nums.length) return;
     const gp = groupPrice_(rs);
+    if (fx) { // je Kennung (#55): [Karten, Exemplare, Wert]
+      dexTokensOfRow_(p, cache, fx).forEach(function (t) {
+        const e = toks[t] || (toks[t] = [0, 0, 0]);
+        e[0]++;
+        e[1] += count;
+        if (gp.price != null) e[2] += gp.price * count;
+      });
+    }
     nums.forEach(function (nr) {
       const e = stats[nr] || (stats[nr] = { cards: 0, copies: 0, value: 0, name: '' });
       e.cards++;
@@ -5855,7 +5959,8 @@ function pokedexIndex_(rows) {
       cards: e.cards, copies: e.copies, value: Math.round(e.value * 100) / 100
     });
   }
-  return { entries: entries };
+  Object.keys(toks).forEach(function (t) { toks[t][2] = Math.round(toks[t][2] * 100) / 100; });
+  return { entries: entries, toks: toks };
 }
 
 /**
@@ -5869,17 +5974,48 @@ function setupPokedexDataSheet_(ss) {
   writeDexStatic_(sh, dexTop_());
   sh.getRange('E2:F').setNumberFormat('0');
   sh.getRange('G2:G').setNumberFormat(EUR_FORMAT);
-  setFormulaLocal_(sh.getRange('E2'), dexStatsFormula_());
+  setFormulasLocal_([
+    [sh.getRange('E2'), dexStatsFormula_()],
+    [sh.getRange('K2'), dexVisibleFormula_()],
+    [sh.getRange('N2'), '=IFERROR(FILTER(H2:H, K2:K=1), "")']
+  ]);
   sh.hideSheet();
 }
 
-/** Feste Spalten von Pokédex-Daten bis zur Nummer top: A:D und H (dexStaticRows_). */
+/**
+ * Formel in Pokédex-Daten K2 (#55): 1 = die Zeile steht im Pokédex. Eine Art, solange keine ihrer Formen eingeblendet
+ * ist; eine Form, wenn Pokédex-Formen sie sichtbar nennt (die Grundform, sobald eine andere Form der Art sichtbar ist).
+ */
+function dexVisibleFormula_(names) {
+  const n = formulaSheets_(names);
+  const f = fref_(n.dexForms, 'A2:H');
+  return '=ARRAYFORMULA(IF(A2:A="", "", IF(J2:J="", IFERROR(1-VLOOKUP(I2:I & "_1", ' + f + ', 8, FALSE), 1), ' +
+    'IFERROR(VLOOKUP(I2:I, ' + f + ', 8, FALSE), 0))))';
+}
+
+/**
+ * Feste Spalten von Pokédex-Daten: je Pokémon bis zur Nummer top eine Zeile (dexStaticRows_), danach je Form aus
+ * Pokédex-Formen eine (#55). A:D Nr., Name, Name englisch, Generation; H Auswahl; I Kennung ('6' bzw. '6_2'); J Gruppe
+ * (leer = Art); L Anzeige-Nr. (6 bzw. '6.2'); M Form (0 = Art).
+ */
 function writeDexStatic_(sh, top) {
-  const rows = dexStaticRows_(top);
+  const rows = dexStaticRows_(top).map(function (r) { return [r[0], r[1], r[2], r[3], r[4], String(r[0]), '', r[0], 0]; });
+  readDexForms_().forEach(function (f) {
+    const nrText = f.nr + '.' + f.form;
+    rows.push([f.nr, f.de, f.en, dexGen_(f.nr), '#' + nrText + ' ' + f.de, f.token, f.grp, nrText, f.form]);
+  });
   growRows_(sh, rows.length + 1);
+  const last = sh.getLastRow();
+  if (last > rows.length + 1) {
+    sh.getRange(rows.length + 2, 1, last - rows.length - 1, 4).clearContent();
+    sh.getRange(rows.length + 2, 8, last - rows.length - 1, 3).clearContent();
+    sh.getRange(rows.length + 2, 12, last - rows.length - 1, 2).clearContent();
+  }
   sh.getRange(2, 1, rows.length, 4).setNumberFormats(rows.map(function () { return ['0', '@', '@', '0']; }))
     .setValues(rows.map(function (r) { return r.slice(0, 4); }));
-  sh.getRange(2, 8, rows.length, 1).setNumberFormat('@').setValues(rows.map(function (r) { return [r[4]]; }));
+  sh.getRange(2, 8, rows.length, 3).setNumberFormat('@').setValues(rows.map(function (r) { return r.slice(4, 7); }));
+  sh.getRange(2, 12, rows.length, 2).setNumberFormats(rows.map(function (r) { return [typeof r[7] === 'number' ? '0' : '@', '0']; }))
+    .setValues(rows.map(function (r) { return r.slice(7, 9); }));
 }
 
 /** Höchste Pokédex-Nummer: die der Namensliste oder eine neuere aus den Karten der Sammlung (Pokédex-Nummern E). */
@@ -5908,9 +6044,10 @@ function ensureDexRows_(top) {
 function setupPokedexSheet_(ss, keepControls) {
   const prev = ss.getActiveSheet();
   const sh = getOrCreateSheet_(ss, SHEETS.dex);
-  let keep = null;
+  let keep = null, boxes = null;
   if (keepControls) {
     try { keep = sh.getRange('B4:I4').getValues()[0]; } catch (e) { keep = null; }
+    try { boxes = sh.getMaxColumns() >= 16 ? sh.getRange('K4:P4').getValues()[0] : null; } catch (e) { boxes = null; }
   }
   ss.setActiveSheet(sh);
   ss.moveActiveSheet(frontPos_(ss, SHEETS.dex));
@@ -5948,10 +6085,15 @@ function setupPokedexSheet_(ss, keepControls) {
   sh.getRange('C4').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(gens, true).setAllowInvalid(false).build());
   const dsh = ss.getSheetByName(SHEETS.dexData);
-  if (dsh) {
+  if (dsh) { // die Auswahl listet die sichtbaren Zeilen, also auch eingeblendete Formen (#55)
     sh.getRange('I4').setDataValidation(SpreadsheetApp.newDataValidation()
-      .requireValueInRange(dsh.getRange('H2:H'), true).setAllowInvalid(true).build());
+      .requireValueInRange(dsh.getRange('N2:N'), true).setAllowInvalid(true).build());
   }
+  // Formen (#55): K4 alle, L4:P4 je Gruppe; onEdit hält „Alle“ und die Gruppen zusammen
+  sh.getRange('K3:P3').setValues([['Alle Formen'].concat(DEX_FORM_GROUPS.map(function (g) { return g[1]; }))])
+    .setFontColor('#5f6368').setFontSize(9).setWrap(true);
+  sh.getRange('K4:P4').insertCheckboxes().setValue(false);
+  if (boxes) sh.getRange('K4:P4').setValues([boxes.map(function (b) { return b === true; })]);
 
   const head = function (col, headers) {
     sh.getRange(5, col, 1, headers.length).setValues([headers])
@@ -5962,7 +6104,7 @@ function setupPokedexSheet_(ss, keepControls) {
   ensureFormulaRoom_(null, SHEETS.dex);
   const dd = function (a1) { return fref_(SHEETS.dexData, a1); };
   setFormulasLocal_([
-    [sh.getRange('D1'), '=COUNTIF(' + dd('F2:F') + ', ">0") & " von " & COUNT(' + dd('A2:A') + ')'],
+    [sh.getRange('D1'), '=SUMPRODUCT((' + dd('K2:K') + '=1)*(' + dd('F2:F') + '>0)) & " von " & SUM(' + dd('K2:K') + ')'],
     [sh.getRange('A6'), dexListFormula_()],
     [sh.getRange('H6'), dexCardFormula_()]
   ]);
@@ -5981,6 +6123,22 @@ function setupPokedexSheet_(ss, keepControls) {
   sh.getRange('A5:F').protect().setDescription('Pokédex – wird per Formel berechnet').setWarningOnly(true);
   sh.getRange('H5:P').protect().setDescription('Pokédex – wird per Formel berechnet').setWarningOnly(true);
   applyDexRowHeights_(sh);
+  // Pokédex-Formen liest die Haken dieses Blatts: erst jetzt, da es das Blatt gibt
+  const fsh = ss.getSheetByName(SHEETS.dexForms) || setupDexFormsSheet_(ss);
+  setFormulaLocal_(fsh.getRange('H2'), dexFormsFormula_());
+}
+
+/** Haken der Formen im Blatt Pokédex (#55): „Alle“ (K4) setzt alle, fehlt einer, ist „Alle“ aus. */
+function syncDexFormBoxes_(sh, range) {
+  const c1 = range.getColumn(), c2 = range.getLastColumn();
+  if (range.getRow() > 4 || range.getLastRow() < 4 || c2 < 11 || c1 > 16) return;
+  const v = sh.getRange('K4:P4').getValues()[0];
+  if (c1 <= 11 && c2 >= 11) {
+    sh.getRange('L4:P4').setValues([v.slice(1).map(function () { return v[0] === true; })]);
+  } else {
+    const all = v.slice(1).every(function (b) { return b === true; });
+    if ((v[0] === true) !== all) sh.getRange('K4').setValue(all);
+  }
 }
 
 /** Zeilen mit Kartenbildern im Blatt Pokédex hoch machen, die übrigen normal. */
@@ -5997,15 +6155,407 @@ function applyDexRowHeights_(sh) {
   if (max > last) sh.setRowHeights(last + 1, max - last, 21);
 }
 
-/** Öffentlich (Tab Pokédex): {entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]], gens} */
+/**
+ * Öffentlich (Tab Pokédex): {entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]], gens,
+ * forms: [[Kennung, Nr, Form, Gruppe, Name, Name englisch]] (#55), toks: {Kennung: [Karten, Exemplare, Wert]},
+ * groups: [[Gruppe, Beschriftung]]}. Welche Formen eigene Zeilen bekommen, entscheidet die Seite (Haken pro Gerät).
+ */
 function getPokedex() {
   ensureSchema_();
   const sh = ss_().getSheetByName(SHEETS.data);
-  const idx = pokedexIndex_(sh ? readData_(sh) : []);
+  const fx = dexFormCtx_(lookups_());
+  const idx = pokedexIndex_(sh ? readData_(sh) : [], fx);
+  const forms = [];
+  Object.keys(fx.ix.byToken).forEach(function (t) {
+    const f = fx.ix.byToken[t];
+    forms.push([f.token, f.nr, f.form, f.grp, f.de, f.en]);
+  });
+  forms.sort(function (a, b) { return a[1] - b[1] || a[2] - b[2]; });
   return {
     entries: idx.entries.map(function (e) { return [e.nr, e.name, e.nameEn, e.gen, e.cards, e.copies, e.value]; }),
-    gens: DEX_GEN_ENDS.length
+    gens: DEX_GEN_ENDS.length, forms: forms, toks: idx.toks, groups: DEX_FORM_GROUPS
   };
+}
+
+// ---------- Pokédex-Formen (#55) ----------
+//
+// Formen (Mega, Regionalformen, Gigadynamax, Geschlechter, weitere wie Icognito A bis Z) kennt tcgdex nicht. Die Liste
+// kommt von PokeAPI (CSV-Dateien auf GitHub), höchstens einmal pro Woche mit dem Preislauf (und über „Übersetzung und
+// Sets aktualisieren“), und steht im versteckten Blatt „Pokédex-Formen“: je Pokémon mit Formen eine Zeile pro Form mit
+// der Kennung „6_1“ (Grundform), „6_2“ … Die Nummer einer Form bleibt fest, neue Formen bekommen die nächste freie.
+// Zu welcher Form eine Karte gehört, erkennt das Skript am Kartennamen („Mega-Glurak X-ex“, „Alola-Vulpix“, VMAX ->
+// Gigadynamax, falls es die gibt); im Bearbeiten lässt sie sich pro Karte von Hand wählen (Pokédex-Nummern F:G).
+// Pokédex-Nummern E hält dann statt „6“ die Kennung „6_2“ (eine Karte der Grundform bleibt „6“).
+// Welche Formen eine eigene Zeile bekommen, wählen Haken: im Blatt Pokédex (L4:P4, K4 = alle) und im Pokédex-Tab
+// (pro Gerät). Eine ausgeblendete Form zählt zur Art; hat die Art eingeblendete Formen, zu ihrer Grundform („6_1“).
+
+const DEX_FORM_HEADERS = ['Kennung', 'Nr.', 'Form', 'Gruppe', 'Name', 'Name englisch', 'PokeAPI', 'Sichtbar', 'Zählt zu'];
+// Gruppen der Haken, in dieser Reihenfolge (Blatt Pokédex L:P, Pokédex-Tab)
+const DEX_FORM_GROUPS = [['mega', 'Mega'], ['regional', 'Regionalformen'], ['gmax', 'Gigadynamax'], ['gender', 'Geschlechter'],
+  ['other', 'Weitere Formen']];
+const POKEAPI_CSV = 'https://raw.githubusercontent.com/PokeAPI/pokeapi/master/data/v2/csv/';
+const DEX_FORMS_DAYS = 7;
+const DEX_REGIONS = { alola: ['Alola', 'Alolan'], galar: ['Galar', 'Galarian'], hisui: ['Hisui', 'Hisuian'], paldea: ['Paldea', 'Paldean'] };
+
+/** CSV-Text -> Zeilen (Felder in Anführungszeichen dürfen Kommas und "" enthalten). */
+function csvRows_(text) {
+  const s = String(text == null ? '' : text);
+  const out = [];
+  let row = [], cur = '', q = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charAt(i);
+    if (q) {
+      if (ch !== '"') cur += ch;
+      else if (s.charAt(i + 1) === '"') { cur += '"'; i++; } else q = false;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cur); cur = ''; } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && s.charAt(i + 1) === '\n') i++;
+      row.push(cur); out.push(row); row = []; cur = '';
+    } else cur += ch;
+  }
+  if (cur !== '' || row.length) { row.push(cur); out.push(row); }
+  return out;
+}
+
+/** CSV-Text -> Objekte nach der Kopfzeile */
+function csvObjects_(text) {
+  const rows = csvRows_(text);
+  const head = rows.shift() || [];
+  return rows.filter(function (r) { return r.length > 1; }).map(function (r) {
+    const o = {};
+    head.forEach(function (h, i) { o[h] = r[i] == null ? '' : r[i]; });
+    return o;
+  });
+}
+
+/** Gruppe einer PokeAPI-Form (Zeile aus pokemon_forms.csv), die nicht die Grundform ist */
+function dexFormGroup_(f) {
+  const fi = String(f.form_identifier || '');
+  if (f.is_mega === '1' || fi === 'primal') return 'mega';
+  if (/gmax/.test(fi)) return 'gmax';
+  if (/(^|-)(alola|galar|hisui|paldea)(-|$)/.test(fi) && !/cap/.test(fi)) return 'regional';
+  if (fi === 'male' || fi === 'female') return 'gender';
+  return 'other';
+}
+
+/**
+ * Formenliste aus den PokeAPI-Dateien pokemon_forms.csv, pokemon.csv und pokemon_form_names.csv. Ohne Totem- und
+ * Partner-Formen (Let's Go) und ohne Formen, die es nur im Kampf gibt (außer Mega und Gigadynamax). Nur Pokémon mit
+ * mindestens einer weiteren Form, dann mit Grundform. old: bisherige Zeilen (readDexForms_), ihre Nummern bleiben.
+ * -> [{token, nr, form, grp, de, en, key}] nach Nr. und Form
+ */
+function dexFormsFromCsv_(formsCsv, pokemonCsv, namesCsv, old) {
+  const pk = {};
+  csvObjects_(pokemonCsv).forEach(function (p) { pk[p.id] = p; });
+  const nm = {};
+  csvObjects_(namesCsv).forEach(function (r) {
+    if (r.local_language_id !== '6' && r.local_language_id !== '9') return;
+    (nm[r.pokemon_form_id] || (nm[r.pokemon_form_id] = {}))[r.local_language_id === '6' ? 'de' : 'en'] = { form: r.form_name, name: r.pokemon_name };
+  });
+  const bySp = {};
+  csvObjects_(formsCsv).forEach(function (f) {
+    const p = pk[f.pokemon_id];
+    const sp = p ? Math.floor(Number(p.species_id)) : 0;
+    if (!(sp > 0)) return;
+    const key = String(f.identifier || '');
+    const fi = String(f.form_identifier || '');
+    if (/(^|-)totem(-|$)/.test(key) || fi === 'starter') return;
+    const base = p.is_default === '1' && f.is_default === '1';
+    const grp = base ? 'base' : dexFormGroup_(f);
+    if (grp === 'other' && f.is_battle_only === '1') return;
+    (bySp[sp] || (bySp[sp] = [])).push({ key: key, fi: fi, grp: grp, order: Number(f.order) || 0, n: nm[f.id] || {} });
+  });
+  const oldNr = {}, oldMax = {};
+  (old || []).forEach(function (o) {
+    oldNr[o.key] = o.form;
+    oldMax[o.nr] = Math.max(oldMax[o.nr] || 1, o.form);
+  });
+  const dn = dexNames_();
+  const out = [];
+  Object.keys(bySp).map(Number).sort(function (a, b) { return a - b; }).forEach(function (sp) {
+    const list = bySp[sp];
+    if (!list.some(function (e) { return e.grp !== 'base'; })) return;
+    let base = list.filter(function (e) { return e.grp === 'base'; })[0];
+    const spDe = dn.de[sp - 1] || (base && base.n.de && base.n.de.name) || (base && base.n.en && base.n.en.name) || 'Nr. ' + sp;
+    const spEn = dn.en[sp - 1] || (base && base.n.en && base.n.en.name) || spDe;
+    if (!base) base = { key: '', fi: '', grp: 'base', order: 0, n: {} };
+    const gender = list.some(function (e) { return e.grp === 'gender'; });
+    const megas = list.filter(function (e) { return e.grp === 'mega' && e.fi !== 'primal'; }).length;
+    let next = oldMax[sp] || 1;
+    const rows = [];
+    list.filter(function (e) { return e !== base; }).sort(function (a, b) { return a.order - b.order; }).forEach(function (e) {
+      const form = e.key && oldNr[e.key] > 1 ? oldNr[e.key] : ++next;
+      const nmz = dexFormNames_(e, spDe, spEn);
+      rows.push({ token: sp + '_' + form, nr: sp, form: form, grp: e.grp, de: nmz.de, en: nmz.en, key: e.key, megas: megas });
+    });
+    let bde = (base.n.de && base.n.de.name) || spDe, ben = (base.n.en && base.n.en.name) || spEn;
+    if (gender && bde.indexOf('♂') < 0) bde += ' ♂';
+    if (gender && ben.indexOf('♂') < 0) ben += ' ♂';
+    out.push({ token: sp + '_1', nr: sp, form: 1, grp: 'base', de: bde, en: ben, key: base.key });
+    rows.sort(function (a, b) { return a.form - b.form; }).forEach(function (r) { delete r.megas; out.push(r); });
+  });
+  return out;
+}
+
+/** Deutscher und englischer Name einer Form: von PokeAPI, sonst aus dem Artnamen zusammengesetzt („Mega-Glurak X“). */
+function dexFormNames_(e, spDe, spEn) {
+  const de = e.n.de && e.n.de.name, en = e.n.en && e.n.en.name;
+  const fi = e.fi;
+  let cde = '', cen = '';
+  if (e.grp === 'mega') {
+    const l = (/-([xyz])$/.exec(fi) || [])[1];
+    if (fi === 'primal') { cde = 'Proto-' + spDe; cen = 'Primal ' + spEn; } else {
+      cde = 'Mega-' + spDe + (l ? ' ' + l.toUpperCase() : '');
+      cen = 'Mega ' + spEn + (l ? ' ' + l.toUpperCase() : '');
+    }
+  } else if (e.grp === 'regional') {
+    const m = /(alola|galar|hisui|paldea)/.exec(fi);
+    const r = DEX_REGIONS[m[1]];
+    const rest = fi.replace(m[1], '').replace(/^-+|-+$/g, '');
+    const extra = rest ? ' (' + ((e.n.en && e.n.en.form) || rest) + ')' : '';
+    cde = r[0] + '-' + spDe + extra;
+    cen = r[1] + ' ' + spEn + extra;
+  } else if (e.grp === 'gmax') {
+    cde = 'Gigadynamax-' + spDe; cen = 'Gigantamax ' + spEn;
+  } else if (e.grp === 'gender') {
+    const g = fi === 'female' ? ' ♀' : ' ♂';
+    cde = spDe + g; cen = spEn + g;
+  } else {
+    const fde = (e.n.de && e.n.de.form) || (e.n.en && e.n.en.form) || fi;
+    cde = spDe + ' (' + fde + ')';
+    cen = spEn + ' (' + ((e.n.en && e.n.en.form) || fi) + ')';
+  }
+  return { de: de || cde, en: en || cen };
+}
+
+/** Blatt „Pokédex-Formen“ anlegen (versteckt); die Zeilen bleiben. Die Formel in H2 setzt setupPokedexSheet_. */
+function setupDexFormsSheet_(ss) {
+  const sh = getOrCreateSheet_(ss, SHEETS.dexForms);
+  writeHeaders_(sh, DEX_FORM_HEADERS);
+  sh.getRange(2, 1, Math.max(1, sh.getMaxRows() - 1), 1).setNumberFormat('@');
+  sh.getRange(2, 4, Math.max(1, sh.getMaxRows() - 1), 4).setNumberFormat('@');
+  sh.hideSheet();
+  return sh;
+}
+
+/** Zeilen von Pokédex-Formen: [{token, nr, form, grp, de, en, key}] */
+function readDexForms_() {
+  const sh = ss_().getSheetByName(SHEETS.dexForms);
+  const last = sh ? sh.getLastRow() : 0;
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, 7).getValues().filter(function (r) { return String(r[0] || ''); }).map(function (r) {
+    return { token: String(r[0]), nr: Math.floor(Number(r[1])) || 0, form: Math.floor(Number(r[2])) || 1, grp: String(r[3] || ''),
+      de: String(r[4] || ''), en: String(r[5] || ''), key: String(r[6] || '') };
+  }).filter(function (o) { return o.nr > 0; });
+}
+
+/**
+ * Formenliste von PokeAPI holen (force: auch, wenn sie jünger als eine Woche ist) und alles nachziehen: Pokédex-Daten
+ * (eine Zeile je Form), die Kennungen der Karten (Pokédex-Nummern E). Ist PokeAPI nicht erreichbar, bleibt die alte
+ * Liste. -> Anzahl Formen oder null (noch nicht fällig)
+ */
+function refreshDexForms_(force) {
+  const at = settingGet_('DEX_FORMS_AT');
+  const t = at ? Date.parse(String(at).slice(0, 10)) : NaN;
+  if (!force && isFinite(t) && Date.now() - t < DEX_FORMS_DAYS * 86400000) return null;
+  const res = UrlFetchApp.fetchAll(['pokemon_forms', 'pokemon', 'pokemon_form_names'].map(function (f) {
+    return { url: POKEAPI_CSV + f + '.csv', muteHttpExceptions: true };
+  }));
+  const texts = res.map(function (r) {
+    if (r.getResponseCode() !== 200) throw new Error('PokeAPI antwortet nicht (HTTP ' + r.getResponseCode() + ')');
+    return r.getContentText();
+  });
+  const ss = ss_();
+  const sh = ss.getSheetByName(SHEETS.dexForms) || setupDexFormsSheet_(ss);
+  return withLock_(function () {
+    const rows = dexFormsFromCsv_(texts[0], texts[1], texts[2], readDexForms_());
+    if (!rows.length) throw new Error('PokeAPI lieferte keine Formen.');
+    const vals = rows.map(function (r) { return [r.token, r.nr, r.form, r.grp, r.de, r.en, r.key]; });
+    growRows_(sh, vals.length + 1);
+    const last = sh.getLastRow();
+    if (last > vals.length + 1) sh.getRange(vals.length + 2, 1, last - vals.length - 1, 7).clearContent();
+    sh.getRange(2, 1, vals.length, 7).setNumberFormats(vals.map(function () { return ['@', '0', '0', '@', '@', '@', '@']; })).setValues(vals);
+    settingSet_('DEX_FORMS_AT', todayText_());
+    const dd = ss.getSheetByName(SHEETS.dexData);
+    if (dd) writeDexStatic_(dd, dexTop_());
+    const data = ss.getSheetByName(SHEETS.data);
+    syncDexMap_(data ? readData_(data) : []);
+    ensureFormulaRoom_(null, SHEETS.dex);
+    dropLookups_();
+    return rows.length;
+  });
+}
+
+/**
+ * Formel in Pokédex-Formen H2 (Spalten Sichtbar, Zählt zu) nach den Haken im Blatt Pokédex (L4:P4): Eine Form ist
+ * sichtbar, wenn ihre Gruppe angehakt ist, die Grundform, wenn eine andere Form ihrer Art sichtbar ist. „Zählt zu“: die
+ * Zeile, zu der Karten dieser Form zählen (die Form selbst, sonst die Grundform „6_1“, sonst die Art „6“).
+ */
+function dexFormsFormula_(names) {
+  const n = formulaSheets_(names);
+  const f = function (a1) { return fref_(n.dexForms, a1); };
+  const pairs = [
+    ['tok', f('A2:A')],
+    ['nrs', f('B2:B')],
+    ['grp', f('D2:D')],
+    ['shw', '"|" & TEXTJOIN("|", TRUE, IF(' + fref_(n.dex, 'L4:P4') + '=TRUE, SPLIT("' +
+      DEX_FORM_GROUPS.map(function (g) { return g[0]; }).join(' ') + '", " "), "")) & "|"'],
+    ['vis', '(grp<>"base")*(grp<>"")*ISNUMBER(SEARCH("|" & grp & "|", shw))'],
+    ['spl', '"|" & TEXTJOIN("|", TRUE, IF(vis, nrs, "")) & "|"'],
+    ['has', '(tok<>"")*ISNUMBER(SEARCH("|" & nrs & "|", spl))'],
+    ['sic', 'IF(tok="", "", IF(grp="base", has, vis))'],
+    ['zto', 'IF(tok="", "", IF(sic, tok, IF(has, nrs & "_1", nrs & "")))']
+  ];
+  return '=ARRAYFORMULA(' + letFormula_(pairs, 'HSTACK(sic, zto)') + ')';
+}
+
+/** Index der Formen fürs Erkennen am Namen: {byNr: {Nr: {keys: {Vergleichsform: Kennung}, gmax: [...]}}, byToken} */
+function dexFormIndex_(rows) {
+  const byNr = {}, byToken = {};
+  const dn = dexNames_();
+  rows.forEach(function (r) {
+    byToken[r.token] = r;
+    const sp = byNr[r.nr] || (byNr[r.nr] = { keys: {}, gmax: [], forms: [], megas: 0 });
+    sp.forms.push(r);
+    if (r.grp === 'mega' && !/-primal$/.test(r.key)) sp.megas++;
+  });
+  Object.keys(byNr).forEach(function (nr) {
+    const sp = byNr[nr];
+    const de = dn.de[nr - 1] || '', en = dn.en[nr - 1] || '';
+    const put = function (k, tok) {
+      k = dexSquash_(k);
+      if (!k) return;
+      sp.keys[k] = k in sp.keys && sp.keys[k] !== tok ? '' : tok; // passt auf zwei Formen: keine
+    };
+    sp.forms.forEach(function (r) {
+      if (r.grp === 'base') return;
+      put(r.de, r.token);
+      put(r.en, r.token);
+      if (r.grp === 'mega') {
+        if (/-primal$/.test(r.key)) { put('Proto-' + de, r.token); put('Primal ' + en, r.token); return; }
+        const l = ((/-mega-([xyz])$/.exec(r.key) || [])[1] || '').toUpperCase();
+        [['Mega-', 'Mega '], ['M-', 'M ']].forEach(function (p) {
+          put(p[0] + de + l, r.token); put(p[1] + en + l, r.token);
+          if (sp.megas === 1) { put(p[0] + de, r.token); put(p[1] + en, r.token); }
+        });
+      } else if (r.grp === 'regional') {
+        const m = /(alola|galar|hisui|paldea)/.exec(r.key);
+        if (m) { put(DEX_REGIONS[m[1]][0] + de, r.token); put(DEX_REGIONS[m[1]][1] + en, r.token); }
+      } else if (r.grp === 'gmax') {
+        put('Gigadynamax-' + de, r.token); put('Gigantamax ' + en, r.token);
+        sp.gmax.push(r.token);
+      }
+    });
+  });
+  return { byNr: byNr, byToken: byToken };
+}
+
+/** Kennung der Form, die der Kartenname für Pokémon nr nennt („Mega-Glurak X-ex“ -> '6_2'); VMAX -> Gigadynamax; sonst '' */
+function dexFormOfName_(name, nr, ix) {
+  const sp = ix.byNr[nr];
+  if (!sp) return '';
+  let tok = '';
+  String(name == null ? '' : name).split(/\s*&\s*/).some(function (part) {
+    const s = splitSuffix_(part);
+    const words = s.base.split(/\s+/);
+    for (let i = 0; i < words.length && !tok; i++) tok = sp.keys[dexSquash_(words.slice(i).join(' '))] || '';
+    if (!tok && s.suffix === 'VMAX' && sp.gmax.length) tok = sp.gmax[0];
+    return !!tok;
+  });
+  return tok;
+}
+
+/** Nummer einer Kennung: '6_2' -> 6, '25' -> 25 */
+function dexTokenNr_(t) {
+  return Math.floor(Number(String(t == null ? '' : t).split('_')[0])) || 0;
+}
+
+/** Form von Hand je Karte (Pokédex-Nummern F:G): {dexKey_: [Kennungen]} */
+function readDexManual_() {
+  return loadDexSheet_(true).manual;
+}
+
+/** Für die Nachschlagewerte (lookups_): Formen als Zeilen und die Wahl von Hand (manual: schon gelesen, sonst lesen) */
+function loadDexFormsLook_(manual) {
+  return { rows: readDexForms_().map(function (r) { return [r.token, r.nr, r.form, r.grp, r.de, r.en, r.key]; }), manual: manual || readDexManual_() };
+}
+
+/**
+ * Formen und Wahl von Hand: {ix: dexFormIndex_, manual: {dexKey_: [Kennungen]}}. look (optional): aus den
+ * Nachschlagewerten, einmal je Aufruf aufgebaut; ohne look aus den Blättern.
+ */
+function dexFormCtx_(look) {
+  if (look && look._fx) return look._fx;
+  const d = (look && look.dexForms) || loadDexFormsLook_();
+  const fx = {
+    ix: dexFormIndex_(d.rows.map(function (r) { return { token: r[0], nr: r[1], form: r[2], grp: r[3], de: r[4], en: r[5], key: r[6] }; })),
+    manual: d.manual
+  };
+  if (look) Object.defineProperty(look, '_fx', { value: fx, enumerable: false, configurable: true, writable: true });
+  return fx;
+}
+
+/**
+ * Kennungen einer Daten-Zeile für Pokédex-Nummern E: je Pokémon die von Hand gewählte Form, sonst die aus dem Namen,
+ * sonst die Nummer ('6' = Grundform bzw. Art). fx: dexFormCtx_() (ohne: nur Nummern).
+ */
+function dexTokensOfRow_(r, cache, fx) {
+  const nums = dexOfRow_(r, cache);
+  if (!fx || !nums.length) return nums.map(String);
+  const man = fx.manual[dexKey_(groupKey_(r))] || [];
+  return nums.map(function (nr) {
+    const m = man.filter(function (t) { return dexTokenNr_(t) === nr; })[0];
+    if (m != null && (m === String(nr) || fx.ix.byToken[m])) return m;
+    if (!fx.ix.byNr[nr]) return String(nr);
+    return dexFormOfName_(r[COL.name], nr, fx.ix) || dexFormOfName_(r[COL.nameEn], nr, fx.ix) || String(nr);
+  });
+}
+
+/**
+ * Form einer Karte von Hand wählen (Bearbeiten, #55): tokens = je Pokémon mit Formen eine Kennung ('6' Grundform,
+ * '6_2' …). Gilt für die ganze Karte (alle Exemplare und Varianten), übersteht den Preislauf. Innerhalb der Sperre.
+ */
+function setDexManual_(key, tokens) {
+  const ss = ss_();
+  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4, 5, 6], true);
+  ensureCols_(sh, 7);
+  const last = sh.getLastRow();
+  const vals = last >= 2 ? sh.getRange(2, 6, last - 1, 2).getValues() : [];
+  const txt = tokens.join(' ');
+  let row = -1, end = 1;
+  vals.forEach(function (r, i) {
+    const k = String(r[0] == null ? '' : r[0]);
+    if (k) end = i + 2;
+    if (k === key && row < 0) row = i + 2;
+  });
+  if (row < 0) { row = end + 1; growRows_(sh, row); }
+  sh.getRange(row, 6, 1, 2).setNumberFormat('@').setValues([[key, txt]]);
+}
+
+/**
+ * Formen einer Karte fürs Bearbeiten (#55): nur Pokémon, die Formen haben.
+ * -> [{nr, name, cur (Kennung jetzt), opts: [[Kennung, Name]]}] ('6' = Grundform)
+ */
+function getCardForms(gkey) {
+  ensureSchema_();
+  gkey = String(gkey == null ? '' : gkey);
+  const st = dataStore_();
+  const idx = storeGroupIdx_(st, gkey);
+  if (!idx.length) throw new Error('Diese Karte wurde nicht gefunden. Bitte die Liste neu laden.');
+  const r = orderGroupRows_(idx.map(function (i) { return st.rows[i]; }))[0];
+  const look = lookups_();
+  const fx = dexFormCtx_(look);
+  const nums = dexOfRow_(r, look.dexIds);
+  const toks = dexTokensOfRow_(r, look.dexIds, fx);
+  const dn = dexNames_();
+  const out = [];
+  nums.forEach(function (nr, i) {
+    const sp = fx.ix.byNr[nr];
+    if (!sp) return;
+    const opts = sp.forms.map(function (f) { return [f.grp === 'base' ? String(nr) : f.token, f.de]; });
+    out.push({ nr: nr, name: dn.de[nr - 1] || 'Nr. ' + nr, cur: toks[i], opts: opts });
+  });
+  return out;
 }
 
 // ---------- Seltenheiten ----------
