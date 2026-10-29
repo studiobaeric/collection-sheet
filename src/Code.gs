@@ -3075,13 +3075,15 @@ function fetchJson_(url, attempts) {
 }
 
 /**
- * Eine Karte von tcgdex, eine halbe Stunde zwischengespeichert (#31): getCardDetail holt sie beim Antippen,
- * addCard gleich danach noch einmal, das spart einen Abruf. Die Suche legt ihre Treffer schon hinein (#36 A1),
- * dann kommt das Antippen ganz ohne Abruf aus. 404 -> null (wird nicht gemerkt).
+ * Eine Karte von tcgdex, eine halbe Stunde zwischengespeichert (#31): Die Suche auf dem Server legt ihre Treffer
+ * hinein (#36 A1), Hinzufügen und Verknüpfen holen sie dann nicht noch einmal. Sucht der Browser selbst (#43), schickt
+ * er die Karten beim Hinzufügen mit (given, siehe givenCards_). 404 -> null (wird nicht gemerkt).
  */
-function fetchCard_(lang, id, attempts) {
+function fetchCard_(lang, id, attempts, given) {
+  const key = cardCacheKey_(lang, id);
+  if (given && given[key]) return given[key];
   try {
-    const hit = CacheService.getScriptCache().get(cardCacheKey_(lang, id));
+    const hit = CacheService.getScriptCache().get(key);
     if (hit) return JSON.parse(hit);
   } catch (e) { /* ohne Zwischenspeicher weiter */ }
   const card = fetchJson_(apiUrl_(lang, 'cards/' + encodeURIComponent(id)), attempts);
@@ -3090,6 +3092,20 @@ function fetchCard_(lang, id, attempts) {
 }
 
 function cardCacheKey_(lang, id) { return 'tcg:' + lang + ':' + id; }
+
+/**
+ * Karten, die die Seite mitschickt ([{lang, id, data}], von ihrer Suche direkt bei tcgdex): {Schlüssel wie
+ * cardCacheKey_: Kartendaten}. Nur Karten, deren Daten zur ID passen, höchstens vier.
+ */
+function givenCards_(list) {
+  const out = {};
+  (Array.isArray(list) ? list : []).slice(0, 4).forEach(function (x) {
+    const d = x && x.data;
+    if (!d || typeof d !== 'object' || (x.lang !== 'de' && x.lang !== 'en')) return;
+    if (String(d.id) === String(x.id) && d.id != null) out[cardCacheKey_(x.lang, String(x.id))] = d;
+  });
+  return out;
+}
 
 /** Karten [{lang, id, data}] in einem Aufruf zwischenspeichern; ohne data oder zu groß (Grenze 100 KB) nicht. */
 function cacheCards_(list) {
@@ -3104,33 +3120,39 @@ function cacheCards_(list) {
   } catch (e) { /* ohne Zwischenspeicher weiter */ }
 }
 
-/** Paralleler GET. Liefert pro URL {ok, data} oder {ok:false, notFound|error}. */
+/**
+ * Paralleler GET. Liefert pro URL {ok, data} oder {ok:false, notFound|error}. Was scheitert (außer 404), holt ein
+ * zweiter Versuch noch einmal, wieder parallel (#38 S2). Wirft fetchAll (eine Adresse gar nicht erreichbar), holt es
+ * jede Adresse einzeln.
+ */
 function fetchAllJson_(urls) {
   if (!urls.length) return [];
-  let responses;
-  try {
-    responses = UrlFetchApp.fetchAll(urls.map(function (u) {
-      return { url: u, muteHttpExceptions: true, headers: { Accept: 'application/json' } };
-    }));
-  } catch (e) {
-    responses = urls.map(function () { return null; });
+  const opts = { muteHttpExceptions: true, headers: { Accept: 'application/json' } };
+  const all = function (list) {
+    return UrlFetchApp.fetchAll(list.map(function (u) { return Object.assign({ url: u }, opts); })).map(answerOf_);
+  };
+  const one = function (u) {
+    try { return answerOf_(UrlFetchApp.fetch(u, opts)); } catch (e) { return answerOf_(e); }
+  };
+  let out;
+  try { out = all(urls); } catch (e) { return urls.map(one); }
+  const again = [];
+  out.forEach(function (a, i) { if (a.error) again.push(i); });
+  if (again.length) {
+    let second;
+    try { second = all(again.map(function (i) { return urls[i]; })); } catch (e) { second = again.map(function () { return answerOf_(e); }); }
+    again.forEach(function (i, k) { out[i] = second[k]; });
   }
-  return urls.map(function (u, i) {
-    const r = responses[i];
-    if (r) {
-      const code = r.getResponseCode();
-      if (code === 404) return { ok: false, notFound: true };
-      if (code >= 200 && code < 300) {
-        try { return { ok: true, data: JSON.parse(r.getContentText('UTF-8')) }; } catch (e) { /* unten erneut */ }
-      }
-    }
-    try {
-      const d = fetchJson_(u, 1);
-      return d ? { ok: true, data: d } : { ok: false, notFound: true };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-  });
+  return out;
+}
+
+/** HTTP-Antwort (oder Fehler beim Abruf) -> {ok, data} | {ok:false, notFound} | {ok:false, error} */
+function answerOf_(r) {
+  if (!r || typeof r.getResponseCode !== 'function') return { ok: false, error: (r && r.message) || '?' };
+  const code = r.getResponseCode();
+  if (code === 404) return { ok: false, notFound: true };
+  if (code < 200 || code >= 300) return { ok: false, error: 'HTTP ' + code };
+  try { return { ok: true, data: JSON.parse(r.getContentText('UTF-8')) }; } catch (e) { return { ok: false, error: 'keine gültige Antwort' }; }
 }
 
 function setIdOf_(brief) {
@@ -3170,11 +3192,11 @@ function baseVariant_(v) {
  * das Bild (alte Sets bis Diamant & Perl haben bei tcgdex keine deutschen Bilder)
  * und, falls er fehlt, den Cardmarket-Preis. Setzt card.image direkt.
  */
-function cardmarketWithFallback_(card, lang) {
+function cardmarketWithFallback_(card, lang, given) {
   let cm = cardmarket_(card);
   if (lang !== 'de' || (cm && card.image)) return { cm: cm, fromEn: false };
   let en = null;
-  try { en = fetchCard_('en', card.id, 1); } catch (e) { en = null; }
+  try { en = fetchCard_('en', card.id, 1, given); } catch (e) { en = null; }
   if (!en) return { cm: cm, fromEn: false };
   if (!card.image && en.image) card.image = en.image;
   if (cm) return { cm: cm, fromEn: false };
@@ -3259,31 +3281,230 @@ function squash_(s) {
 // gleich danach „Glurak 4“ holen dieselbe Liste nur einmal. Neue Karten kommen mit neuen Sets, selten am selben Tag.
 const NAME_LIST_SECS = 3 * 3600;
 
-/** Kurzform aller Karten mit diesem Namen von tcgdex: [{id, localId, name, image}], gemerkt für NAME_LIST_SECS. */
-function cardsByName_(lang, name) {
-  const key = 'tcgl:' + lang + ':' + String(name).trim().toLowerCase().slice(0, 200);
-  const hit = cacheGetJson_(key);
-  if (Array.isArray(hit)) return hit;
-  const res = fetchJson_(apiUrl_(lang, 'cards', { name: name }));
-  const list = (Array.isArray(res) ? res : []).map(function (c) {
+function nameListKey_(lang, name) {
+  return 'tcgl:' + lang + ':' + String(name).trim().toLowerCase().slice(0, 200);
+}
+
+/** Kurzform einer Namensliste von tcgdex: [{id, localId, name, image}] */
+function slimList_(list) {
+  return (Array.isArray(list) ? list : []).map(function (c) {
     return { id: c.id, localId: c.localId, name: c.name, image: c.image };
   });
+}
+
+/** Kurzform aller Karten mit diesem Namen von tcgdex: [{id, localId, name, image}], gemerkt für NAME_LIST_SECS. */
+function cardsByName_(lang, name) {
+  const key = nameListKey_(lang, name);
+  const hit = cacheGetJson_(key);
+  if (Array.isArray(hit)) return hit;
+  const list = slimList_(fetchJson_(apiUrl_(lang, 'cards', { name: name })));
   cachePutJson_(key, list, NAME_LIST_SECS);
   return list;
 }
 
-/** Kandidaten (Kurzform) aus tcgdex holen und lokal exakt filtern. */
+/** Kandidaten (Kurzform) nach Name aus tcgdex holen und lokal exakt filtern (Erkennung im Import). */
 function findCandidates_(lang, name, num, setIds, sets, suffix) {
-  let list = [];
-  if (name) {
-    list = cardsByName_(lang, name);
-  } else {
-    (setIds || []).slice(0, 5).forEach(function (id) {
-      const set = fetchJson_(apiUrl_(lang, 'sets/' + encodeURIComponent(id)));
-      if (set && Array.isArray(set.cards)) list = list.concat(set.cards);
-    });
+  return filterCands_(name ? cardsByName_(lang, name) : [], lang, num, setIds, sets, suffix);
+}
+
+// ---------------------------------------------------------------------------
+// 5a. Suchablauf für Server und Browser (#43, #38 S1 und S2)
+// ---------------------------------------------------------------------------
+// Die Kartensuche läuft in Runden. Ein Ablauf (Generator-Funktion) nennt pro Runde alles, was er braucht
+// (yield [Bedarf, …]), und bekommt die Antworten in derselben Reihenfolge zurück: {ok: true, data} oder
+// {ok: false, notFound | error}. Bedarf: ['card', lang, id], ['name', lang, Name] und ['set', lang, setId] bei tcgdex,
+// ['sets'] die Set-Liste wie loadSets_, ['tr', Name] die Übersetzung wie translateName_.
+// Der Ablauf rechnet nur. Deshalb läuft er an zwei Stellen gleich: auf dem Server (runFlow_, mit Zwischenspeicher) und
+// in Seitenleiste und Web-App direkt im Browser, ohne Skriptaufruf (searchJs_ gibt der Seite den Quelltext). Alles, was
+// searchJs_ mitgibt, kommt deshalb ohne Apps-Script-Dienste aus.
+
+/**
+ * Suche in bis zu drei Stufen: deutsch, englisch mit übersetztem Namen, Set-Auswahl. input = {name, number, set}.
+ * Die Treffer kommen mit Preisen, das Antippen braucht keinen zweiten Abruf (#38 S1).
+ */
+function* searchFlow_(input) {
+  input = input || {};
+  const name = String(input.name || '').trim();
+  const num = parseNumberInput_(input.number);
+  const setText = String(input.set || '').trim();
+  if (!name && !(num && setText)) throw new Error('Bitte einen Namen eingeben – oder Set und Nummer.');
+  const notes = [];
+  const sp = splitSuffix_(name);
+
+  // Runde 1: die deutsche Namensliste, bei „Glurak ex“ gleich auch die von „Glurak“ (#38 S2). Die Sets nur, wenn der
+  // Set-Filter oder die Kartenzahl hinter der Nummer („025/165“) sie braucht.
+  const needSets = !!(setText || (num && num.size));
+  const need = needSets ? [['sets']] : [];
+  if (name) need.push(['name', 'de', name]);
+  if (name && sp.suffix) need.push(['name', 'de', sp.base]);
+  let res = yield need;
+  const at = needSets ? 1 : 0;
+  let sets = needSets ? dataOf_(res[0]) : null;
+  let setIds = null;
+  if (setText) {
+    const ids = matchSets_(sets, setText);
+    if (ids.length) setIds = ids;
+    else notes.push('Set „' + setText + '" ist nicht im Set-Cache, der Set-Filter wird ignoriert. Evtl. „Übersetzung und Sets aktualisieren" ausführen.');
   }
-  let cands = list.map(function (c) {
+  if (!name && !setIds) throw new Error('Set „' + setText + '" nicht gefunden. Bitte einen Namen eingeben.');
+
+  // Stufe 1: deutsch (auch „Glurak ex“ statt „Glurak-ex“)
+  let cands = [];
+  let enSets = null;
+  if (name) {
+    cands = filterCands_(listOf_(res[at]), 'de', num, setIds, sets, null);
+    if (!cands.length && sp.suffix) {
+      cands = filterCands_(listOf_(res[at + 1]), 'de', num, setIds, sets, sp.suffix)
+        .filter(function (c) { return squash_(c.name).indexOf(squash_(name)) >= 0; });
+    }
+  } else {
+    // nur Set und Nummer: die Kartenlisten der Sets, deutsch und englisch in einer Runde
+    const ids = setIds.slice(0, 5);
+    res = yield ids.map(function (id) { return ['set', 'de', id]; }).concat(ids.map(function (id) { return ['set', 'en', id]; }));
+    const cardsOf = function (from) {
+      let list = [];
+      ids.forEach(function (id, i) {
+        const set = dataOf_(res[from + i]);
+        if (set && Array.isArray(set.cards)) list = list.concat(set.cards);
+      });
+      return list;
+    };
+    cands = filterCands_(cardsOf(0), 'de', num, setIds, sets, null);
+    enSets = function () { return cardsOf(ids.length); };
+  }
+  if (cands.length) return yield* finishFlow_('de', cands, notes, name, '', sets);
+
+  // Stufe 2: englisch mit übersetztem Namen, die Listen für beide Schreibweisen in einer Runde
+  if (name) {
+    const tr = dataOf_((yield [['tr', name]])[0]);
+    const tries = [];
+    if (tr) tries.push({ q: tr.base, suffix: tr.suffix, label: tr.en });
+    tries.push({ q: name, suffix: '', label: name });
+    const seen = {};
+    const uniq = tries.filter(function (t) {
+      const k = String(t.q).toLowerCase();
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+    res = yield uniq.map(function (t) { return ['name', 'en', t.q]; });
+    for (let i = 0; i < uniq.length; i++) {
+      cands = filterCands_(listOf_(res[i]), 'en', num, setIds, sets, uniq[i].suffix);
+      if (cands.length) {
+        return yield* finishFlow_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten für „' + uniq[i].label + '".', sets);
+      }
+    }
+  } else {
+    cands = filterCands_(enSets(), 'en', num, setIds, sets, null);
+    if (cands.length) return yield* finishFlow_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten.', sets);
+  }
+
+  // Stufe 3: Set-Auswahl (braucht eine Nummer)
+  if (!num) {
+    notes.push('Keine Karte gefunden. Mit Nummer (z. B. 025/165) kannst du das Set aus einer Liste wählen.');
+    return { stage: 'none', cards: [], notes: notes, inputName: name };
+  }
+  if (!sets) sets = dataOf_((yield [['sets']])[0]);
+  notes.push('Keine Karte gefunden. Wähle das Set, dann wird Nummer ' + num.raw + ' darin gesucht.');
+  return { stage: 'pickSet', cards: [], notes: notes, inputName: name, number: input.number, sets: setPickerList_(sets, num, setIds) };
+}
+
+/**
+ * Treffer fertig machen: die Details aller Kandidaten in einer Runde (#38 S2). Bei englischen Treffern holt dieselbe
+ * Runde die IDs auch deutsch (gibt es die Karte auf Deutsch, ist sie kein Ersatz), bei deutschen ohne Bild die
+ * englischen Daten fürs Bild. Fehlt einer deutschen Karte danach noch der Preis, holt eine Runde mehr die englischen.
+ */
+function* finishFlow_(lang, cands, notes, inputName, enNote, sets) {
+  if (cands.length > MAX_CANDIDATES) {
+    notes.push(cands.length + ' Treffer – bitte Nummer oder Set ergänzen.');
+    return { stage: lang, tooMany: cands.length, cards: [], notes: notes, inputName: inputName };
+  }
+  const need = cands.map(function (c) { return ['card', lang, c.id]; });
+  const other = {}; // Kandidat -> Stelle der Antwort in der anderen Sprache
+  cands.forEach(function (c, i) {
+    if (lang === 'en' || !c.image) { other[i] = need.length; need.push(['card', lang === 'en' ? 'de' : 'en', c.id]); }
+  });
+  const res = yield need;
+  const found = cands.map(function (c, i) {
+    const main = res[i].ok ? res[i].data : null;
+    const alt = other[i] != null && res[other[i]].ok ? res[other[i]].data : null;
+    if (lang === 'en') return alt ? { lang: 'de', card: alt, en: main } : { lang: 'en', card: main, en: null };
+    return { lang: 'de', card: main, en: alt, asked: other[i] != null };
+  });
+  const late = [];
+  found.forEach(function (f, i) { if (f.card && f.lang === 'de' && !f.en && !f.asked && !cardmarket_(f.card)) late.push(i); });
+  if (late.length) {
+    const more = yield late.map(function (i) { return ['card', 'en', cands[i].id]; });
+    late.forEach(function (i, k) { if (more[k].ok) found[i].en = more[k].data; });
+  }
+  const cards = cands.map(function (c, i) {
+    const f = found[i];
+    if (f.card) return cardInfo_(f.card, f.lang, f.en);
+    // ohne Details (tcgdex hat sie gerade nicht geliefert): die Kurzform, das Antippen holt sie nach
+    const s = sets && sets[f.lang] ? sets[f.lang][c.setId] : null;
+    return { id: c.id, lang: f.lang, name: c.name, localId: c.localId, setId: c.setId, setName: s ? s.name : c.setId,
+      image: c.image || (f.en && f.en.image) || '' };
+  });
+  if (enNote && cards.some(function (c) { return c.lang === 'en'; })) notes.push(enNote);
+  return { stage: lang, cards: cards, notes: notes, inputName: inputName };
+}
+
+/**
+ * Einzelkarte mit Preis (ein Treffer ohne Details, die Set-Auswahl). Eine deutsche Karte ohne Bild oder Preis ergänzen
+ * die englischen Daten derselben ID; noImage: das Bild fehlt schon in der Kurzform, dann kommen sie gleich mit.
+ */
+function* cardFlow_(id, lang, noImage) {
+  lang = lang === 'en' ? 'en' : 'de';
+  const need = [['card', lang, id]];
+  if (lang === 'de' && noImage) need.push(['card', 'en', id]);
+  const res = yield need;
+  const card = dataOf_(res[0]);
+  if (!card) throw new Error('Karte ' + id + ' nicht gefunden.');
+  let en = res[1] && res[1].ok ? res[1].data : null;
+  if (lang === 'de' && !res[1] && !(cardmarket_(card) && card.image)) {
+    const more = yield [['card', 'en', id]];
+    en = more[0].ok ? more[0].data : null;
+  }
+  return cardInfo_(card, lang, en);
+}
+
+/**
+ * Letzte Stufe: Karte über Set + Nummer, deutsch vor englisch (beide Kartenlisten in einer Runde). „DP 16“ zählt wie
+ * „DP16“. Passt keine Nummer genau, zählen nur die Ziffern, wenn genau eine Karte des Sets sie hat („DS 62“ im Set
+ * Delta Species -> 62).
+ */
+function* setNumberFlow_(setId, number) {
+  const num = parseNumberInput_(number);
+  if (!num) throw new Error('Bitte eine Nummer angeben.');
+  const joined = normalizeNumber_(num.raw.replace(/\s+/g, ''));
+  const res = yield [['set', 'de', setId], ['set', 'en', setId]];
+  const lists = [];
+  let hit = null;
+  for (let i = 0; i < 2 && !hit; i++) {
+    const set = dataOf_(res[i]);
+    if (!set || !Array.isArray(set.cards)) continue;
+    const c = set.cards.filter(function (x) {
+      const n = normalizeNumber_(x.localId);
+      return n === num.norm || n === joined;
+    })[0];
+    if (c) hit = { lang: i ? 'en' : 'de', card: c };
+    else lists.push({ lang: i ? 'en' : 'de', cards: set.cards });
+  }
+  const digits = joined.replace(/\D/g, '');
+  for (let i = 0; !hit && digits && i < lists.length; i++) {
+    const d = lists[i].cards.filter(function (x) {
+      const cd = String(x.localId == null ? '' : x.localId).replace(/\D/g, '');
+      return cd !== '' && Number(cd) === Number(digits);
+    });
+    if (d.length === 1) hit = { lang: lists[i].lang, card: d[0] };
+  }
+  if (!hit) throw new Error('Nummer ' + num.raw + ' gibt es in diesem Set nicht.');
+  return yield* cardFlow_(String(hit.card.id), hit.lang, !hit.card.image);
+}
+
+/** Kurzform-Liste von tcgdex -> Kandidaten, lokal exakt gefiltert (Nummer, Set, Kartenzahl, Zusatz wie „ex“). */
+function filterCands_(list, lang, num, setIds, sets, suffix) {
+  let cands = (list || []).map(function (c) {
     return { id: String(c.id), localId: String(c.localId), name: String(c.name || ''), image: c.image || '', setId: setIdOf_(c), lang: lang };
   }).filter(function (c) {
     if (isPocketSet_(c.setId)) return false;
@@ -3314,95 +3535,177 @@ function summarizeCard_(card, lang) {
   };
 }
 
-function finishCandidates_(lang, cands, notes, inputName, enNote, sets) {
-  if (cands.length > MAX_CANDIDATES) {
-    notes.push(cands.length + ' Treffer – bitte Nummer oder Set ergänzen.');
-    return { stage: lang, tooMany: cands.length, cards: [], notes: notes, inputName: inputName };
+/** Karte für Treffer und Bestätigung, mit Preisen. en: englische Daten derselben ID (Bild und Preis, falls sie fehlen). */
+function cardInfo_(card, lang, en) {
+  let cm = cardmarket_(card);
+  let fromEn = false;
+  if (!cm && lang === 'de' && en) {
+    cm = cardmarket_(en);
+    fromEn = !!cm;
   }
-  const details = fetchAllJson_(cands.map(function (c) { return apiUrl_(lang, 'cards/' + encodeURIComponent(c.id)); }));
-  const langs = cands.map(function () { return lang; });
-  // Treffer zwischenspeichern: Antippen (getCardDetail) und Hinzufügen brauchen dieselben Daten (#36 A1)
-  const toCache = details.map(function (d, i) { return { lang: lang, id: cands[i].id, data: d.ok ? d.data : null }; });
-  if (lang === 'en' && cands.length) {
-    // IDs sind in de und en gleich: gibt es die Karte auf Deutsch, ist sie kein Ersatz
-    const de = fetchAllJson_(cands.map(function (c) { return apiUrl_('de', 'cards/' + encodeURIComponent(c.id)); }));
-    de.forEach(function (d, i) {
-      if (!d.ok) return;
-      details[i] = d; langs[i] = 'de';
-      toCache.push({ lang: 'de', id: cands[i].id, data: d.data });
+  const s = summarizeCard_(card, lang);
+  if (!s.image && lang === 'de' && en && en.image) s.image = en.image;
+  s.priceFromEn = fromEn;
+  s.prices = { base: priceFor_(cm, s.baseVariant), reverse: priceFor_(cm, 'reverse'), firstEdition: priceFor_(cm, 'firstEdition') };
+  s.priceUpdated = cm ? ymdOf_(cm.updated) : '';
+  return s;
+}
+
+/** Antwort einer Runde -> Daten; nicht gefunden -> null; Fehler -> Ausnahme wie bei fetchJson_. */
+function dataOf_(a) {
+  if (a && a.ok) return a.data;
+  if (a && a.notFound) return null;
+  throw new Error('tcgdex nicht erreichbar (' + ((a && a.error) || '?') + ')');
+}
+
+/** Kartenliste aus einer Antwort, nicht gefunden -> [] */
+function listOf_(a) {
+  const d = dataOf_(a);
+  return Array.isArray(d) ? d : [];
+}
+
+/** tcgdex-Adresse für einen Bedarf: ['card' | 'name' | 'set', lang, …]; ['sets', lang] ist die Liste aller Sets. */
+function needUrl_(n) {
+  if (n[0] === 'card') return apiUrl_(n[1], 'cards/' + encodeURIComponent(n[2]));
+  if (n[0] === 'name') return apiUrl_(n[1], 'cards', { name: n[2] });
+  if (n[0] === 'set') return apiUrl_(n[1], 'sets/' + encodeURIComponent(n[2]));
+  return apiUrl_(n[1], 'sets');
+}
+
+/** Set-Liste wie loadSets_ aus den tcgdex-Listen aller Sets (die Suche im Browser liest das Blatt Sets nicht). */
+function setsOf_(de, en) {
+  const out = { de: {}, en: {}, order: { de: [], en: [] } };
+  [['de', de], ['en', en]].forEach(function (p) {
+    (Array.isArray(p[1]) ? p[1] : []).forEach(function (s) {
+      if (!s || !s.id || isPocketSet_(s.id) || out[p[0]][s.id]) return;
+      const cc = s.cardCount || {};
+      out[p[0]][s.id] = { id: String(s.id), name: String(s.name || ''), logo: String(s.logo || ''), symbol: String(s.symbol || ''),
+        official: Number(cc.official) || null, total: Number(cc.total) || null, releaseDate: '' };
+      out.order[p[0]].push(String(s.id));
     });
-  }
-  cacheCards_(toCache);
-  const cards = cands.map(function (c, i) {
-    if (details[i].ok) return summarizeCard_(details[i].data, langs[i]);
-    const s = sets[langs[i]][c.setId];
-    return { id: c.id, lang: langs[i], name: c.name, localId: c.localId, setId: c.setId, setName: s ? s.name : c.setId, image: c.image };
   });
-  if (enNote && langs.indexOf('en') >= 0) notes.push(enNote);
-  fillMissingImages_(cards);
-  return { stage: lang, cards: cards, notes: notes, inputName: inputName };
+  return out;
+}
+
+/** Datum (Text, Sekunden oder Millisekunden) -> 'yyyy-MM-dd' in der Zeitzone des Rechners, ohne Dienste. */
+function ymdOf_(x) {
+  if (x == null || x === '') return '';
+  const d = new Date(typeof x === 'number' && x < 1e12 ? x * 1000 : x);
+  if (isNaN(d.getTime())) return String(x);
+  const two = function (n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
 }
 
 /**
- * Suche in bis zu drei Stufen: deutsch, englisch mit übersetztem Namen, Set-Auswahl.
- * input = {name, number, set}
+ * Quelltext des Suchablaufs für die Seite (Vorlage Ui.html): genau diese Funktionen, in einer eigenen Hülle, dazu die
+ * Werte, die sie brauchen. Klappt das nicht, bekommt die Seite null und sucht über den Server.
  */
+function searchJs_() {
+  try {
+    const fns = [searchFlow_, finishFlow_, cardFlow_, setNumberFlow_, filterCands_, cardInfo_, dataOf_, listOf_, needUrl_,
+      setsOf_, ymdOf_, apiUrl_, setIdOf_, cardmarket_, priceFor_, baseVariant_, summarizeCard_, setPickerList_, matchSets_,
+      sizeOk_, squash_, normalizeNumber_, parseNumberInput_, isPocketSet_, splitSuffix_, toNum_];
+    const vals = { API: API, MAX_CANDIDATES: MAX_CANDIDATES, VARIANT_LABELS: VARIANT_LABELS };
+    const res = { SUFFIX_RE: SUFFIX_RE, POCKET_SET_RE: POCKET_SET_RE };
+    const src = '(function () {\n' +
+      Object.keys(vals).map(function (k) { return 'var ' + k + ' = ' + JSON.stringify(vals[k]) + ';\n'; }).join('') +
+      Object.keys(res).map(function (k) { return 'var ' + k + ' = ' + String(res[k]) + ';\n'; }).join('') +
+      fns.map(String).join('\n') +
+      '\nreturn { search: searchFlow_, card: cardFlow_, setNumber: setNumberFlow_, url: needUrl_, sets: setsOf_ };\n})()';
+    // nur, wenn der Quelltext wirklich so ankommt (z. B. kein „</script>“ darin, das die Seite abschneiden würde)
+    return /<\/script/i.test(src) || fns.some(function (f) { return String(f).indexOf(f.name) < 0; }) ? 'null' : src;
+  } catch (e) {
+    return 'null';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5b. Suche auf dem Server (wenn der Browser tcgdex nicht selbst erreicht) und Hinzufügen
+// ---------------------------------------------------------------------------
+
+/**
+ * Führt einen Suchablauf auf dem Server aus: jede Runde parallel (fetchAllJson_), Karten und Namenslisten aus dem
+ * Zwischenspeicher (#36 A1, #38 S3), Sets und Übersetzung aus der Tabelle. Was neu von tcgdex kommt, merkt er sich.
+ */
+function runFlow_(flow) {
+  let step = flow.next();
+  for (let round = 1; !step.done; round++) {
+    const answers = serveNeeds_(step.value);
+    tmrStep_('Runde ' + round);
+    step = flow.next(answers);
+  }
+  return step.value;
+}
+
+/** Bedarf einer Runde -> Antworten (siehe Suchablauf). */
+function serveNeeds_(needs) {
+  const out = [];
+  const keys = needs.map(function (n) { return n[0] === 'card' ? cardCacheKey_(n[1], n[2]) : ''; });
+  let hits = {};
+  if (keys.some(Boolean)) {
+    try { hits = CacheService.getScriptCache().getAll(keys.filter(Boolean)) || {}; } catch (e) { hits = {}; }
+  }
+  const urls = [], at = [];
+  needs.forEach(function (n, i) {
+    if (n[0] === 'sets') { out[i] = { ok: true, data: cachedSets_() }; return; }
+    if (n[0] === 'tr') { out[i] = { ok: true, data: translateName_(n[1]) }; return; }
+    if (n[0] === 'card' && hits[keys[i]]) {
+      try { out[i] = { ok: true, data: JSON.parse(hits[keys[i]]) }; return; } catch (e) { /* neu holen */ }
+    }
+    if (n[0] === 'name') {
+      const list = cacheGetJson_(nameListKey_(n[1], n[2]));
+      if (Array.isArray(list)) { out[i] = { ok: true, data: list }; return; }
+    }
+    urls.push(needUrl_(n));
+    at.push(i);
+  });
+  const put = [];
+  fetchAllJson_(urls).forEach(function (a, k) {
+    const i = at[k], n = needs[i];
+    if (n[0] === 'name' && a.ok) {
+      a = { ok: true, data: slimList_(a.data) };
+      cachePutJson_(nameListKey_(n[1], n[2]), a.data, NAME_LIST_SECS);
+    }
+    if (n[0] === 'card') put.push({ lang: n[1], id: n[2], data: a.ok ? a.data : null });
+    out[i] = a;
+  });
+  cacheCards_(put);
+  return out;
+}
+
+/** Kartensuche über den Server. input = {name, number, set} */
 function searchCards(input) {
-  input = input || {};
-  const name = String(input.name || '').trim();
-  const num = parseNumberInput_(input.number);
-  const setText = String(input.set || '').trim();
-  if (!name && !(num && setText)) throw new Error('Bitte einen Namen eingeben – oder Set und Nummer.');
-
-  const sets = cachedSets_(); // einmal pro Suche, ohne das Blatt zu lesen (#38 S3)
-  const notes = [];
-  let setIds = null;
-  if (setText) {
-    const ids = matchSets_(sets, setText);
-    if (ids.length) setIds = ids;
-    else notes.push('Set „' + setText + '" ist nicht im Set-Cache, der Set-Filter wird ignoriert. Evtl. „Übersetzung und Sets aktualisieren" ausführen.');
+  tmrStart_('searchCards');
+  try {
+    return runFlow_(searchFlow_(input));
+  } finally {
+    tmrDone_();
   }
-  if (!name && !setIds) throw new Error('Set „' + setText + '" nicht gefunden. Bitte einen Namen eingeben.');
+}
 
-  // Stufe 1: deutsch (auch „Glurak ex" statt „Glurak-ex")
-  let cands = findCandidates_('de', name, num, setIds, sets, null);
-  if (!cands.length && name) {
-    const sp = splitSuffix_(name);
-    if (sp.suffix) {
-      cands = findCandidates_('de', sp.base, num, setIds, sets, sp.suffix)
-        .filter(function (c) { return squash_(c.name).indexOf(squash_(name)) >= 0; });
-    }
+/** Einzelkarte mit Preis für die Bestätigung (nur noch für Treffer ohne Details). */
+function getCardDetail(id, lang) {
+  tmrStart_('getCardDetail');
+  try {
+    return runFlow_(cardFlow_(id, lang));
+  } finally {
+    tmrDone_();
   }
-  if (cands.length) return finishCandidates_('de', cands, notes, name, '', sets);
+}
 
-  // Stufe 2: englisch mit übersetztem Namen
-  if (name) {
-    const tries = [];
-    const tr = translateName_(name);
-    if (tr) tries.push({ q: tr.base, suffix: tr.suffix, label: tr.en });
-    tries.push({ q: name, suffix: '', label: name });
-    const seen = {};
-    for (let i = 0; i < tries.length; i++) {
-      const t = tries[i];
-      if (seen[t.q.toLowerCase()]) continue;
-      seen[t.q.toLowerCase()] = true;
-      cands = findCandidates_('en', t.q, num, setIds, sets, t.suffix);
-      if (cands.length) {
-        return finishCandidates_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten für „' + t.label + '".', sets);
-      }
-    }
-  } else {
-    cands = findCandidates_('en', '', num, setIds, sets, null);
-    if (cands.length) return finishCandidates_('en', cands, notes, name, 'Keine deutsche Karte gefunden – englische Daten.', sets);
+/** Set-Auswahl: Karte über Set und Nummer. */
+function getCardBySetNumber(setId, number) {
+  tmrStart_('getCardBySetNumber');
+  try {
+    return runFlow_(setNumberFlow_(setId, number));
+  } finally {
+    tmrDone_();
   }
+}
 
-  // Stufe 3: Set-Auswahl (braucht eine Nummer)
-  if (!num) {
-    notes.push('Keine Karte gefunden. Mit Nummer (z. B. 025/165) kannst du das Set aus einer Liste wählen.');
-    return { stage: 'none', cards: [], notes: notes, inputName: name };
-  }
-  notes.push('Keine Karte gefunden. Wähle das Set, dann wird Nummer ' + num.raw + ' darin gesucht.');
-  return { stage: 'pickSet', cards: [], notes: notes, inputName: name, number: input.number, sets: setPickerList_(sets, num, setIds) };
+/** Für die Suche im Browser (Stufe 2): Übersetzung eines deutschen Namens, {en, base, suffix} oder null. */
+function translateCardName(name) {
+  return translateName_(String(name == null ? '' : name));
 }
 
 function setPickerList_(sets, num, setIds) {
@@ -3424,53 +3727,6 @@ function setPickerList_(sets, num, setIds) {
   }
   if (pref.length < list.length) pref.forEach(function (s) { s.preferred = true; });
   return list; // volle Liste, die Vorauswahl ist nur markiert
-}
-
-/** Einzelkarte mit Preis für die Bestätigung. */
-function getCardDetail(id, lang) {
-  const card = fetchCard_(lang, id);
-  if (!card) throw new Error('Karte ' + id + ' nicht gefunden.');
-  const p = cardmarketWithFallback_(card, lang);
-  const s = summarizeCard_(card, lang);
-  s.priceFromEn = p.fromEn;
-  s.prices = {
-    base: priceFor_(p.cm, s.baseVariant),
-    reverse: priceFor_(p.cm, 'reverse'),
-    firstEdition: priceFor_(p.cm, 'firstEdition')
-  };
-  s.priceUpdated = p.cm ? dateText_(p.cm.updated) : '';
-  return s;
-}
-
-/**
- * Letzte Stufe: Karte über Set + Nummer (erst deutsch, dann englisch). „DP 16“ zählt wie „DP16“. Passt keine
- * Nummer genau, zählen nur die Ziffern, wenn genau eine Karte des Sets sie hat („DS 62“ im Set Delta Species -> 62).
- */
-function getCardBySetNumber(setId, number) {
-  const num = parseNumberInput_(number);
-  if (!num) throw new Error('Bitte eine Nummer angeben.');
-  const joined = normalizeNumber_(num.raw.replace(/\s+/g, ''));
-  const langs = ['de', 'en'];
-  const lists = [];
-  for (let i = 0; i < langs.length; i++) {
-    const set = fetchJson_(apiUrl_(langs[i], 'sets/' + encodeURIComponent(setId)));
-    if (!set || !Array.isArray(set.cards)) continue;
-    const c = set.cards.filter(function (x) {
-      const n = normalizeNumber_(x.localId);
-      return n === num.norm || n === joined;
-    })[0];
-    if (c) return getCardDetail(c.id, langs[i]);
-    lists.push({ lang: langs[i], cards: set.cards });
-  }
-  const digits = joined.replace(/\D/g, '');
-  for (let i = 0; digits && i < lists.length; i++) {
-    const d = lists[i].cards.filter(function (x) {
-      const cd = String(x.localId == null ? '' : x.localId).replace(/\D/g, '');
-      return cd !== '' && Number(cd) === Number(digits);
-    });
-    if (d.length === 1) return getCardDetail(d[0].id, lists[i].lang);
-  }
-  throw new Error('Nummer ' + num.raw + ' gibt es in diesem Set nicht.');
 }
 
 /** Erscheinungsdatum eines Sets: aus dem Blatt Sets, sonst einmal holen und speichern (setReleaseDates_). */
@@ -3625,7 +3881,8 @@ function addRidPut_(rid, res) {
 /**
  * Karte speichern (saveStore_). req = {id, lang ('de'|'en' Datensprache),
  * variant: 'base'|'reverse'|'firstEdition', condition, qty, inputName, cardLang (Sprache der Karte, Standard 'DE'),
- * version (Sonderversion, Standard ''), ownPrice (Zahl|null|''), rid (Anfrage-ID, optional)}
+ * version (Sonderversion, Standard ''), ownPrice (Zahl|null|''), rid (Anfrage-ID, optional),
+ * cards (optional: die Kartendaten von der Suche im Browser, [{lang, id, data}], dann kein Abruf bei tcgdex)}
  * -> {eid, key, gkey, count, message, delta (collDelta_)}; schon gespeicherte rid: dieselbe Antwort mit repeat: true,
  * ohne delta
  */
@@ -3641,7 +3898,8 @@ function addCard(req) {
   const cardLang = langCode_(req.cardLang);
   const version = versionText_(req.version);
   const ownPrice = ownPriceOf_(req.ownPrice);
-  const card = fetchCard_(lang, req.id);
+  const given = givenCards_(req.cards);
+  const card = fetchCard_(lang, req.id, null, given);
   if (!card) throw new Error('Karte ' + req.id + ' nicht gefunden – nichts gespeichert.');
   tmrStep_('tcgdex');
 
@@ -3651,7 +3909,7 @@ function addCard(req) {
   if (req.variant === 'firstEdition') variant = 'firstEdition';
   const cond = condCode_(req.condition) || '';
 
-  const p = cardmarketWithFallback_(card, lang);
+  const p = cardmarketWithFallback_(card, lang, given);
   const price = priceFor_(p.cm, variant);
   const priceDate = p.cm ? dateText_(p.cm.updated) : '';
   const set = card.set || {};
@@ -4232,16 +4490,18 @@ function setGroupOwnPrice(gkey, price) {
 /**
  * Freie Gruppe mit einer tcgdex-Karte verknüpfen. dataLang 'de'|'en', variant 'base'|'reverse'|'firstEdition'
  * (auch 'normal'/'holo'). Zustand, Sprache, Sonderversion, Anzahl, Herkunft, Zusatzwerte und eigener Preis bleiben.
- * Zeilen „von Hand“ mit nun gleichem Schlüssel werden zusammengelegt. -> {gkey (neu), delta (collDelta_)}
+ * Zeilen „von Hand“ mit nun gleichem Schlüssel werden zusammengelegt. cards wie bei addCard (optional).
+ * -> {gkey (neu), delta (collDelta_)}
  */
-function linkFreeGroup(gkey, cardId, dataLang, variant) {
+function linkFreeGroup(gkey, cardId, dataLang, variant, cards) {
   tmrStart_('linkFreeGroup');
   ensureSchema_();
   gkey = String(gkey == null ? '' : gkey);
   const lang = dataLang === 'en' ? 'en' : 'de';
-  const card = fetchCard_(lang, cardId);
+  const given = givenCards_(cards);
+  const card = fetchCard_(lang, cardId, null, given);
   if (!card) throw new Error('Karte ' + cardId + ' nicht gefunden, nichts geändert.');
-  const p = cardmarketWithFallback_(card, lang); // ergänzt auch das Bild aus den englischen Daten
+  const p = cardmarketWithFallback_(card, lang, given); // ergänzt auch das Bild aus den englischen Daten
   const s = summarizeCard_(card, lang);
   const v = VARIANT_LABELS[variant] ? variant : s.baseVariant;
   const price = priceFor_(p.cm, v);

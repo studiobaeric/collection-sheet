@@ -10,6 +10,7 @@ const RAW = fs.readFileSync(SRC, 'utf8');
 const MODE_LET = "<?!= mode ?>";
 const INCLUDE_LET = "<?!= mode === 'sidebar' ? include('ImportUi') : '' ?>";
 const START_LET = '<?!= typeof start === "string" ? start : "" ?>';
+const SEARCH_LET = "<?!= typeof searchJs_ === 'function' ? searchJs_() : 'null' ?>";
 
 let pass = 0, failCount = 0;
 function ok(label, cond, extra) {
@@ -271,10 +272,11 @@ function seedCollection(S) {
 const UI_VERSION = /var UI_FILE_VERSION = '([^']*)'/.exec(RAW)[1];
 const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-PANE</div><script>var impFileVersion = \'' + UI_VERSION + '\'; var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
-function render(mode, include, start) {
+function render(mode, include, start, search) {
   // wie HtmlService: den Import-Teil gibt es nur in der Seitenleiste (#36 A3)
   const imp = mode === 'sidebar' ? (include == null ? IMPORT_STUB : include) : '';
-  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(INCLUDE_LET, imp);
+  // ohne Suchablauf (search) sucht die Seite über den Stub-Server
+  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(SEARCH_LET, search || 'null').replace(INCLUDE_LET, imp);
 }
 
 function boot(mode, opts) {
@@ -358,10 +360,12 @@ function boot(mode, opts) {
   {
     const idxs = []; let k = -1;
     while ((k = RAW.indexOf('<?', k + 1)) >= 0) idxs.push(k);
-    ok('genau drei Scriptlets in Ui.html', idxs.length === 3, idxs);
+    ok('genau vier Scriptlets in Ui.html', idxs.length === 4, idxs);
     ok('Scriptlet 1 ist MODE', RAW.substr(idxs[0], MODE_LET.length) === MODE_LET && /var MODE = '<\?!= mode \?>';/.test(RAW));
     ok('Scriptlet 2 ist START (fehlt start, bleibt es leer)', RAW.substr(idxs[1], START_LET.length) === START_LET && RAW.indexOf("var START = '" + START_LET + "';") >= 0);
-    ok('Scriptlet 3 ist include(ImportUi), nur in der Seitenleiste', RAW.substr(idxs[2], INCLUDE_LET.length) === INCLUDE_LET);
+    ok('Scriptlet 3 ist der Suchablauf (searchJs_, sonst null) in einem eigenen Skript', RAW.substr(idxs[2], SEARCH_LET.length) === SEARCH_LET &&
+      RAW.indexOf('<script>\n// Suchablauf aus Code.gs') >= 0 && RAW.indexOf('window.SEARCH = ' + SEARCH_LET + ';\n</script>') >= 0);
+    ok('Scriptlet 4 ist include(ImportUi), nur in der Seitenleiste', RAW.substr(idxs[3], INCLUDE_LET.length) === INCLUDE_LET);
     const incAt = RAW.indexOf(INCLUDE_LET);
     ok('include steht nach dem Skript am Ende von body', incAt > RAW.lastIndexOf('</script>') && incAt < RAW.indexOf('</body>'));
     ok('kein Gedankenstrich (—) in Ui.html', RAW.indexOf('—') < 0);

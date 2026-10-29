@@ -41,8 +41,8 @@ function evaluateTemplate(env, tpl, includeImpl) {
   const html = content.replace(/<\?(!=|=)?([\s\S]*?)\?>/g, (m, kind, expr) => {
     seen.push(m);
     if (!kind) throw new Error('Scriptlet ohne Ausgabe wird hier nicht unterstützt: ' + m);
-    // Vorlagen-Eigenschaften (mode, start) + globale Serverfunktionen (include)
-    const val = new Function('mode', 'start', 'include', 'return (' + expr + ');')(tpl.mode, tpl.start, includeImpl);
+    // Vorlagen-Eigenschaften (mode, start) + globale Serverfunktionen (include, searchJs_)
+    const val = new Function('mode', 'start', 'include', 'searchJs_', 'return (' + expr + ');')(tpl.mode, tpl.start, includeImpl, env.ctx.searchJs_);
     return kind === '!=' ? String(val) : escHtml(val);
   });
   return { html, scriptlets: seen };
@@ -69,7 +69,7 @@ function leaks(x, where, out) {
 // ---------------------------------------------------------------------------
 // Seite starten: echte Vorlage + echter Server
 // ---------------------------------------------------------------------------
-function boot(env, mode) {
+function boot(env, mode, opts) {
   let tpl;
   if (mode === 'sidebar') {
     const before = env.ui.sidebars.length;
@@ -91,7 +91,8 @@ function boot(env, mode) {
     return name === 'ImportUi' && !(REAL_IMPORTUI && real) ? IMPORT_STUB : real;
   };
   const ev = evaluateTemplate(env, tpl, includeImpl);
-  t.ok(mode + ': genau drei Scriptlets ausgewertet (mode, start, include)', ev.scriptlets.length === 3, ev.scriptlets);
+  t.ok(mode + ': genau vier Scriptlets ausgewertet (mode, start, Suchablauf, include)', ev.scriptlets.length === 4, ev.scriptlets);
+  t.ok(mode + ': der Suchablauf kommt mit (searchJs_)', ev.html.indexOf('window.SEARCH = (function () {') >= 0);
   t.ok(mode + ': START ist leer', /var START = '';/.test(ev.html));
   // die Handy-Seite hat keinen Import-Teil (#36 A3)
   t.ok(mode + ': include(ImportUi) ' + (mode === 'sidebar' ? 'aufgerufen' : 'nicht aufgerufen'), J(includeCalls) === J(mode === 'sidebar' ? ['ImportUi'] : []), includeCalls);
@@ -133,6 +134,7 @@ function boot(env, mode) {
         }
       };
       win.google = { script: { get run() { return makeRun(); } } };
+      if (opts && opts.fetch) win.fetch = opts.fetch; // tcgdex für die Suche direkt im Browser (#43)
     }
   });
   const win = dom.window, doc = win.document;
@@ -319,15 +321,18 @@ function seedImport(env) {
     try { new vm.Script(code, { filename: 'Code.gs' }); } catch (e) { err = e.message; }
     t.ok('Code.gs kompiliert', !err, err);
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
+    const searchSrc = H.createEnv({ files: FILES.slice() }).ctx.searchJs_();
+    t.ok('searchJs_ liefert den Suchablauf (nicht null)', /^\(function \(\) \{/.test(searchSrc) && searchSrc.length > 5000, searchSrc.slice(0, 80));
     ['sidebar', 'web'].forEach(mode => {
       const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '')
+        .replace("<?!= typeof searchJs_ === 'function' ? searchJs_() : 'null' ?>", () => searchSrc)
         .replace(/<\?!= mode === 'sidebar' \? include\('ImportUi'\) : '' \?>/g, mode === 'sidebar' ? IMPORT_STUB : '');
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
       let bad = [];
       scripts.forEach((s, i) => { try { new vm.Script(s, { filename: 'Ui.html#' + i }); } catch (e) { bad.push(i + ': ' + e.message); } });
       t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= (mode === 'sidebar' ? 2 : 1) && bad.length === 0, bad);
     });
-    t.ok('Ui.html: "<?" nur in den drei Scriptlets', (raw.match(/<\?/g) || []).length === 3);
+    t.ok('Ui.html: "<?" nur in den vier Scriptlets', (raw.match(/<\?/g) || []).length === 4);
     t.ok('Ui.html: kein Gedankenstrich (—)', raw.indexOf('—') < 0);
   }
 
@@ -336,12 +341,13 @@ function seedImport(env) {
   {
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
     const env = makeEnv();
-    const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
+    // call('…') und der Server-Weg der Suche (viaDirect(…, 'searchCards', [q]))
+    const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g), ...raw.matchAll(/\}, '([A-Za-z0-9_]+)', \[/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
     const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
-      'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
+      'setPrereleases', 'takeoverPreview', 'takeoverRun', 'translateCardName', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
     // Argumentreihenfolge wie in Code.gs
     const code = fs.readFileSync(path.join(SRC, 'Code.gs'), 'utf8');
@@ -349,7 +355,9 @@ function seedImport(env) {
     t.eq('adjustEntry(eid, delta)', sig('adjustEntry'), ['eid', 'delta']);
     t.eq('editEntry(eid, changes, qty)', sig('editEntry'), ['eid', 'changes', 'qty']);
     t.eq('setGroupOwnPrice(gkey, price)', sig('setGroupOwnPrice'), ['gkey', 'price']);
-    t.eq('linkFreeGroup(gkey, cardId, dataLang, variant)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant']);
+    t.eq('linkFreeGroup(gkey, cardId, dataLang, variant, cards)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant', 'cards']);
+    t.eq('getCardDetail(id, lang)', sig('getCardDetail'), ['id', 'lang']);
+    t.eq('getCardBySetNumber(setId, number)', sig('getCardBySetNumber'), ['setId', 'number']);
     t.eq('searchCollection(query, setText, opts)', sig('searchCollection'), ['query', 'setText', 'opts']);
     t.eq('revertAdjust(token)', sig('revertAdjust'), ['token']);
   }
@@ -946,6 +954,120 @@ function seedImport(env) {
     t.ok('−1 auf alte Zeile geht', nu.data().find(r => r.key === 'swsh3-025|normal||NM|DE').count === 1);
     checkUiMatchesServer(U, 'nach Umstieg');
     t.ok('keine Skriptfehler (Umstieg)', U.errors.length === 0, U.errors);
+  }
+
+  // ---- 14b. Suche direkt im Browser (#43): echter Suchablauf aus searchJs_, die tcgdex-Attrappe antwortet auf fetch ----
+  t.section('Suche direkt im Browser');
+  {
+    const envD = makeEnv();
+    envD.ctx.onOpen();
+    envD.ctx.setupAll_();
+    const fetched = [];
+    const fakeFetch = url => {
+      fetched.push(String(url));
+      const body = envD.DB[decodeURIComponent(String(url).slice(H.API.length))];
+      return Promise.resolve({ status: body === undefined ? 404 : 200, ok: body !== undefined,
+        json: () => Promise.resolve(JSON.parse(JSON.stringify(body === undefined ? {} : body))) });
+    };
+    envD.ctx.addFreeCard({ name: 'Unbekannt', setName: 'Grundset', number: '4', qty: 1 }); // zum Verknüpfen weiter unten
+    const D = boot(envD, 'sidebar', { fetch: fakeFetch });
+    const $d = D.$;
+    await D.settle();
+    t.ok('Seite hat den Suchablauf', !!D.win.SEARCH && typeof D.win.SEARCH.search === 'function');
+    D.type($d('fName'), 'Glurak');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    const tiles = () => [...$d('addResults').querySelectorAll('.tile')];
+    t.ok('Glurak: drei Treffer, ohne Skriptaufruf', tiles().length === 3 && D.calls('searchCards').length === 0, D.callLog.map(c => c.fn));
+    t.ok('direkt bei tcgdex: Namensliste, Details, englische Daten für das fehlende Bild', fetched.some(u => /\/de\/cards\?name=Glurak$/.test(u)) &&
+      fetched.some(u => /\/de\/cards\/swsh3-136$/.test(u)) && fetched.some(u => /\/en\/cards\/base1-4$/.test(u)), fetched);
+    const k4 = tiles().findIndex(el => /· 4\//.test(el.textContent));
+    D.click(tiles()[k4]);
+    await D.settle();
+    t.ok('Antippen: Bestätigung sofort, mit Preis, ohne getCardDetail', !!$d('cAdd') && D.calls('getCardDetail').length === 0 &&
+      /Trend: 1,50/.test($d('cPrice').textContent) && /Holo/.test($d('addResults').textContent), [D.callLog.map(c => c.fn), $d('cPrice').textContent]);
+    const n0 = envD.fetchLog.length;
+    await D.clickSettle($d('cAdd'));
+    const add = D.lastCall('addCard');
+    t.ok('Hinzufügen schickt die Kartendaten mit (deutsch und englisch)', !!add && J((add.args[0].cards || []).map(c => c.lang + ':' + c.id)) === J(['de:base1-4', 'en:base1-4']),
+      add && add.args[0]);
+    t.ok('der Server holt die Karte nicht noch einmal', !!add && !add.error && !envD.fetchLog.slice(n0).some(u => /\/cards\//.test(u)), envD.fetchLog.slice(n0));
+    t.ok('gespeichert mit dem Bild aus den englischen Daten', /en\/x\/base1-4/.test(envD.data().find(r => r.id === 'base1-4').img));
+    // nichts Deutsches: nur die Übersetzung fragt beim Server
+    D.type($d('fName'), 'Mewtu');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    t.ok('Mewtu: einziger Skriptaufruf ist die Übersetzung, englische Ersatzdaten', D.calls('translateCardName').length === 1 && D.calls('searchCards').length === 0 &&
+      /Englische Ersatzdaten/.test($d('addResults').textContent) && !!$d('cAdd'), [D.callLog.map(c => c.fn), $d('addResults').textContent.slice(0, 160)]);
+    // Kartenzahl hinter der Nummer: die Sets kommen einmal von tcgdex
+    D.click(D.btn($d('addResults'), 'Zurück'));
+    D.type($d('fName'), 'Glurak'); D.type($d('fNumber'), '25/189');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    D.type($d('fName'), 'Glurak'); D.type($d('fNumber'), '136/189');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    t.ok('mit Kartenzahl: Treffer, die Sets nur einmal geholt', !!$d('cAdd') && /136\/189/.test($d('addResults').textContent) &&
+      fetched.filter(u => /\/de\/sets$/.test(u)).length === 1 && fetched.filter(u => /\/en\/sets$/.test(u)).length === 1, fetched.filter(u => /sets/.test(u)));
+    t.ok('Preis aus den englischen Daten (deutsch fehlt er)', /Preis aus den englischen tcgdex-Daten/.test($d('addResults').textContent));
+    // Set-Auswahl: Liste aus den tcgdex-Sets, die Karte direkt
+    D.type($d('fName'), 'Unbekannt'); D.type($d('fNumber'), '4');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    const setTiles = [...$d('addResults').querySelectorAll('.tile.set')];
+    t.ok('Set-Auswahl mit den Sets von tcgdex', setTiles.length >= 2 && /Grundset/.test($d('addResults').textContent), $d('addResults').textContent.slice(0, 200));
+    D.click(setTiles.find(el => /base1/.test(el.textContent)));
+    await D.settle();
+    t.ok('Set gewählt: Karte direkt, ohne getCardBySetNumber', !!$d('cAdd') && D.calls('getCardBySetNumber').length === 0 && /Grundset|Flammende/.test($d('addResults').textContent),
+      [D.callLog.map(c => c.fn), $d('addResults').textContent.slice(0, 160)]);
+    // Verknüpfen: dieselbe Suche, die Karte geht mit
+    await D.clickSettle($d('tabColl'));
+    const fk = 'frei:unbekannt~grundset~4|normal|';
+    const fi = D.gIdx(fk);
+    D.expand(fi);
+    D.click(D.btn($d('gl' + fi), 'Mit tcgdex-Karte verknüpfen'));
+    D.type($d('lkName' + fi), 'Glurak');
+    await D.clickSettle(D.btn($d('gl' + fi), 'Suchen'));
+    const lt = $d('lkRes' + fi).querySelectorAll('.tile');
+    t.ok('Verknüpfen: Treffer direkt, ohne searchCards', lt.length === 1 && D.calls('searchCards').length === 0, [lt.length, $d('lkRes' + fi).textContent.slice(0, 120)]);
+    const n1 = envD.fetchLog.length;
+    await D.clickSettle(lt[0]);
+    const lk = D.lastCall('linkFreeGroup');
+    t.ok('linkFreeGroup bekommt die Kartendaten mit, der Server holt nichts', !!lk && !lk.error && lk.args.length === 5 &&
+      J(lk.args[4].map(c => c.lang + ':' + c.id)) === J(['de:base1-4', 'en:base1-4']) && !envD.fetchLog.slice(n1).some(u => /\/cards\//.test(u)),
+      lk && [lk.args.slice(0, 4), lk.error, envD.fetchLog.slice(n1)]);
+    t.ok('keine Skriptfehler (direkt)', D.errors.length === 0, D.errors);
+  }
+  {
+    // der Browser kommt nicht durch (z. B. gesperrt): der Server sucht, danach bleibt es für diese Seite beim Server
+    const envF = makeEnv();
+    envF.ctx.onOpen();
+    envF.ctx.setupAll_();
+    let tries = 0;
+    const F = boot(envF, 'sidebar', { fetch: () => { tries++; return Promise.reject(new TypeError('Failed to fetch')); } });
+    await F.settle();
+    F.type(F.$('fName'), 'Glurak');
+    await F.clickSettle(F.btn(F.$('searchForm'), 'Suchen'));
+    t.ok('gesperrt: der Server sucht, die Treffer kommen', F.calls('searchCards').length === 1 && F.$('addResults').querySelectorAll('.tile').length === 3 && tries > 0,
+      [F.callLog.map(c => c.fn), tries]);
+    const t1 = tries;
+    F.click(F.$('addResults').querySelectorAll('.tile')[0]);
+    await F.settle();
+    t.ok('Antippen: Treffer vom Server haben Preise, kein zweiter Aufruf', !!F.$('cAdd') && F.calls('getCardDetail').length === 0, F.callLog.map(c => c.fn));
+    F.type(F.$('fName'), 'Mewtu');
+    await F.clickSettle(F.btn(F.$('searchForm'), 'Suchen'));
+    t.ok('danach gleich über den Server, ohne neuen Versuch im Browser', F.calls('searchCards').length === 2 && tries === t1 && !!F.$('cAdd'), [tries, t1]);
+    t.ok('keine Skriptfehler (gesperrt)', F.errors.length === 0, F.errors);
+  }
+  {
+    // tcgdex antwortet aus dem Browser gar nicht: nach 8 Sekunden sucht der Server
+    const envS = makeEnv();
+    envS.ctx.onOpen();
+    envS.ctx.setupAll_();
+    const S = boot(envS, 'sidebar', { fetch: () => new Promise(() => {}) });
+    await S.settle();
+    S.type(S.$('fName'), 'Glurak');
+    await S.clickSettle(S.btn(S.$('searchForm'), 'Suchen'));
+    t.ok('tcgdex hängt: es wird noch gesucht, kein Serveraufruf', S.calls('searchCards').length === 0 && /Suche bei tcgdex/.test(S.$('addResults').textContent));
+    S.win.__advance(8000);
+    await S.settle();
+    t.ok('nach 8 Sekunden: der Server sucht', S.calls('searchCards').length === 1 && S.$('addResults').querySelectorAll('.tile').length === 3, S.callLog.map(c => c.fn));
+    t.ok('keine Skriptfehler (hängt)', S.errors.length === 0, S.errors);
   }
 
   // ---- 15. Fehlerpfade über die echte Brücke ----

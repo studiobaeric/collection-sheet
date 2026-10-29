@@ -15,6 +15,7 @@ const LT_Q = '<' + '?';
 const MODE_LET = LT_Q + "!= mode ?>";
 const INCLUDE_LET = LT_Q + "!= mode === 'sidebar' ? include('ImportUi') : '' ?>";
 const START_LET = LT_Q + '!= typeof start === "string" ? start : "" ?>';
+const SEARCH_LET = LT_Q + "!= typeof searchJs_ === 'function' ? searchJs_() : 'null' ?>";
 
 let pass = 0, failCount = 0;
 function ok(label, cond, extra) {
@@ -240,7 +241,7 @@ function makeServer() {
 // ---------------------------------------------------------------------------
 function render(mode) {
   // wie HtmlService: den Import-Teil gibt es nur in der Seitenleiste (#36 A3)
-  return UI_RAW.replace(MODE_LET, mode).replace(START_LET, '').replace(INCLUDE_LET, mode === 'sidebar' ? IMP_RAW : '');
+  return UI_RAW.replace(MODE_LET, mode).replace(START_LET, '').replace(SEARCH_LET, 'null').replace(INCLUDE_LET, mode === 'sidebar' ? IMP_RAW : '');
 }
 
 function boot(mode, opts) {

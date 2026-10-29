@@ -346,8 +346,10 @@ t.section('Suche ohne Blatt Sets, Namenslisten gemerkt (#38 S3)');
   const orig = c.loadSets_;
   c.loadSets_ = function () { reads++; return orig.apply(null, arguments); };
   env.uiCall('searchCards', { name: 'Glurak' });
+  ok('nur ein Name: die Suche braucht die Sets gar nicht (#43)', reads === 0, reads);
+  const SIZED = { name: 'Glurak', number: '25/189' }; // die Kartenzahl hinter der Nummer braucht die Sets
+  env.uiCall('searchCards', SIZED);
   const r1 = reads;
-  env.uiCall('searchCards', { name: 'Glurak', number: '25/189' });
   env.uiCall('searchCards', { name: 'Pikachu', set: 'Teams sind Trumpf' });
   env.uiCall('getSetSuggestions');
   ok('Blatt Sets höchstens einmal gelesen, danach aus dem Zwischenspeicher', r1 <= 1 && reads === r1, [r1, reads]);
@@ -357,20 +359,20 @@ t.section('Suche ohne Blatt Sets, Namenslisten gemerkt (#38 S3)');
   const again = env.uiCall('searchCards', { name: 'glurak ' });
   ok('gleicher Name noch einmal (Groß/klein, Leerzeichen): ohne Namenssuche bei tcgdex', again.cards.length === 3 && !env.fetchLog.slice(n0).some(u => /cards\?name=/.test(u)), env.fetchLog.slice(n0));
   // Sets geändert: Zwischenspeicher verworfen, die nächste Suche liest das Blatt wieder
-  env.uiCall('searchCards', { name: 'Glurak' });
+  env.uiCall('searchCards', SIZED);
   c.onEdit({ range: env.sheet('Sets').getRange(2, 3) });
   ok('Änderung im Blatt Sets verwirft die Sets', !env.cache.has('sets'));
-  env.uiCall('searchCards', { name: 'Glurak' });
+  env.uiCall('searchCards', SIZED);
   ok('danach einmal neu gelesen', reads === r1 + 1, reads);
   c.rebuildSets_();
   ok('Übersetzung und Sets aktualisieren verwirft sie auch', !env.cache.has('sets'));
   // kaputter oder unvollständiger Zwischenspeicher: aus dem Blatt
-  env.uiCall('searchCards', { name: 'Glurak' });
+  env.uiCall('searchCards', SIZED);
   env.cache.delete('sets:0');
   const r2 = reads;
-  ok('fehlt ein Stück: aus dem Blatt', env.uiCall('searchCards', { name: 'Glurak' }).cards.length === 3 && reads === r2 + 1);
+  ok('fehlt ein Stück: aus dem Blatt', env.uiCall('searchCards', SIZED).cards.length === 1 && reads === r2 + 1);
   env.cache.set('sets', '1'); env.cache.set('sets:0', '{kaputt');
-  ok('kaputter Inhalt: aus dem Blatt', env.uiCall('searchCards', { name: 'Glurak' }).cards.length === 3 && reads === r2 + 2);
+  ok('kaputter Inhalt: aus dem Blatt', env.uiCall('searchCards', SIZED).cards.length === 1 && reads === r2 + 2);
   // großer Wert: in Stücken unter der Grenze von 100 KB
   const big = { x: 'y'.repeat(70000) };
   c.cachePutJson_('gross', big, 60);
