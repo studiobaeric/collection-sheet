@@ -13,7 +13,7 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Promo-Sets zeigen einen einheitlichen Stern
 - Setfeld mit Auswahlliste aus Symbol und Name
 - Nummer geht auch im Namensfeld, z. B. „Pikachu 12“
-- Nach dem Hinzufügen bleiben Treffer und Name, Nummer und Set leer
+- Nach dem Hinzufügen: Treffer und Name bleiben, Nummer und Set leer
 - Feld Anzahl entfernt, jedes Hinzufügen ist ein Exemplar
 - Englische Ersatzdaten als graue Zeile zum Aufklappen
 - Sammlung: schlanke Zeile mit Symbol, Nummer und Anzahl
