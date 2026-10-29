@@ -149,8 +149,12 @@ function ss_() {
   return ss;
 }
 
+let tzCache_ = '';
+
+/** Zeitzone der Tabelle, einmal pro Ausführung gelesen. */
 function tz_() {
-  return ss_().getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  if (!tzCache_) tzCache_ = ss_().getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  return tzCache_;
 }
 
 function sheet_(name) {
@@ -253,16 +257,52 @@ function colLetter_(n) {
   return s;
 }
 
-function withLock_(fn) {
+/**
+ * fn in der Sperre ausführen und alles festschreiben, solange die Sperre noch gilt. Danach gelten die gemerkten
+ * Nachschlagewerte nicht mehr (dropLookups_), außer bei keepLookups: Das Speichern hält sie selbst aktuell (#43).
+ */
+function withLock_(fn, keepLookups) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error('Das Sheet ist gerade beschäftigt. Bitte gleich noch einmal versuchen.');
+  tmrStep_('Sperre');
+  let done = false;
   try {
     const result = fn();
     SpreadsheetApp.flush(); // Schreibvorgänge festschreiben, solange die Sperre noch gilt
+    tmrStep_('festschreiben');
+    done = true;
     return result;
   } finally {
+    if (!done || !keepLookups) dropLookups_();
     lock.releaseLock();
   }
+}
+
+// Zeitprotokoll (#43): Ein Aufruf aus Seitenleiste oder Web-App schreibt am Ende eine Zeile ins Protokoll seiner
+// Ausführung (Erweiterungen > Apps Script > Ausführungen), z. B. „addCard 900 ms: tcgdex 380, Sperre 2, Daten lesen 90,
+// Nachschlagewerte 15, schreiben 40, festschreiben 310“. Die Schritte meldet der Code unterwegs mit tmrStep_.
+let tmr_ = null;
+
+/** Zeitprotokoll für diesen Aufruf beginnen. */
+function tmrStart_(name) {
+  const now = Date.now();
+  tmr_ = { name: name, t0: now, last: now, parts: [] };
+}
+
+/** Zeit seit dem letzten Schritt unter label vermerken (ohne laufendes Zeitprotokoll: nichts). */
+function tmrStep_(label) {
+  if (!tmr_) return;
+  const now = Date.now();
+  tmr_.parts.push(label + ' ' + (now - tmr_.last));
+  tmr_.last = now;
+}
+
+/** Zeitprotokoll abschließen: eine Zeile ins Protokoll der Ausführung. */
+function tmrDone_() {
+  if (!tmr_) return;
+  const t = tmr_;
+  tmr_ = null;
+  console.log(t.name + ' ' + (Date.now() - t.t0) + ' ms: ' + t.parts.join(', '));
 }
 
 function notify_(msg, title) {
@@ -652,6 +692,16 @@ function readData_(sh) {
   return rows;
 }
 
+/**
+ * Wie ensureRows_, ohne zu lesen, wenn die Arbeitskopie st (optional) die Zeilen schon kennt: Bis zur letzten gelesenen
+ * Zeile gibt es sie sicher, darüber hinaus zählt maxRows, falls saveStore_ es vor dem Schreiben gelesen hat.
+ */
+function ensureRowsKnown_(sh, rowNeeded, st) {
+  if (st && (rowNeeded <= st.base + 1 || (st.maxRows != null && rowNeeded <= st.maxRows))) return;
+  ensureRows_(sh, rowNeeded);
+  if (st) st.maxRows = null;
+}
+
 /** Blatt Daten verlängern (in Schritten von mindestens 200 Zeilen); die Blätter mit Formeln wachsen mit (#43). */
 function ensureRows_(sh, rowNeeded) {
   if (rowNeeded <= sh.getMaxRows()) return;
@@ -660,15 +710,18 @@ function ensureRows_(sh, rowNeeded) {
   ensureFormulaRoom_(sh.getMaxRows());
 }
 
-/** Viele Zeilen in einem Rutsch anhängen (innerhalb der Sperre). */
-function appendDataRows_(rows) {
+/**
+ * Viele Zeilen in einem Rutsch anhängen (innerhalb der Sperre). st (optional): die Arbeitskopie (dataStore_), aus der
+ * Breite, erste freie Zeile und Zeilenzahl schon bekannt sind.
+ */
+function appendDataRows_(rows, st) {
   if (!rows || !rows.length) return;
-  const sh = sheet_(SHEETS.data);
-  let width = Math.max(NCOL, dataHeaders_().length);
+  const sh = st ? st.sh : sheet_(SHEETS.data);
+  let width = st ? st.width : Math.max(NCOL, dataHeaders_().length);
   rows.forEach(function (r) { width = Math.max(width, r.length); });
-  ensureCols_(sh, width);
-  const start = Math.max(2, sh.getLastRow() + 1);
-  ensureRows_(sh, start + rows.length - 1);
+  if (!st || !(st.cols >= width)) ensureCols_(sh, width);
+  const start = st ? st.base + 2 : Math.max(2, sh.getLastRow() + 1);
+  ensureRowsKnown_(sh, start + rows.length - 1, st);
   const block = rows.map(function (r) { return padRow_(r, width); });
   const fmt = dataFormatRow_(width);
   const range = sh.getRange(start, 1, block.length, width);
@@ -677,42 +730,62 @@ function appendDataRows_(rows) {
 }
 
 /**
- * Ersetzt alle Datenzeilen (unter der Kopfzeile) durch `rows` und leert, was darunter übrig bleibt.
+ * Ersetzt alle Datenzeilen (unter der Kopfzeile) durch `rows` und leert, was darunter übrig bleibt. Mit der
+ * Arbeitskopie st und from: erst ab ihrer Zeile from (0 = erste Datenzeile), die Zeilen darüber bleiben.
  * Ein einziges setValues über den ganzen alten und neuen Bereich (übrige Zeilen werden mit leeren Zeilen
  * überschrieben): Bricht der Lauf ab, steht entweder alles Alte oder alles Neue da, nie beides.
  * Für Löschungen (z. B. Import zurücknehmen). Innerhalb der Sperre.
  */
-function rewriteData_(rows) {
+function rewriteData_(rows, st, from) {
+  from = st && from > 0 ? from : 0;
   rows = (rows || []).filter(isDataRow_);
-  const sh = sheet_(SHEETS.data);
-  let width = Math.max(NCOL, dataHeaders_().length, sh.getLastColumn());
+  const sh = st ? st.sh : sheet_(SHEETS.data);
+  let width = st ? st.width : Math.max(NCOL, dataHeaders_().length, sh.getLastColumn());
   rows.forEach(function (r) { width = Math.max(width, r.length); });
-  ensureCols_(sh, width);
-  const n = Math.max(rows.length, sh.getLastRow() - 1);
+  if (!st || !(st.cols >= width)) ensureCols_(sh, width);
+  const n = Math.max(rows.length, st ? st.base - from : sh.getLastRow() - 1);
   if (n <= 0) return;
-  ensureRows_(sh, n + 1);
+  ensureRowsKnown_(sh, from + n + 1, st);
   const block = rows.map(function (r) { return padRow_(r, width); });
   while (block.length < n) block.push(new Array(width).fill(''));
   const fmt = dataFormatRow_(width);
-  const range = sh.getRange(2, 1, n, width);
+  const range = sh.getRange(from + 2, 1, n, width);
   range.setNumberFormats(block.map(function () { return fmt; }));
   range.setValues(block);
 }
 
 /**
- * Arbeitskopie des Datenblatts für Änderungen in der Sperre:
- * {sh, headers, width, rows, base (Anzahl gelesener Zeilen), dirty: {i}, removed: {i}, gk0: [Gruppenschlüssel beim Lesen]}.
+ * Arbeitskopie des Datenblatts für Änderungen in der Sperre, mit einem Lesezugriff für Kopfzeile und Zeilen (#43):
+ * {sh, headers, width, cols (so viele Spalten hat das Blatt mindestens), rows, base (Anzahl gelesener Zeilen),
+ * dirty: {i}, removed: {i}, gk0: [Gruppenschlüssel beim Lesen], maxRows (Zeilen im Blatt, sobald gelesen)}.
  * Neue Zeilen werden mit storeAdd_ hinten an rows gehängt; storeSave_ schreibt alles zurück.
  */
 function dataStore_() {
   const sh = sheet_(SHEETS.data);
-  const headers = dataHeaders_();
-  const rows = readData_(sh);
+  const all = sh.getDataRange().getValues();
+  const rows = all.slice(1);
+  const headers = dataHeadersOf_(all[0]) || dataHeaders_();
   let width = Math.max(NCOL, headers.length);
   rows.forEach(function (r) { width = Math.max(width, r.length); });
   rows.forEach(function (r) { while (r.length < width) r.push(''); });
   const gk0 = rows.map(function (r) { return isDataRow_(r) ? groupKey_(r) : ''; });
-  return { sh: sh, headers: headers, width: width, rows: rows, base: rows.length, dirty: {}, removed: {}, gk0: gk0 };
+  tmrStep_('Daten lesen');
+  return {
+    sh: sh, headers: headers, width: width, cols: all.length ? all[0].length : 0, rows: rows, base: rows.length,
+    dirty: {}, removed: {}, gk0: gk0, maxRows: null
+  };
+}
+
+/**
+ * Kopfzeile wie dataHeaders_ aus der schon gelesenen ersten Zeile von Daten. null, wenn eine Zusatzspalte keinen Text
+ * hat (Sheets hat ihren Namen als Datum oder Zahl gelesen): Dann zählt der Anzeigetext, dataHeaders_ liest ihn.
+ */
+function dataHeadersOf_(head) {
+  const extras = (head || []).slice(NCOL);
+  if (extras.some(function (h) { return typeof h !== 'string'; })) return null;
+  const out = extras.map(function (h) { return h.trim(); });
+  while (out.length && !out[out.length - 1]) out.pop();
+  return DATA_HEADERS.concat(out);
 }
 
 /** Zeilen, die sich in der Arbeitskopie geändert haben (geändert, neu, gelöscht): Indizes aufsteigend. */
@@ -756,11 +829,18 @@ function storeLive_(st, i) {
   return !st.removed[i] && isDataRow_(st.rows[i]);
 }
 
-/** Zusatzspalte anlegen und die Arbeitskopie verbreitern (newCols: eine Spalte kam dazu, für saveStore_). */
+/**
+ * Zusatzspalte anlegen und die Arbeitskopie verbreitern (newCols: eine Spalte kam dazu, für saveStore_). Eine Spalte,
+ * die die Arbeitskopie schon kennt, liest es nicht noch einmal nach.
+ */
 function storeEnsureExtra_(st, name) {
+  const known = String(name == null ? '' : name).trim();
+  const at = known ? st.headers.indexOf(known, NCOL) : -1;
+  if (at >= 0) return at;
   const idx = ensureExtraColumn_(name);
   const before = st.headers.length;
   st.headers = dataHeaders_();
+  st.cols = Math.max(st.cols || 0, idx + 1);
   if (st.headers.length !== before) st.newCols = true;
   const width = Math.max(st.width, st.headers.length, idx + 1);
   if (width > st.width) {
@@ -801,14 +881,19 @@ function storeGroupCount_(st, gkey) {
   return storeGroupIdx_(st, gkey).reduce(function (s, i) { return s + (Number(st.rows[i][COL.count]) || 0); }, 0);
 }
 
-/** Schreibt die Arbeitskopie zurück: mit Löschungen in einem Rutsch, sonst nur geänderte und neue Zeilen. */
+/**
+ * Schreibt die Arbeitskopie zurück: mit Löschungen in einem Rutsch, sonst nur geänderte und neue Zeilen. Was die
+ * Arbeitskopie über das Blatt weiß (Spalten, erste freie Zeile, Zeilenzahl), liest es nicht noch einmal.
+ */
 function storeSave_(st) {
-  const anyRemoved = Object.keys(st.removed).some(function (i) { return Number(i) < st.base; });
-  if (anyRemoved) {
-    rewriteData_(st.rows.filter(function (r, i) { return !st.removed[i]; }));
+  if (!(st.cols >= st.width)) { ensureCols_(st.sh, st.width); st.cols = st.width; }
+  const removed = Object.keys(st.removed).map(Number).filter(function (i) { return i < st.base; });
+  if (removed.length) {
+    // die Zeilen darunter rücken nach oben: ab der ersten geänderten oder gelöschten Zeile alles in einem Rutsch
+    const from = Math.min.apply(null, removed.concat(Object.keys(st.dirty).map(Number)));
+    rewriteData_(st.rows.filter(function (r, i) { return i >= from && !st.removed[i]; }), st, from);
     return;
   }
-  ensureCols_(st.sh, st.width);
   const idx = Object.keys(st.dirty).map(Number).sort(function (a, b) { return a - b; });
   let k = 0;
   while (k < idx.length) {
@@ -821,7 +906,7 @@ function storeSave_(st) {
   }
   const added = [];
   for (let i = st.base; i < st.rows.length; i++) if (!st.removed[i]) added.push(st.rows[i]);
-  appendDataRows_(added);
+  appendDataRows_(added, st);
 }
 
 /** Zeilen einer Gruppe ordnen: „von Hand“ zuerst, dann nach Hinzufügedatum. */
@@ -1262,8 +1347,9 @@ function settingsAll_() {
   const ss = ss_();
   const sh = ss.getSheetByName(SHEETS.settings);
   const map = {};
-  if (sh && sh.getLastRow() >= 2) {
-    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r) {
+  const last = sh ? sh.getLastRow() : 0;
+  if (last >= 2) {
+    sh.getRange(2, 1, last - 1, 2).getValues().forEach(function (r) {
       const k = String(r[0] == null ? '' : r[0]).trim();
       if (k && !(k in map)) map[k] = r[1] == null ? '' : String(r[1]);
     });
@@ -1728,6 +1814,7 @@ function onEdit(e) {
     const name = sh.getName();
     if (name === SHEETS.data) { afterEdit_(); return; }
     if (name === SHEETS.sets) { dropSetsCache_(); return; }
+    if (LOOKUP_SHEETS.indexOf(name) >= 0) { dropLookups_(); return; }
     if (name === SHEETS.dex) { if (e.range.getRow() === 4) applyDexRowHeights_(sh); return; }
     if (name !== SHEETS.view || e.range.getRow() !== 4) return;
     // nur der Bilder-Schalter (H4) ändert die Zeilenhöhen; Suche, Set, Sortierung und 0er zeigen starten kein Skript (#39 V1)
@@ -1745,6 +1832,7 @@ function beiStrukturAenderung(e) {
     if (takenOverBy_()) { stopTriggers_(); return; }
     const type = String((e && e.changeType) || '');
     if (['REMOVE_ROW', 'REMOVE_COLUMN', 'INSERT_COLUMN', 'OTHER'].indexOf(type) < 0) return;
+    dropLookups_(); // vielleicht in einem der Blätter hinter den Nachschlagewerten
     afterEdit_();
   } catch (err) { /* nie die Änderung stören */ }
 }
@@ -1759,6 +1847,7 @@ function afterEdit_() {
   } catch (err) {
     /* nie den Edit stören */
   } finally {
+    dropLookups_();
     lock.releaseLock();
   }
 }
@@ -1849,6 +1938,7 @@ function setupSheets_(ss, keepControls, step) {
   const missing = setupFormulaSheets_(ss, keepControls, step);
   removeDefaultSheet_(ss);
   restoreActiveSheet_(ss, prevName);
+  dropLookups_();
   return missing;
 }
 
@@ -2606,17 +2696,133 @@ function afterDataChange_() {
 }
 
 /**
- * Arbeitskopie speichern (Hinzufügen und jede Änderung aus Seitenleiste und Web-App): Daten schreiben, dazu die
- * Pokédex-Nummern der geänderten Karten und neue Seltenheiten. Alles andere rechnen die Formeln. Innerhalb der Sperre.
+ * Arbeitskopie speichern (Hinzufügen und jede Änderung aus Seitenleiste und Web-App, #43). Erst lesen, was nötig ist:
+ * Pokédex-Nummern nur für eine Karte, die neu in die Sammlung kommt oder neue Nummern von tcgdex hat (planDex_),
+ * Seltenheiten nur für eine unbekannte (planRarities_), die Zeilenzahl von Daten nur, wenn Zeilen dazukommen. Dann
+ * schreiben: Daten, Pokédex-Nummern, neue Seltenheiten. Danach liest es nichts mehr, so rechnet die Tabelle nur einmal
+ * nach. Alles andere rechnen die Formeln. look: lookups_() (bleibt aktuell, auch im Zwischenspeicher);
+ * card: Kartendaten von tcgdex (Hinzufügen, Verknüpfen). Innerhalb der Sperre.
  */
-function saveStore_(st) {
+function saveStore_(st, look, card) {
+  look = look || lookups_();
+  let dex = null, rar = null;
+  try {
+    dex = planDex_(st, look, card);
+    rar = planRarities_(st, look);
+    if (dex && dex.top > dexNames_().de.length) ensureDexRows_(dex.top);
+  } catch (e) { dex = rar = null; /* holt der nächste Preislauf nach */ }
+  if (st.rows.length > st.base && st.maxRows == null) st.maxRows = st.sh.getMaxRows();
   storeSave_(st);
   if (st.newCols) syncGroupsSheet_(st.headers); // eine gezeigte Zusatzspalte kann es jetzt erst geben
   try {
-    const live = storeLiveRows_(st);
-    syncDexMap_(live, null, storeTouchedGroups_(st));
-    syncRarities_(live);
+    if (dex) writeDexPlan_(dex);
+    if (rar) writeRarityPlan_(rar);
+    if (dex || rar) putLookups_(look);
   } catch (e) { /* holt der nächste Preislauf nach; die Daten sind geschrieben */ }
+  tmrStep_('schreiben');
+}
+
+/**
+ * Pokédex-Nummern beim Speichern, vor dem ersten Schreiben (#43). A:C merkt die Nummern einer Karte von tcgdex, D:E die
+ * Nummern jeder Karte der Sammlung für die Formel in Gruppen (dexMapOf_). Das Blatt wird nur gelesen, wenn eine Karte
+ * neu in die Sammlung kommt oder tcgdex andere Nummern liefert, als gemerkt sind. Trägt neue Nummern in look.dexIds
+ * ein. card: Kartendaten von tcgdex oder null. -> was writeDexPlan_ schreibt, oder null
+ */
+function planDex_(st, look, card) {
+  let id = '', ids = null;
+  if (card && card.id) {
+    id = String(card.id);
+    const got = dexIdsOf_(card);
+    const known = look.dexIds[id];
+    if (!known || known.join(' ') !== got.join(' ')) ids = got;
+  }
+  const before = {};
+  st.gk0.forEach(function (g) { if (g) before[dexKey_(g)] = true; });
+  const heads = {};
+  storeTouchedIdx_(st).forEach(function (i) {
+    if (!storeLive_(st, i)) return;
+    const k = dexKey_(groupKey_(st.rows[i]));
+    if (!before[k] || (ids && k === dexKey_(id))) heads[k] = true;
+  });
+  if (!ids && !Object.keys(heads).length) return null;
+  if (ids) look.dexIds[id] = ids;
+  const want = dexMapOf_(storeLiveRows_(st).filter(function (r) { return isDataRow_(r) && heads[dexKey_(groupKey_(r))]; }), look.dexIds);
+  const ss = ss_();
+  const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4], true);
+  let vals;
+  try { vals = sh.getRange('A:E').getValues(); } catch (e) { ensureCols_(sh, 5); vals = sh.getRange('A:E').getValues(); }
+  const rowA = {}, rowD = {};
+  let lastA = 1, lastD = 1;
+  for (let i = 1; i < vals.length; i++) {
+    const a = String(vals[i][0] == null ? '' : vals[i][0]).trim();
+    if (a) { lastA = i + 1; if (!(a in rowA)) rowA[a] = i; }
+    const d = String(vals[i][3] == null ? '' : vals[i][3]);
+    if (d) { lastD = i + 1; if (!(d in rowD)) rowD[d] = i; }
+  }
+  const p = { sh: sh, maxRows: vals.length, lastA: lastA, lastD: lastD, setAC: [], addAC: [], setDE: [], addDE: [], top: 0 };
+  if (ids) {
+    const txt = ids.join(' ');
+    if (id in rowA) {
+      if (String(vals[rowA[id]][1] == null ? '' : vals[rowA[id]][1]) !== txt) p.setAC.push({ row: rowA[id] + 1, vals: [txt, todayText_()] });
+    } else {
+      p.addAC.push([id, txt, todayText_()]);
+    }
+  }
+  Object.keys(heads).forEach(function (k) {
+    const txt = want[k] == null ? '' : want[k];
+    if (k in rowD) {
+      if (String(vals[rowD[k]][4] == null ? '' : vals[rowD[k]][4]) !== txt) p.setDE.push({ row: rowD[k] + 1, txt: txt });
+    } else {
+      p.addDE.push([k, txt]);
+    }
+    parseDexText_(txt).forEach(function (nr) { if (nr > p.top) p.top = nr; });
+  });
+  return p;
+}
+
+/** Schreibt, was planDex_ gefunden hat: geänderte Einträge an ihrer Stelle, neue unten an A:C bzw. D:E. */
+function writeDexPlan_(p) {
+  const sh = p.sh;
+  const need = Math.max(p.lastA + p.addAC.length, p.lastD + p.addDE.length);
+  if (need > p.maxRows) sh.insertRowsAfter(p.maxRows, Math.max(100, need - p.maxRows));
+  p.setAC.forEach(function (x) { sh.getRange(x.row, 2, 1, 2).setNumberFormat('@').setValues([x.vals]); });
+  if (p.addAC.length) sh.getRange(p.lastA + 1, 1, p.addAC.length, 3).setNumberFormat('@').setValues(p.addAC);
+  p.setDE.forEach(function (x) { sh.getRange(x.row, 5).setNumberFormat('@').setValue(x.txt); });
+  if (p.addDE.length) sh.getRange(p.lastD + 1, 4, p.addDE.length, 2).setNumberFormat('@').setValues(p.addDE);
+}
+
+/**
+ * Neue Seltenheiten beim Speichern, vor dem ersten Schreiben (#43): Kennen die Nachschlagewerte eine Seltenheit der
+ * geänderten Zeilen nicht, liest es das Blatt Seltenheiten (die Stufen kommen dabei frisch in look.ranks).
+ * -> was writeRarityPlan_ anhängt, oder null
+ */
+function planRarities_(st, look) {
+  const add = {};
+  storeTouchedIdx_(st).forEach(function (i) {
+    if (!storeLive_(st, i)) return;
+    const t = String(st.rows[i][COL.rarity] == null ? '' : st.rows[i][COL.rarity]).trim();
+    const k = rarityKey_(t);
+    if (k && !(k in look.ranks) && !(k in add)) add[k] = t;
+  });
+  if (!Object.keys(add).length) return null;
+  const sh = ss_().getSheetByName(SHEETS.rarity);
+  if (!sh) return null;
+  const vals = sh.getRange('A:B').getValues();
+  look.ranks = ranksOf_(vals.slice(1));
+  let last = 1;
+  for (let i = 1; i < vals.length; i++) if (String(vals[i][0] == null ? '' : vals[i][0]).trim()) last = i + 1;
+  const rows = Object.keys(add).filter(function (k) { return !(k in look.ranks); }).map(function (k) { return [add[k], '']; });
+  rows.forEach(function (r) { look.ranks[rarityKey_(r[0])] = null; });
+  return { sh: sh, maxRows: vals.length, last: last, rows: rows };
+}
+
+/** Hängt an, was planRarities_ gefunden hat (mit leerer Stufe). */
+function writeRarityPlan_(p) {
+  if (!p.rows.length) return;
+  const need = p.last + p.rows.length;
+  if (need > p.maxRows) p.sh.insertRowsAfter(p.maxRows, Math.max(100, need - p.maxRows));
+  p.sh.getRange(p.last + 1, 1, p.rows.length, 1).setNumberFormat('@');
+  p.sh.getRange(p.last + 1, 1, p.rows.length, 2).setValues(p.rows);
 }
 
 /** Zeilen, die die Formel eines Blatts höchstens braucht (#43). dataMax: Zeilen im Blatt Daten. */
@@ -3331,13 +3537,6 @@ function cardSetDate_(lang, setId, setBrief) {
   try { return setReleaseDate_(lang, setId, setBrief); } catch (e) { return ''; }
 }
 
-/** Pokédex-Nummern einer Karte von tcgdex merken (Blatt Pokédex-Nummern A:C), vor saveStore_. Innerhalb der Sperre. */
-function storeCardDex_(card) {
-  const map = {};
-  map[String(card.id)] = dexIdsOf_(card);
-  try { storeDexIds_(map); } catch (e) { /* holt der nächste Preislauf nach */ }
-}
-
 /** Eigener Preis aus einer Anfrage: Zahl > 0 oder null (leer/0). Unlesbar -> Fehler. */
 function ownPriceOf_(x) {
   const p = parsePrice_(x);
@@ -3431,10 +3630,11 @@ function addRidPut_(rid, res) {
  * ohne delta
  */
 function addCard(req) {
+  tmrStart_('addCard');
   req = req || {};
   const rid = addRid_(req);
   const prev = addRidGet_(rid);
-  if (prev) return prev;
+  if (prev) { tmrDone_(); return prev; }
   ensureSchema_();
   const lang = req.lang === 'en' ? 'en' : 'de';
   const qty = Math.max(1, Math.floor(Number(req.qty) || 1));
@@ -3443,6 +3643,7 @@ function addCard(req) {
   const ownPrice = ownPriceOf_(req.ownPrice);
   const card = fetchCard_(lang, req.id);
   if (!card) throw new Error('Karte ' + req.id + ' nicht gefunden – nichts gespeichert.');
+  tmrStep_('tcgdex');
 
   const v = card.variants || {};
   let variant = baseVariant_(v);
@@ -3456,6 +3657,7 @@ function addCard(req) {
   const set = card.set || {};
   const setId = String(set.id || setIdOf_(card));
   const setDate = cardSetDate_(lang, setId, set);
+  tmrStep_('Set-Datum');
   const summary = summarizeCard_(card, lang);
   summary.dataLang = lang;
   summary.setName = String(set.name || setId);
@@ -3469,6 +3671,7 @@ function addCard(req) {
     if (again) return { prev: again };
     const now = new Date();
     const st = dataStore_();
+    const look = lookups_();
     if (setDate) {
       // ältere Einträge dieses Sets ohne Datum nachtragen
       st.rows.forEach(function (r, i) {
@@ -3480,9 +3683,8 @@ function addCard(req) {
       now: now, headers: st.headers, width: st.width
     });
     const res = storeAddHand_(st, row, qty, ownPrice, now, { price: price, date: priceDate });
-    storeCardDex_(card);
-    saveStore_(st);
-    res.delta = collDelta_(st);
+    saveStore_(st, look, card);
+    res.delta = collDelta_(st, look);
     const name = summary.dataLang === 'en' && summary.inputName ? summary.inputName : String(card.name);
     let priceInfo = '';
     if (ownPrice != null) priceInfo = ' Eigener Preis: ' + eurText_(ownPrice) + '.';
@@ -3490,7 +3692,8 @@ function addCard(req) {
     const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
     addRidPut_(rid, out); // noch in der Sperre: eine Wiederholung wartet darauf und bekommt diese Antwort
     return out;
-  });
+  }, true);
+  tmrDone_();
   return result.prev || result;
 }
 
@@ -3505,10 +3708,11 @@ function addResult_(res, message) {
  * -> wie addCard
  */
 function addFreeCard(req) {
+  tmrStart_('addFreeCard');
   req = req || {};
   const rid = addRid_(req);
   const prev = addRidGet_(rid);
-  if (prev) return prev;
+  if (prev) { tmrDone_(); return prev; }
   ensureSchema_();
   const name = String(req.name || '').trim();
   if (!name) throw new Error('Bitte einen Namen eingeben.');
@@ -3525,18 +3729,20 @@ function addFreeCard(req) {
     if (again) return { prev: again };
     const now = new Date();
     const st = dataStore_();
+    const look = lookups_();
     const row = buildCardRow_(card, {
       variant: variant, cond: cond, lang: cardLang, version: version, count: qty, origin: ORIGIN_HAND, fp: '',
       now: now, headers: st.headers, width: st.width
     });
     const res = storeAddHand_(st, row, qty, ownPrice, now, null);
-    saveStore_(st);
-    res.delta = collDelta_(st);
+    saveStore_(st, look);
+    res.delta = collDelta_(st, look);
     const priceInfo = ownPrice != null ? ' Eigener Preis: ' + eurText_(ownPrice) + '.' : ' (freie Karte, kein Preis)';
     const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
     addRidPut_(rid, out);
     return out;
-  });
+  }, true);
+  tmrDone_();
   return result.prev || result;
 }
 
@@ -3639,9 +3845,10 @@ function searchCollection(query, setText, opts) {
     st = dataStore_();
   }
   const rows = st.rows;
+  const look = lookups_();
   const words = String(query || '').trim().split(/\s+/).filter(Boolean);
   const stx = String(setText || '').trim().toLowerCase();
-  const stIds = stx ? matchSets_(cachedSets_(), stx) : [];
+  const stIds = stx ? matchSets_(look.sets, stx) : [];
   let groups = groupRows_(rows).map(function (g) {
     return { gkey: g.gkey, rows: g.idx.map(function (i) { return rows[i]; }) };
   }).filter(function (g) {
@@ -3652,7 +3859,7 @@ function searchCollection(query, setText, opts) {
     return words.every(function (w) { return matchWord_(r, w); });
   });
   const needDex = dexNr > 0 || sort === 'dex';
-  const cache = needDex ? loadDexIds_() : null;
+  const cache = look.dexIds;
   groups.forEach(function (g) {
     g.p = orderGroupRows_(g.rows)[0];
     g.count = g.rows.reduce(function (s, r) { return s + (Number(r[COL.count]) || 0); }, 0);
@@ -3660,11 +3867,10 @@ function searchCollection(query, setText, opts) {
     if (needDex) g.dex = dexOfRow_(g.p, cache);
   });
   if (dexNr) groups = groups.filter(function (g) { return g.dex.indexOf(dexNr) >= 0; });
-  const ranks = sort === 'rarity' ? rarityRanks_() : null;
-  groups.forEach(function (g) { g.sortVal = collSortValue_(g, sort, ranks); });
+  groups.forEach(function (g) { g.sortVal = collSortValue_(g, sort, look.ranks); });
   groups.sort(function (a, b) { return collCompare_(a, b, sort, desc); });
-  const info = importInfo_();
-  const refs = loadCardHistRefs_();
+  const info = look.info;
+  const refs = look.refs;
   return {
     total: groups.length,
     sort: sort,
@@ -3684,6 +3890,7 @@ function searchCollection(query, setText, opts) {
  * Aufrufe. -> {groups: [collGroup_], total}
  */
 function getCollection() {
+  tmrStart_('getCollection');
   ensureSchema_();
   let st = dataStore_();
   if (needsRepair_(st.rows)) { // wie searchCollection: erst reparieren, sonst lassen sich Exemplare nicht ändern
@@ -3694,12 +3901,61 @@ function getCollection() {
   const groups = groupRows_(st.rows).map(function (g) {
     return collGroup_(g.gkey, g.idx.map(function (i) { return st.rows[i]; }), st.headers, ctx);
   });
+  tmrStep_('Gruppen');
+  tmrDone_();
   return { groups: groups, total: groups.length };
 }
 
-/** Nachschlagewerte für collGroup_, einmal pro Aufruf gelesen. */
+/** Nachschlagewerte für collGroup_ (lookups_). */
 function collCtx_() {
-  return { info: importInfo_(), refs: loadCardHistRefs_(), dexIds: loadDexIds_(), ranks: rarityRanks_(), sets: cachedSets_() };
+  return lookups_();
+}
+
+// Nachschlagewerte im Zwischenspeicher (#43): Zu jeder Karte zeigt die Seitenleiste die Herkunft (Blatt Importe), die
+// Preisveränderung (Kartenverlauf) und die Pokédex-Nummern (Pokédex-Nummern A:B), sortiert nach Seltenheit (Seltenheiten)
+// und filtert nach Set (Sets). Speichern und das Laden der Sammlung lesen diese Blätter nicht jedes Mal, sondern nehmen
+// sie aus dem Zwischenspeicher. Gültig ist nur, was unter dem aktuellen Stand (LOOKUP_KEY) gemerkt ist. Einen neuen
+// Stand setzt jede Sperre ohne keepLookups (Import, Preislauf, Einrichtung …, withLock_), jede Änderung von Hand in
+// diesen Blättern (onEdit, beiStrukturAenderung) und die Einrichtung. Das Speichern trägt neue Pokédex-Nummern und
+// Seltenheiten selbst nach (saveStore_).
+const LOOKUP_KEY = 'nachschlag';
+const LOOKUP_SHEETS = [SHEETS.imports, SHEETS.cardHist, SHEETS.dexIds, SHEETS.rarity];
+const LOOKUP_SECS = 21600; // 6 Stunden, mehr erlaubt CacheService nicht
+
+/** Neuer Stand: Alles bisher Gemerkte gilt nicht mehr und läuft von selbst ab. */
+function dropLookups_() {
+  try { CacheService.getScriptCache().put(LOOKUP_KEY, hex10_(), LOOKUP_SECS); } catch (e) { /* läuft von selbst ab */ }
+}
+
+/**
+ * Nachschlagewerte {info (importInfo_), refs (loadCardHistRefs_), dexIds (loadDexIds_), ranks (rarityRanks_), sets
+ * (cachedSets_), gen (Stand)}: aus dem Zwischenspeicher, sonst aus den Blättern gelesen und unter dem Stand von vor dem
+ * Lesen gemerkt. Setzt jemand während des Lesens einen neuen Stand, gilt das Gemerkte nicht.
+ */
+function lookups_() {
+  let gen = '';
+  try { gen = CacheService.getScriptCache().get(LOOKUP_KEY) || ''; } catch (e) { gen = ''; }
+  let look = gen ? cacheGetJson_(LOOKUP_KEY + ':' + gen) : null;
+  const hit = !!(look && look.info && look.refs && look.dexIds && look.ranks);
+  if (!hit) {
+    if (!gen) {
+      gen = hex10_();
+      try { CacheService.getScriptCache().put(LOOKUP_KEY, gen, LOOKUP_SECS); } catch (e) { /* ohne Zwischenspeicher weiter */ }
+    }
+    look = { info: importInfo_(), refs: loadCardHistRefs_(), dexIds: loadDexIds_(), ranks: rarityRanks_() };
+    look.gen = gen;
+    putLookups_(look);
+  }
+  look.gen = gen;
+  look.sets = cachedSets_();
+  tmrStep_(hit ? 'Nachschlagewerte' : 'Nachschlagewerte gelesen');
+  return look;
+}
+
+/** Nachschlagewerte unter ihrem Stand merken, z. B. nachdem das Speichern neue Pokédex-Nummern eingetragen hat. */
+function putLookups_(look) {
+  if (!look || !look.gen) return;
+  cachePutJson_(LOOKUP_KEY + ':' + look.gen, { info: look.info, refs: look.refs, dexIds: look.dexIds, ranks: look.ranks }, LOOKUP_SECS);
 }
 
 /**
@@ -3734,9 +3990,10 @@ function collGroup_(gkey, rows, headers, ctx) {
 
 /**
  * Nach einer Änderung in der Sperre: die betroffenen Gruppen fürs UI, damit es nur diese Karten austauscht statt neu
- * zu laden (#30). -> {groups: [collGroup_], gone: [Schlüssel ohne Zeilen]}
+ * zu laden (#30). look: lookups_() von vor dem Schreiben, dann liest es nichts (#43).
+ * -> {groups: [collGroup_], gone: [Schlüssel ohne Zeilen]}
  */
-function collDelta_(st) {
+function collDelta_(st, look) {
   const keys = storeTouchedGroups_(st);
   const want = {};
   keys.forEach(function (k) { want[k] = []; });
@@ -3745,7 +4002,7 @@ function collDelta_(st) {
     const g = groupKey_(r);
     if (g in want) want[g].push(r);
   });
-  const ctx = collCtx_();
+  const ctx = look || lookups_();
   const out = { groups: [], gone: [] };
   keys.forEach(function (k) {
     if (want[k].length) out.groups.push(collGroup_(k, want[k], st.headers, ctx));
@@ -3761,9 +4018,10 @@ function collDelta_(st) {
  * -> {token: {eid, applied, logIds, createdEid}, eid, count, groupCount, applied, gkey, delta (collDelta_, null ohne Änderung)}
  */
 function adjustEntry(eid, delta) {
+  tmrStart_('adjustEntry');
   ensureSchema_();
   delta = Math.round(Number(delta) || 0);
-  return withLock_(function () {
+  const out = withLock_(function () {
     const st = dataStore_();
     const i0 = storeFindEid_(st, eid);
     if (i0 < 0) throw new Error('Eintrag nicht gefunden. Bitte die Liste neu laden.');
@@ -3797,23 +4055,26 @@ function adjustEntry(eid, delta) {
       r[COL.changed] = now;
       storeTouch_(st, i);
     }
+    const look = applied !== 0 ? lookups_() : null; // vor dem ersten Schreiben
     const nr = importNrOf_(r[COL.origin]);
     if (applied < 0 && nr != null) {
-      const inf = importInfo_()[nr];
+      const inf = look.info[nr];
       logIds = appendProto_([{
         nr: nr, type: 'handentfernt', eid: String(r[COL.eid]), fp: String(r[COL.fp] || ''), qty: -applied,
         data: { countBefore: cur }, status: 'erledigt', sourceId: inf ? inf.sourceId : ''
       }]);
     }
-    if (applied !== 0 || createdEid) saveStore_(st);
-    const diff = applied !== 0 ? collDelta_(st) : null;
+    if (applied !== 0) saveStore_(st, look);
+    const diff = applied !== 0 ? collDelta_(st, look) : null;
     const gkey = groupKey_(r);
     const eidNow = String(r[COL.eid]);
     return {
       token: { eid: eidNow, applied: applied, logIds: logIds, createdEid: createdEid },
       eid: eidNow, count: next, groupCount: storeGroupCount_(st, gkey), applied: applied, gkey: gkey, delta: diff
     };
-  });
+  }, true);
+  tmrDone_();
+  return out;
 }
 
 /**
@@ -3822,11 +4083,13 @@ function adjustEntry(eid, delta) {
  * -> {eid, count, groupCount, gkey, delta (collDelta_; fehlt, wenn der Eintrag nicht mehr da ist)}
  */
 function revertAdjust(token) {
+  tmrStart_('revertAdjust');
   ensureSchema_();
   token = token || {};
   const applied = Math.round(Number(token.applied) || 0);
-  return withLock_(function () {
+  const out = withLock_(function () {
     const st = dataStore_();
+    const look = lookups_(); // vor dem ersten Schreiben
     const i = storeFindEid_(st, token.eid);
     if (token.logIds && token.logIds.length) deleteProtoByIds_(token.logIds);
     if (i < 0) {
@@ -3846,10 +4109,12 @@ function revertAdjust(token) {
       const k = storeFindEid_(st, token.createdEid);
       if (k >= 0 && (Number(st.rows[k][COL.count]) || 0) === 0) storeRemove_(st, k);
     }
-    saveStore_(st);
-    const diff = collDelta_(st);
+    saveStore_(st, look);
+    const diff = collDelta_(st, look);
     return { eid: String(r[COL.eid]), count: next, groupCount: storeGroupCount_(st, gkey), gkey: gkey, delta: diff };
-  });
+  }, true);
+  tmrDone_();
+  return out;
 }
 
 /**
@@ -3859,6 +4124,7 @@ function revertAdjust(token) {
  * -> {ok, eid (Ergebniszeile), gkey, delta (collDelta_: alte und neue Gruppe; fehlt, wenn sich nichts änderte)}
  */
 function editEntry(eid, changes, qty) {
+  tmrStart_('editEntry');
   ensureSchema_();
   changes = changes || {};
   let cond = null, lang = null, version = null;
@@ -3872,10 +4138,11 @@ function editEntry(eid, changes, qty) {
   const extras = changes.extras && typeof changes.extras === 'object' ? changes.extras : {};
   const extraNames = Object.keys(extras).map(function (n) { return String(n).trim(); }).filter(Boolean);
 
-  return withLock_(function () {
+  const out = withLock_(function () {
     const st = dataStore_();
     const i0 = storeFindEid_(st, eid);
     if (i0 < 0) throw new Error('Eintrag nicht gefunden. Bitte die Liste neu laden.');
+    const look = lookups_(); // vor dem ersten Schreiben (eine neue Zusatzspalte)
     const extraCols = {};
     extraNames.forEach(function (n) { extraCols[n] = storeEnsureExtra_(st, n); });
     const src = st.rows[i0];
@@ -3932,10 +4199,12 @@ function editEntry(eid, changes, qty) {
         break;
       }
     }
-    saveStore_(st);
-    const diff = collDelta_(st);
+    saveStore_(st, look);
+    const diff = collDelta_(st, look);
     return { ok: true, eid: String(st.rows[t][COL.eid]), gkey: groupKey_(st.rows[t]), delta: diff };
-  });
+  }, true);
+  tmrDone_();
+  return out;
 }
 
 /**
@@ -3943,17 +4212,21 @@ function editEntry(eid, changes, qty) {
  * null/''/0 entfernt ihn. -> {gkey, price (Preis der Gruppe danach oder null), priceManual, delta (collDelta_)}
  */
 function setGroupOwnPrice(gkey, price) {
+  tmrStart_('setGroupOwnPrice');
   ensureSchema_();
   const p = ownPriceOf_(price);
-  return withLock_(function () {
+  const out = withLock_(function () {
     const st = dataStore_();
     const n = storeSetGroupOwnPrice_(st, String(gkey), p, new Date());
     if (!n) throw new Error('Diese Karte wurde nicht gefunden. Bitte die Liste neu laden.');
-    saveStore_(st);
-    const diff = collDelta_(st);
+    const look = lookups_();
+    saveStore_(st, look);
+    const diff = collDelta_(st, look);
     const gp = groupPrice_(storeGroupIdx_(st, String(gkey)).map(function (i) { return st.rows[i]; }));
     return { gkey: String(gkey), price: gp.price, priceManual: gp.manual, delta: diff };
-  });
+  }, true);
+  tmrDone_();
+  return out;
 }
 
 /**
@@ -3962,6 +4235,7 @@ function setGroupOwnPrice(gkey, price) {
  * Zeilen „von Hand“ mit nun gleichem Schlüssel werden zusammengelegt. -> {gkey (neu), delta (collDelta_)}
  */
 function linkFreeGroup(gkey, cardId, dataLang, variant) {
+  tmrStart_('linkFreeGroup');
   ensureSchema_();
   gkey = String(gkey == null ? '' : gkey);
   const lang = dataLang === 'en' ? 'en' : 'de';
@@ -3976,8 +4250,9 @@ function linkFreeGroup(gkey, cardId, dataLang, variant) {
   const setId = String(set.id || setIdOf_(card));
   const setDate = cardSetDate_(lang, setId, set);
 
-  return withLock_(function () {
+  const out = withLock_(function () {
     const st = dataStore_();
+    const look = lookups_();
     const idx = storeGroupIdx_(st, gkey);
     if (!idx.length) throw new Error('Diese Karte wurde nicht gefunden. Bitte die Liste neu laden.');
     if (idx.some(function (i) { return String(st.rows[i][COL.id] || ''); })) throw new Error('Diese Karte ist schon mit tcgdex verknüpft.');
@@ -4034,13 +4309,14 @@ function linkFreeGroup(gkey, cardId, dataLang, variant) {
       storeTouch_(st, target);
       storeRemove_(st, i);
     });
-    storeCardDex_(card);
-    saveStore_(st);
-    const diff = collDelta_(st);
+    saveStore_(st, look, card);
+    const diff = collDelta_(st, look);
     const first = idx.filter(function (i) { return !st.removed[i]; })[0];
     const keyRow = first != null ? st.rows[first] : st.rows[idx[0]];
     return { gkey: groupKey_(keyRow), delta: diff };
-  });
+  }, true);
+  tmrDone_();
+  return out;
 }
 
 /** Vorschlagsliste fürs Setfeld. */
@@ -5142,10 +5418,10 @@ function dexMapOf_(rows, cache) {
 /**
  * Pokédex-Nummern D:E auf den Stand der Daten bringen (#43): Daraus liest die Formel in Gruppen die Spalte Pokédex-Nr.
  * Schreibt nur, wenn sich etwas geändert hat, dann D:E in einem Rutsch (Karten, die es nicht mehr gibt, fallen weg).
- * only: Liste von Gruppenschlüsseln (Speichern einzelner Karten) -> nur deren Einträge ergänzen bzw. ändern.
- * Innerhalb der Sperre. -> Anzahl geänderter Einträge
+ * Beim Speichern einzelner Karten trägt planDex_ nur deren Einträge nach. Innerhalb der Sperre.
+ * -> Anzahl geänderter Einträge
  */
-function syncDexMap_(rows, cache, only) {
+function syncDexMap_(rows, cache) {
   const ss = ss_();
   const sh = ss.getSheetByName(SHEETS.dexIds) || setupSimpleSheet_(ss, SHEETS.dexIds, DEX_IDS_HEADERS, [0, 1, 2, 3, 4], true);
   const want = dexMapOf_(rows || [], cache || loadDexIds_());
@@ -5157,20 +5433,12 @@ function syncDexMap_(rows, cache, only) {
     const k = String(r[0] == null ? '' : r[0]);
     if (k && !(k in have)) have[k] = String(r[1] == null ? '' : r[1]);
   });
-  let keys = Object.keys(want);
-  if (only) {
-    const sel = {};
-    only.forEach(function (g) { sel[dexKey_(g)] = true; });
-    keys = keys.filter(function (k) { return sel[k]; });
-    keys.forEach(function (k) { if (have[k] !== want[k]) { have[k] = want[k]; n++; } });
-    if (!n) return 0;
-  } else {
-    Object.keys(have).forEach(function (k) { if (!(k in want)) n++; });
-    keys.forEach(function (k) { if (have[k] !== want[k]) n++; });
-    if (!n) return 0;
-    Object.keys(have).forEach(function (k) { if (!(k in want)) delete have[k]; });
-    keys.forEach(function (k) { have[k] = want[k]; });
-  }
+  const keys = Object.keys(want);
+  Object.keys(have).forEach(function (k) { if (!(k in want)) n++; });
+  keys.forEach(function (k) { if (have[k] !== want[k]) n++; });
+  if (!n) return 0;
+  Object.keys(have).forEach(function (k) { if (!(k in want)) delete have[k]; });
+  keys.forEach(function (k) { have[k] = want[k]; });
   const block = [DEX_IDS_HEADERS.slice(3, 5)].concat(Object.keys(have).sort().map(function (k) { return [k, have[k]]; }));
   ensureCols_(sh, 5);
   growRows_(sh, block.length);
@@ -5416,9 +5684,14 @@ function rarityKey_(s) {
 
 /** Stufen aus dem Blatt „Seltenheiten“ (fehlt es: Startreihenfolge): {Schlüssel: Zahl oder null} */
 function rarityRanks_() {
-  const out = {};
   const sh = ss_().getSheetByName(SHEETS.rarity);
-  const rows = !sh ? RARITY_SEED : (sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues() : []);
+  const last = sh ? sh.getLastRow() : 0;
+  return ranksOf_(!sh ? RARITY_SEED : (last >= 2 ? sh.getRange(2, 1, last - 1, 2).getValues() : []));
+}
+
+/** Stufen aus Zeilen [Seltenheit, Stufe] des Blatts „Seltenheiten“ (die erste Zeile einer Seltenheit gilt). */
+function ranksOf_(rows) {
+  const out = {};
   rows.forEach(function (r) {
     const k = rarityKey_(r[0]);
     if (!k || k in out) return;

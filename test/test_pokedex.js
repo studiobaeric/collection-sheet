@@ -210,10 +210,12 @@ function sortEnv() {
   eq('Seltenheit: seltenste zuerst, ohne Stufe am Ende', rr.groups.map(g => g.id || g.name), ['swsh3-136', 'base1-4', 'swsh3-025', 'swsh1-178', 'sv1-1', 'sm9-33', 'Bisasam']);
   eq('Seltenheit im UI-Objekt', rr.groups[0].rarity, 'Selten, besondere Illustration');
   eq('Seltenheit aufsteigend', ids({ sort: 'rarity', desc: false }), ['sv1-1', 'swsh1-178', 'base1-4', 'swsh3-025', 'swsh3-136', 'sm9-33', 'Bisasam']);
-  // Stufe im Blatt ändern wirkt sofort
+  // Stufe im Blatt ändern wirkt sofort: die Änderung von Hand löst onEdit aus, das die Nachschlagewerte vergisst (#43)
   const ssh = env.sheet('Seltenheiten');
   const s = env.objects('Seltenheiten');
-  ssh.getRange(s.findIndex(o => o['Seltenheit'] === 'Holografisch Selten GX') + 2, 2).setValue(10);
+  const cellGx = ssh.getRange(s.findIndex(o => o['Seltenheit'] === 'Holografisch Selten GX') + 2, 2);
+  cellGx.setValue(10);
+  env.ctx.onEdit({ range: cellGx });
   eq('eigene Stufe 10 für die GX-Karte', ids({ sort: 'rarity' })[0], 'sm9-33');
   eq('Preis: teuerste zuerst', ids({ sort: 'price' }).slice(0, 2), ['sm9-33', 'base1-4']);
   eq('Preis aufsteigend: günstigste zuerst', ids({ sort: 'price', desc: false })[0], 'sv1-1');

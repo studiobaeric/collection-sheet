@@ -1056,8 +1056,10 @@ function createEnv(opts) {
     AuthMode: { FULL: 'FULL', LIMITED: 'LIMITED' }
   };
 
+  // console.log landet im Protokoll der Ausführung (Zeitprotokoll, #43): hier in env.logs statt in der Testausgabe
+  env.logs = [];
   const ctx = {
-    console,
+    console: Object.assign(Object.create(console), { log: (...a) => { env.logs.push(a.map(String).join(' ')); }, info: (...a) => { env.logs.push(a.map(String).join(' ')); } }),
     Logger: { log() {} },
     SpreadsheetApp, PropertiesService, CacheService, LockService, UrlFetchApp, Utilities, ScriptApp, HtmlService, DriveApp,
     Session: { getScriptTimeZone: () => 'Europe/Berlin', getActiveUser: () => ({ getEmail: () => '' }), getEffectiveUser: () => ({ getEmail: () => '' }) },
