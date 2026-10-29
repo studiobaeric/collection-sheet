@@ -1,6 +1,6 @@
 # collection-sheet
 
-Ein Google-Sheets-Tool für Pokémon-Kartensammlungen. Karten werden über die [tcgdex-API](https://tcgdex.dev) gesucht und mit Bild, Set und Cardmarket-Trendpreis in einer durchsuchbaren Sammlung gespeichert. Eine Seitenleiste und eine Web-App fürs Handy fügen Karten hinzu, zählen sie hoch und runter und importieren bestehende Listen. Die Sammlung lässt sich nach Name, Nummer oder Künstler durchsuchen und zeigt, wie sich der Preis jeder Karte entwickelt. Ein Pokédex-Blatt zeigt, welche Pokémon schon in der Sammlung sind. Ganz vorne fasst ein Dashboard die wichtigsten Zahlen zusammen und hat Knöpfe für die Funktionen des Menüs.
+Ein Google-Sheets-Tool für Pokémon-Kartensammlungen. Karten werden über die [tcgdex-API](https://tcgdex.dev) gesucht und mit Bild, Set und Cardmarket-Trendpreis in einer durchsuchbaren Sammlung gespeichert. Eine Seitenleiste und eine Web-App fürs Handy fügen Karten hinzu, zählen sie hoch und runter und importieren bestehende Listen. Die Sammlung lässt sich nach Name, Nummer oder Künstler durchsuchen und zeigt, wie sich der Preis jeder Karte entwickelt. Ein Pokédex-Blatt zeigt, welche Pokémon schon in der Sammlung sind, auf Wunsch auch mit Mega-, Regional- und weiteren Formen. Ganz vorne fasst ein Dashboard die wichtigsten Zahlen zusammen und hat Knöpfe für die Funktionen des Menüs.
 
 Nicht verbunden mit Nintendo, Creatures, Game Freak oder The Pokémon Company. Kartenbilder und -daten kommen von tcgdex.
 
@@ -44,7 +44,11 @@ Der nächtliche Preislauf merkt sich den Cardmarket-Trendpreis jeder Karte (je V
 
 Die Veränderung gilt für den Preis einer Karte, nicht mal Anzahl. Karten mit eigenem Preis bekommen keine Veränderung, weil ihr Wert nicht Cardmarket folgt; der Preislauf ruft sie trotzdem ab, damit ihr Verlauf weiterläuft.
 
-Seitenleiste und Web-App laden die ganze Sammlung einmal, wenn du den Tab öffnest. Suchen und Sortieren laufen danach ohne Warten. Jede Karte steht in einer schlanken Zeile mit Set-Symbol, Nummer und Anzahl; ein Tipp klappt sie auf, mit Karteninfo, Preis und Exemplaren. Unter **Bilder** wählst du klein, mittel oder groß. Ein weiteres Exemplar kommt über **+ Exemplar**, mit eigener Sprache und eigenem Zustand; −1 sitzt an jedem Exemplar. + Exemplar, −1 und Bearbeiten speichern im Hintergrund, die Karte zeigt so lange „speichert …“ und bleibt an ihrer Stelle, bis du neu suchst oder sortierst. Hast du im Blatt oder auf einem anderen Gerät etwas geändert, holt **Neu laden** den aktuellen Stand.
+Seitenleiste und Web-App laden die ganze Sammlung einmal, wenn du den Tab öffnest. Suchen und Sortieren laufen danach ohne Warten. Jede Karte steht in einer schlanken Zeile mit Set-Symbol, Nummer und Anzahl; ein Tipp klappt sie auf, mit Karteninfo, Preis und Exemplaren. Unter **Bilder** wählst du klein, mittel oder groß. Ein weiteres Exemplar kommt über **+ Exemplar**, mit eigener Sprache und eigenem Zustand; −1 sitzt an jedem Exemplar. Beim Bearbeiten lässt sich auch die Variante ändern, etwa auf Reverse Holo, der Preis passt sich an. + Exemplar, −1 und Bearbeiten speichern im Hintergrund, die Karte zeigt so lange „speichert …“ und bleibt an ihrer Stelle, bis du neu suchst oder sortierst. Hast du im Blatt oder auf einem anderen Gerät etwas geändert, holt **Neu laden** den aktuellen Stand.
+
+## Pokédex mit Formen
+
+Das Blatt **Pokédex** und der Pokédex-Tab zeigen je Pokémon eine Zeile. Über die Haken oben rechts im Blatt (im Tab unter **Formen ▾**) kommen Formen dazu: Mega, Regionalformen, Gigadynamax, Geschlechter und weitere Formen, oder alle auf einmal. Ein Pokémon mit eingeblendeten Formen bekommt dann eine Zeile für die Grundform und eine je Form, etwa #6.1 Glurak und #6.2 Mega-Glurak X. Karten landen über ihren Namen von selbst bei ihrer Form; stimmt das einmal nicht, stellst du beim Bearbeiten im Feld **Form** die richtige ein. Die Formenliste kommt von [PokeAPI](https://pokeapi.co) und lädt sich jede Woche neu.
 
 ## Updates
 

@@ -7,6 +7,16 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.2.2] – 2026-10-29
+
+- Set-Symbole erscheinen wieder, auch wenn tcgdex sie als .webp liefert
+- Bearbeiten: Variante änderbar, z. B. Reverse Holo, mit passendem Preis
+- Pokédex auf Wunsch mit Formen: Mega, Regional, Gigadynamax und mehr
+- Formen je Gruppe per Haken an, im Blatt Pokédex und im Pokédex-Tab
+- Karten landen von selbst bei ihrer Form, z. B. Mega-Glurak X
+- Bearbeiten: Feld Form, falls eine Karte bei der falschen Form steht
+- Formenliste kommt aus PokeAPI und lädt sich wöchentlich neu
+
 ## [1.2.1] – 2026-10-29
 
 - Set-Symbol statt Set-Name in Treffern, Sammlung und Bestätigung

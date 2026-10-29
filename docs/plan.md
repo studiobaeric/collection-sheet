@@ -16,6 +16,8 @@ Ein Google Sheet mit Apps-Script-Oberfläche erfasst deutsche Pokémon-Karten ü
 | Variante | Standard ohne Holo; Checkbox Reverse Holo und 1. Edition nur, wenn tcgdex die Variante kennt; Holo-Rares automatisch als Holo |
 | Suchfelder Hinzufügen | Name, Nummer (auch als 025/165), Set optional mit Vorschlagsliste |
 | Nach dem Hinzufügen | Seit 1.2.1 (#53) bleiben die Treffer, der Name steht markiert im Feld, Nummer und Set sind leer; jedes Hinzufügen ist ein Exemplar (kein Feld Anzahl mehr, #50), weitere über „+ Exemplar“ in der Sammlung (#49) |
+| Variante ändern | Seit 1.2.2 (#54) beim Bearbeiten eines Exemplars, mit Preis der neuen Variante |
+| Pokédex-Formen | Seit 1.2.2 (#55) optional: Haken je Gruppe (Mega, Regional, Gigadynamax, Geschlechter, Weitere), Formen aus PokeAPI, Karten landen per Name bei ihrer Form, Feld Form beim Bearbeiten |
 | Entfernen | Lokale Suche, Knöpfe -1 und +1 wirken sofort, kurz Rückgängig möglich |
 | 0er-Einträge | Standardmäßig versteckt, per Schalter ausgegraut sichtbar, in Suchergebnissen immer ganz unten |
 | Sammlungssuche | Ein Suchfeld (Name oder Nummer) plus Set-Filter, per Formel |

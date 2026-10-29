@@ -4,6 +4,22 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.2.2",
+      "tag": "v1.2.2",
+      "date": "2026-10-29",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Set-Symbole erscheinen wieder, auch wenn tcgdex sie als .webp liefert",
+        "Bearbeiten: Variante änderbar, z. B. Reverse Holo, mit passendem Preis",
+        "Pokédex auf Wunsch mit Formen: Mega, Regional, Gigadynamax und mehr",
+        "Formen je Gruppe per Haken an, im Blatt Pokédex und im Pokédex-Tab",
+        "Karten landen von selbst bei ihrer Form, z. B. Mega-Glurak X",
+        "Bearbeiten: Feld Form, falls eine Karte bei der falschen Form steht",
+        "Formenliste kommt aus PokeAPI und lädt sich wöchentlich neu"
+      ]
+    },
+    {
       "version": "1.2.1",
       "tag": "v1.2.1",
       "date": "2026-10-29",
