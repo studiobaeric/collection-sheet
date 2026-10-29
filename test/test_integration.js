@@ -269,6 +269,15 @@ function checkUiMatchesServer(E, label) {
 }
 
 function headText(E, i) { return E.$('gh' + i).textContent.replace(/\s+/g, ' '); }
+/** Anzahl rechts in der Zeile (#52), z. B. „4×“ */
+function headCount(E, i) { const n = E.$('gh' + i).querySelector('.side .n'); return n ? n.textContent : null; }
+/** Wert einer Zeile der Info-Tabelle (aufgeklappt, #52) */
+function infoRow(E, i, label) {
+  const th = [...E.$('gp' + i).querySelectorAll('table.itab th')].find(x => x.textContent === label);
+  return th ? th.nextElementSibling.textContent.replace(/\s+/g, ' ').trim() : null;
+}
+/** Knopf in der k-ten Exemplar-Zeile (nur −1 und Bearbeiten, #49) */
+function rowBtn(E, i, k, text) { const r = E.$('gr' + i).querySelectorAll('.erow')[k]; return r ? E.btn(r, text) : null; }
 
 // ---------------------------------------------------------------------------
 // Testdaten (tcgdex-Attrappe)
@@ -381,7 +390,22 @@ function seedImport(env) {
   const { $ } = E;
   await E.settle();
   t.ok('Start: getSetSuggestions + getUiConfig', E.calls('getSetSuggestions').length === 1 && E.calls('getUiConfig').length === 1, E.callLog.map(c => c.fn));
-  t.ok('Setliste aus dem Set-Cache', /Flammende Finsternis/.test($('setList').innerHTML) && /Grundset/.test($('setList').innerHTML));
+  t.ok('Sets aus dem Set-Cache, mit Symbol (#47)', E.win.SETS.list.some(s => s.name === 'Flammende Finsternis' && /swsh3\/symbol$/.test(s.symbol)) &&
+    E.win.SETS.list.some(s => s.name === 'Grundset' && !s.symbol), E.win.SETS.list);
+  {
+    // Auswahlliste am Setfeld statt datalist: Symbol und Name, Tippen filtert, Antippen übernimmt
+    $('fSet').focus();
+    const drop = E.doc.querySelector('.setdrop');
+    const optTexts = () => [...drop.querySelectorAll('.opt')].map(o => o.textContent);
+    t.ok('Setfeld: Auswahlliste mit Symbol und Name', !!drop && !drop.classList.contains('hidden') && optTexts().indexOf('Flammende Finsternis') >= 0 &&
+      optTexts().indexOf('Grundset') >= 0 && !!drop.querySelector('.opt img.sym') && !$('setList'), drop && drop.innerHTML.slice(0, 300));
+    E.type($('fSet'), 'grund');
+    t.ok('Setfeld: Tippen filtert', J(optTexts()) === J(['Grundset']), optTexts());
+    E.click(drop.querySelector('.opt'));
+    t.ok('Setfeld: Antippen übernimmt den Namen', $('fSet').value === 'Grundset' && drop.classList.contains('hidden'));
+    $('fSet').value = '';
+    $('fSet').blur();
+  }
   t.ok('LANGS vom Server (11, DE zuerst)', E.win.LANGS.length === 11 && E.win.LANGS[0].code === 'DE' && E.win.LANGS[0].label === 'Deutsch');
   t.ok('CONDITIONS vom Server, "" zuerst', J(E.win.CONDITIONS) === J(['', 'MT', 'NM', 'EX', 'GD', 'LP', 'PL', 'PO']), E.win.CONDITIONS);
   t.ok('CONDITION_LABELS behalten die UI-Texte', /Near Mint/.test(E.win.CONDITION_LABELS.NM));
@@ -396,17 +420,20 @@ function seedImport(env) {
   t.section('Hinzufügen: Grundwerte und dieselbe Karte noch einmal');
   E.type($('fName'), 'Glurak'); E.type($('fNumber'), '025');
   await E.clickSettle(E.btn($('searchForm'), 'Suchen'));
-  t.ok('Einzeltreffer -> Bestätigung mit echten Details', !!$('cAdd') && /Flammende Finsternis · 025\/189/.test($('addResults').textContent), $('addResults').textContent.slice(0, 200));
+  const metaSym = $('addResults').querySelector('.meta img.sym');
+  t.ok('Einzeltreffer -> Bestätigung mit echten Details, Set als Symbol (#47)', !!$('cAdd') && /025\/189/.test($('addResults').querySelector('.meta').textContent) &&
+    !!metaSym && metaSym.getAttribute('title') === 'Flammende Finsternis' && !/Flammende Finsternis/.test($('addResults').textContent), $('addResults').textContent.slice(0, 200));
   t.ok('Trendpreis aus getCardDetail', /1,50/.test($('cPrice').textContent), $('cPrice').textContent);
   t.ok('Sprache-Auswahl mit Serverliste', $('cLang').options.length === 11 && $('cLang').value === 'DE');
-  E.pick($('cCond'), 'NM'); $('cQty').value = '2';
+  t.ok('kein Feld Anzahl mehr (#50)', !$('cQty'));
+  E.pick($('cCond'), 'NM');
   await E.clickSettle($('cAdd'));
   let addRes = E.lastCall('addCard');
   t.ok('addCard ok', addRes && !addRes.error && addRes.res && /^E[0-9a-f]{10}$/.test(addRes.res.eid), addRes);
-  t.ok('Meldung: Glurak, Normal, NM, 2 Stück', /Glurak, Normal, NM hinzugefügt, jetzt 2 Stück\./.test($('addLast').textContent), $('addLast').textContent);
+  t.ok('Meldung: Glurak, Normal, NM, 1 Stück', /Glurak, Normal, NM hinzugefügt, jetzt 1 Stück\./.test($('addLast').textContent), $('addLast').textContent);
   let D = dataRows(env);
   const handA = D.find(r => r.eid === addRes.res.eid);
-  t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 2 &&
+  t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 1 &&
     handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA); // Set-Datum gleich (#43)
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
   // Die Tabelle rechnet selbst (#43): Gruppen gleich da, keine Leiste „Einsortieren“ mehr
@@ -414,13 +441,29 @@ function seedImport(env) {
     [env.groups().length, !!$('sortBar'), addRes.res]);
   checkSheets(env, 'nach addCard');
   t.ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1'));
-  // dieselbe Karte noch einmal über das Formular: zählt in dieselbe Zeile
-  E.type($('fName'), 'Glurak'); E.type($('fNumber'), '025');
+  // Treffer bleiben (#53): der Name steht markiert im Feld, Nummer und Set sind leer, der eine Treffer als Kachel
+  t.ok('danach: Name markiert und im Fokus, Nummer und Set leer', $('fName').value === 'Glurak' && E.doc.activeElement === $('fName') &&
+    $('fName').selectionStart === 0 && $('fName').selectionEnd === 6 && $('fNumber').value === '' && $('fSet').value === '',
+    [$('fName').value, $('fNumber').value, $('fSet').value]);
+  const oneTile = $('addResults').querySelectorAll('.tile');
+  t.ok('danach: „1 Treffer – Karte antippen“ mit der Kachel', oneTile.length === 1 && /1 Treffer – Karte antippen/.test($('addResults').textContent), $('addResults').textContent.slice(0, 120));
+  // dieselbe Karte noch einmal: Kachel antippen, zählt in dieselbe Zeile
+  await E.clickSettle(oneTile[0]);
+  t.ok('Kachel antippen: wieder die Bestätigung', !!$('cAdd'));
+  E.pick($('cCond'), 'NM');
+  await E.clickSettle($('cAdd'));
+  t.ok('noch einmal hinzugefügt -> 2 Stück', /jetzt 2 Stück/.test($('addLast').textContent), $('addLast').textContent);
+  // und noch einmal über die Suche, die Nummer im Namensfeld (#51)
+  E.type($('fName'), 'Glurak 025');
   await E.clickSettle(E.btn($('searchForm'), 'Suchen'));
+  t.ok('„Glurak 025“ im Namensfeld: die Karte direkt', !!$('cAdd') && /025\/189/.test($('addResults').textContent) &&
+    J(E.lastCall('searchCards').args) === J([{ name: 'Glurak', number: '025', set: '' }]), E.lastCall('searchCards').args);
   E.pick($('cCond'), 'NM');
   await E.clickSettle($('cAdd'));
   t.ok('noch einmal hinzugefügt -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
+  t.ok('danach steht nur der Name im Feld', $('fName').value === 'Glurak', $('fName').value);
   t.ok('Daten: 3 Stück in derselben Zeile', dataRows(env).find(r => r.eid === handA.eid).count === 3 && E.lastCall('addCard').res.eid === handA.eid);
+  t.ok('jedes Hinzufügen ist ein Exemplar', E.calls('addCard').length === 3 && E.calls('addCard').every(c => c.args[0].qty === 1));
   checkSheets(env, 'nach dem zweiten Hinzufügen');
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
   t.ok('Gruppen: 3× DE NM, Preis 1,5, Preisstand Trend', G && G['Exemplare'] === '3× DE NM' && G['Anzahl'] === 3 && G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
@@ -496,16 +539,26 @@ function seedImport(env) {
   const GK = 'swsh3-025|normal|';
   let gi = E.gIdx(GK);
   t.ok('Sammlung: Gruppen statt Zeilen', st.groups.length === 5 && gi >= 0, st.groups.map(g => g.gkey));
-  t.ok('Glurak: Exemplare und Anzahl', /1× DE, 3× DE NM/.test(headText(E, gi)) && $('gh' + gi).querySelector('.cnt').textContent === '4', headText(E, gi));
-  t.ok('Glurak: Set · Nummer · Variante · Preis', /Flammende Finsternis · 025\/189 · Normal · 1,50\s€/.test(headText(E, gi)), headText(E, gi));
+  // Zeile (#52): Name; Set-Symbol · Nummer (Variante nur, wenn nicht Normal), rechts die Anzahl. Kein Preis, keine Exemplare.
+  t.ok('Glurak: Anzahl rechts, Exemplare erst aufgeklappt', headCount(E, gi) === '4×' && !/DE/.test(headText(E, gi)), headText(E, gi));
+  const gSym = $('gh' + gi).querySelector('.s img.sym');
+  t.ok('Glurak: Set-Symbol · Nummer, ohne Normal und Preis (#47)', !!gSym && gSym.getAttribute('title') === 'Flammende Finsternis' && /swsh3\/symbol\.webp$/.test(gSym.getAttribute('src')) &&
+    $('gh' + gi).querySelector('.s').textContent.trim() === '025/189' && !/Normal|€/.test(headText(E, gi)), headText(E, gi));
   const si = E.gIdx('swsh3-025|normal|Staff');
-  t.ok('Staff: Titel mit Version, Preis manuell', $('gh' + si).querySelector('.t').textContent === 'Glurak · Staff' && /2,50\s€ manuell/.test(headText(E, si)), headText(E, si));
+  t.ok('Staff: Titel mit Version, kein Preis in der Zeile', $('gh' + si).querySelector('.t').textContent === 'Glurak · Staff' && !/€/.test(headText(E, si)), headText(E, si));
+  E.expand(si);
+  t.ok('Staff aufgeklappt: Preis als eigener Preis', /^2,50\s€ \(eigener Preis\)/.test(infoRow(E, si, 'Preis')), infoRow(E, si, 'Preis'));
+  E.expand(si); // wieder zu
   const fi = E.gIdx('frei:unbekannt~grundset~4|normal|');
-  t.ok('freie Karte markiert, ohne Bild', /freie Karte/.test(headText(E, fi)) && $('gh' + fi).querySelector('img').getAttribute('src') === E.win.PLACEHOLDER);
+  t.ok('freie Karte markiert, mit Set-Namen, ohne Bild', /freie Karte · Grundset · 4\/102/.test(headText(E, fi)) && $('gh' + fi).querySelector('img').getAttribute('src') === E.win.PLACEHOLDER, headText(E, fi));
   E.expand(gi);
+  t.ok('Info-Tabelle: Set, Nummer, Variante, Preis mit Stand', infoRow(E, gi, 'Set') === 'Flammende Finsternis' && infoRow(E, gi, 'Nummer') === '025/189' &&
+    infoRow(E, gi, 'Variante') === 'Normal' && /^1,50\s€ · Stand 13\.10\.(2026)?Eigener Preis …$/.test(infoRow(E, gi, 'Preis')), $('gp' + gi).textContent);
   let rowsText = [...$('gr' + gi).querySelectorAll('.einfo')].map(e => e.textContent);
   t.ok('Exemplar-Zeilen: Hand zuerst, dann Import mit Quellname', rowsText.length === 2 && rowsText[0].indexOf('3× DE NM · von Hand') === 0 &&
     rowsText[1].indexOf('1× DE · Pokemon Ordner, Import 3') === 0 && /Ordner: Seite 3/.test(rowsText[1]), rowsText);
+  t.ok('jede Zeile nur −1 und Bearbeiten, „+ Exemplar“ darunter (#49)', [...$('gr' + gi).querySelectorAll('.erow')].every(r => J([...r.querySelectorAll('button')].map(b => b.textContent)) === J(['−1', 'Bearbeiten'])) &&
+    !E.btn($('gh' + gi), '+1') && !E.btn($('gh' + gi), '−1') && !!E.btn($('gx' + gi), '+ Exemplar'));
   checkUiMatchesServer(E, 'Sammlung geöffnet');
   // Suche nach Sonderversion (Server-Suche, entprellt)
   E.type($('colQuery'), 'Staff');
@@ -526,16 +579,11 @@ function seedImport(env) {
   await E.settle();
   t.ok('wieder alle Gruppen, Glurak noch offen', E.win.state.groups.length === 5 && E.group(GK).open);
 
-  // ---- 7. Gruppe -1 mit Auswahl (Hand + Import), Rückgängig ----
-  t.section('Gruppe −1 mit Auswahl und Rückgängig');
+  // ---- 7. −1 an einem Exemplar (Import-Zeile), Rückgängig ----
+  t.section('Exemplar −1 und Rückgängig');
   gi = E.gIdx(GK);
-  E.click(E.btn($('gh' + gi), '−1'));
-  await E.settle();
-  const opts = [...$('gc' + gi).querySelectorAll('.btn.opt')].map(b => b.textContent);
-  t.ok('Auswahl „Welches Exemplar?“ mit beiden Zeilen', /Welches Exemplar\?/.test($('gc' + gi).textContent) && opts.length === 3 &&
-    opts[0] === '3× DE NM · von Hand' && opts[1] === '1× DE · Pokemon Ordner, Import 3' && opts[2] === 'Abbrechen', opts);
   t.ok('noch kein Serveraufruf', E.calls('adjustEntry').length === 0);
-  await E.clickSettle([...$('gc' + gi).querySelectorAll('.btn.opt')][1]);
+  await E.clickSettle(rowBtn(E, gi, 1, '−1'));
   let adj = E.lastCall('adjustEntry');
   t.eq('adjustEntry(Import-Zeile, -1)', adj.args, [imp.eidA, -1]);
   t.ok('Antwort mit Token und handentfernt-Log', adj.res && adj.res.applied === -1 && adj.res.token.logIds.length === 1 && adj.res.token.createdEid === '' && adj.res.groupCount === 3, adj.res);
@@ -546,8 +594,8 @@ function seedImport(env) {
   t.ok('Import-Protokoll: handentfernt (Nr 3, fp, Menge 1, Quelle-ID)', he.length === 1 && he[0]['Import-Nr'] === 3 && he[0]['Eintrag-ID'] === imp.eidA &&
     he[0]['Quellzeile'] === 'fpaaaaaaaaaa' && he[0]['Menge'] === 1 && he[0]['Quelle-ID'] === 'SRC1' && he[0]['Status'] === 'erledigt' &&
     J(JSON.parse(he[0]['Daten'])) === J({ countBefore: 1 }) && he[0]['Log-ID'] === adj.res.token.logIds[0], he);
-  t.ok('UI: Anzahl 3, Rückgängig sichtbar, Auswahl zu', $('gh' + gi).querySelector('.cnt').textContent === '3' && !!E.btn($('gh' + gi), 'Rückgängig') && $('gc' + gi).innerHTML === '');
-  t.ok('UI: Exemplare nur noch 3× DE NM', /· 3× DE NM/.test(headText(E, gi)) && !/1× DE,/.test(headText(E, gi)), headText(E, gi));
+  t.ok('UI: Anzahl 3, Rückgängig sichtbar', headCount(E, gi) === '3×' && !!E.btn($('gh' + gi), 'Rückgängig'), headText(E, gi));
+  t.ok('UI: Exemplare nur noch 3× DE NM', E.group(GK).exemplare === '3× DE NM' && rowBtn(E, gi, 1, '−1').disabled, [E.group(GK).exemplare, $('gr' + gi).textContent]);
   checkSheets(env, 'nach −1 Import');
   checkUiMatchesServer(E, 'nach −1 Import');
   await E.clickSettle(E.btn($('gh' + gi), 'Rückgängig'));
@@ -556,78 +604,106 @@ function seedImport(env) {
   D = dataRows(env);
   t.ok('Daten: Import-Zeile wieder 1', D.find(r => r.eid === imp.eidA).count === 1);
   t.ok('Import-Protokoll: handentfernt wieder weg, neu-Einträge bleiben', env.proto().filter(p => p['Typ'] === 'handentfernt').length === 0 && env.proto().filter(p => p['Typ'] === 'neu').length === 2);
-  t.ok('UI: Anzahl 4, kein Rückgängig', $('gh' + gi).querySelector('.cnt').textContent === '4' && !E.btn($('gh' + gi), 'Rückgängig'));
+  t.ok('UI: Anzahl 4, kein Rückgängig', headCount(E, gi) === '4×' && !E.btn($('gh' + gi), 'Rückgängig'));
   checkSheets(env, 'nach Rückgängig');
   checkUiMatchesServer(E, 'nach Rückgängig');
 
-  // -1 auf Hand-Zeile über die Auswahl, Rückgängig verfällt nach 5 s
-  E.click(E.btn($('gh' + gi), '−1'));
-  await E.clickSettle([...$('gc' + gi).querySelectorAll('.btn.opt')][0]);
+  // −1 auf die Zeile von Hand, Rückgängig verfällt nach 5 s
+  await E.clickSettle(rowBtn(E, gi, 0, '−1'));
+  t.eq('−1 an der Zeile von Hand', E.lastCall('adjustEntry').args, [handA.eid, -1]);
   t.ok('−1 von Hand: kein Protokolleintrag', E.lastCall('adjustEntry').res.token.logIds.length === 0 && env.proto().filter(p => p['Typ'] === 'handentfernt').length === 0);
   t.ok('Rückgängig da', !!E.btn($('gh' + gi), 'Rückgängig'));
   E.win.__advance(5000);
   t.ok('Rückgängig nach 5 s weg', !E.btn($('gh' + gi), 'Rückgängig'));
-  // Gruppe +1 mit einer Zeile von Hand: direkt
-  await E.clickSettle(E.btn($('gh' + gi), '+1'));
-  t.eq('+1 geht direkt an die Zeile von Hand', E.lastCall('adjustEntry').args, [handA.eid, 1]);
-  t.ok('Daten: Hand wieder 3', dataRows(env).find(r => r.eid === handA.eid).count === 3);
-  checkUiMatchesServer(E, 'nach −1/+1 von Hand');
+  // ein Exemplar mehr (#49): „+ Exemplar“ öffnet die Bestätigung dieser Karte im Tab Hinzufügen, danach zurück zur Karte
+  const nDetail = E.calls('getCardDetail').length;
+  const addBefore = [$('addResults').textContent, $('fName').value];
+  E.click(E.btn($('gx' + gi), '+ Exemplar'));
+  await E.settle();
+  t.ok('+ Exemplar: Bestätigung der Karte im Tab Hinzufügen', !$('paneAdd').classList.contains('hidden') && !!$('cAdd') && /Weiteres Exemplar/.test($('addResults').textContent) &&
+    E.calls('getCardDetail').length === nDetail + 1 && J(E.lastCall('getCardDetail').args) === J(['swsh3-025', 'de']) && $('cVersion').value === '' && !$('cQty'),
+    $('addResults').textContent.slice(0, 160));
+  E.pick($('cCond'), 'NM');
+  await E.clickSettle($('cAdd'));
+  t.eq('addCard: ein Exemplar NM', noRid(E.lastCall('addCard').args[0]), { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1, inputName: 'Glurak', cardLang: 'DE', version: '', ownPrice: null });
+  t.ok('in dieselbe Zeile von Hand: wieder 3', E.lastCall('addCard').res.eid === handA.eid && dataRows(env).find(r => r.eid === handA.eid).count === 3);
+  gi = E.gIdx(GK);
+  t.ok('zurück in der Sammlung, Karte offen, Anzahl 4, ohne Neuladen', !$('paneColl').classList.contains('hidden') && E.group(GK).open &&
+    !$('gx' + gi).classList.contains('hidden') && headCount(E, gi) === '4×' && !/speichert/.test(headText(E, gi)), headText(E, gi));
+  t.ok('der Tab Hinzufügen steht wieder wie vorher', J([$('addResults').textContent, $('fName').value]) === J(addBefore), [$('addResults').textContent.slice(0, 120), addBefore[0].slice(0, 120)]);
+  checkSheets(env, 'nach −1 und + Exemplar');
+  checkUiMatchesServer(E, 'nach −1 und + Exemplar');
 
-  // ---- 8. +1 auf eine Gruppe nur mit Import-Zeile: neue Zeile von Hand, Rückgängig löscht sie ----
-  t.section('+1 auf Import-Gruppe legt Zeile von Hand an');
+  // ---- 8. „+ Exemplar“ bei einer Karte nur aus dem Import: neue Zeile von Hand ----
+  t.section('+ Exemplar bei Import-Karte legt Zeile von Hand an');
   const GB = 'swsh3-136|normal|';
   let bi = E.gIdx(GB);
-  t.ok('Import-Gruppe swsh3-136 da (2× DE EX)', bi >= 0 && /2× DE EX/.test(headText(E, bi)), headText(E, bi));
-  await E.clickSettle(E.btn($('gh' + bi), '+1'));
-  adj = E.lastCall('adjustEntry');
-  t.eq('adjustEntry(Import-Zeile, +1)', adj.args, [imp.eidB, 1]);
-  t.ok('Server legt Zeile von Hand an (createdEid)', adj.res.token.createdEid && adj.res.eid === adj.res.token.createdEid && adj.res.count === 1 && adj.res.groupCount === 3, adj.res);
+  E.expand(bi);
+  t.ok('Import-Gruppe swsh3-136 da (2× DE EX)', bi >= 0 && /2× DE EX/.test($('gr' + bi).textContent), $('gr' + bi).textContent);
+  E.click(E.btn($('gx' + bi), '+ Exemplar'));
+  await E.settle();
+  E.pick($('cCond'), 'EX');
+  await E.clickSettle($('cAdd'));
+  const addB = E.lastCall('addCard');
   D = dataRows(env);
-  const created = D.find(r => r.eid === adj.res.token.createdEid);
+  const created = D.find(r => r.eid === addB.res.eid);
   t.ok('Daten: neue Zeile von Hand, gleicher Schlüssel, Import-Zeile unverändert', created && created.origin === 'Hand' && created.fp === '' && created.count === 1 &&
     created.key === 'swsh3-136|normal||EX|DE' && D.find(r => r.eid === imp.eidB).count === 2, created);
-  t.ok('UI: Gruppe 3, neue Zeile im aufgeklappten Bereich', $('gh' + bi).querySelector('.cnt').textContent === '3' && E.group(GB).rows.length === 2 && E.group(GB).rows[0].eid === created.eid);
-  checkSheets(env, 'nach +1 Import-Gruppe');
-  checkUiMatchesServer(E, 'nach +1 Import-Gruppe');
-  await E.clickSettle(E.btn($('gh' + bi), 'Rückgängig'));
+  bi = E.gIdx(GB);
+  t.ok('UI: Gruppe 3, neue Zeile im aufgeklappten Bereich', headCount(E, bi) === '3×' && E.group(GB).open && E.group(GB).rows.length === 2 && E.group(GB).rows[0].eid === created.eid);
+  checkSheets(env, 'nach + Exemplar Import-Gruppe');
+  checkUiMatchesServer(E, 'nach + Exemplar Import-Gruppe');
+  // das neue Exemplar wieder weg (−1 auf die Zeile von Hand)
+  await E.clickSettle(rowBtn(E, bi, 0, '−1'));
+  t.eq('−1 an der neuen Zeile von Hand', E.lastCall('adjustEntry').args, [created.eid, -1]);
   D = dataRows(env);
-  t.ok('Rückgängig: neue Zeile von Hand gelöscht', !D.some(r => r.eid === created.eid) && D.find(r => r.eid === imp.eidB).count === 2);
-  t.ok('UI: Zeile entfernt, Anzahl 2', E.group(GB).rows.length === 1 && $('gh' + bi).querySelector('.cnt').textContent === '2');
-  checkSheets(env, 'nach Rückgängig (angelegte Zeile)');
-  checkUiMatchesServer(E, 'nach Rückgängig (angelegte Zeile)');
-  // −1 auf die Import-Gruppe (nur eine Zeile): direkt, mit Protokoll
-  await E.clickSettle(E.btn($('gh' + bi), '−1'));
-  t.eq('−1 mit einer Zeile geht direkt', E.lastCall('adjustEntry').args, [imp.eidB, -1]);
+  t.ok('Daten: Zeile von Hand 0, Import-Zeile 2', D.find(r => r.eid === created.eid).count === 0 && D.find(r => r.eid === imp.eidB).count === 2);
+  t.ok('UI: Anzahl 2', headCount(E, bi) === '2×');
+  checkSheets(env, 'nach −1 (neue Zeile)');
+  checkUiMatchesServer(E, 'nach −1 (neue Zeile)');
+  // −1 auf die Import-Zeile: mit Protokoll
+  await E.clickSettle(rowBtn(E, bi, 1, '−1'));
+  t.eq('−1 an der Import-Zeile', E.lastCall('adjustEntry').args, [imp.eidB, -1]);
   he = env.proto().filter(p => p['Typ'] === 'handentfernt');
   t.ok('handentfernt für Import-Zeile B', he.length === 1 && he[0]['Eintrag-ID'] === imp.eidB && he[0]['Quellzeile'] === 'fpbbbbbbbbbb' && J(JSON.parse(he[0]['Daten'])) === J({ countBefore: 2 }), he);
   checkUiMatchesServer(E, 'nach −1 Import-Gruppe');
 
-  // ---- 8b. Neu laden, während -1/+1 unterwegs ist: erst nach dem Speichern ----
+  // ---- 8b. Neu laden, während etwas gespeichert wird: erst nach dem Speichern ----
   t.section('Neu laden während einer Änderung');
   {
     const SK = 'swsh3-025|normal|Staff';
     let k = E.gIdx(SK);
-    E.click(E.btn($('gh' + k), '+1'));
-    E.click(E.btn($('gh' + k), '+1')); // Doppelklick: Knopf ist gesperrt
-    t.ok('Doppelklick: nur ein adjustEntry offen', E.pending.filter(p => p.fn === 'adjustEntry').length === 1, E.pending.map(p => p.fn));
+    if (!E.group(SK).open) E.expand(k);
+    // „+ Exemplar“ speichert über die Warteschlange der Sammlung
+    E.click(E.btn($('gx' + k), '+ Exemplar'));
+    await E.settle();
+    t.ok('Sonderversion vorbelegt', $('cVersion').value === 'Staff', $('cVersion').value);
+    E.pick($('cLang'), 'EN'); E.pick($('cCond'), 'LP');
+    E.click($('cAdd'));
+    k = E.gIdx(SK);
+    t.ok('gleich zurück in der Sammlung, die Karte zeigt „speichert …“', !$('paneColl').classList.contains('hidden') && /speichert/.test(headText(E, k)) &&
+      E.pending.filter(p => p.fn === 'addCard').length === 1, [headText(E, k), E.pending.map(p => p.fn)]);
     const nLoad = E.calls('getCollection').length;
     E.click($('collReload'));
     t.ok('Neu laden wartet auf das Speichern', !E.pending.some(p => p.fn === 'getCollection') && /sobald alles gespeichert/.test($('collMsg').textContent), $('collMsg').textContent);
-    await E.serveFn('adjustEntry');
+    await E.serveFn('addCard');
     t.ok('danach lädt es neu', E.pending.some(p => p.fn === 'getCollection'), E.pending.map(p => p.fn));
     await E.settle();
     k = E.gIdx(SK);
-    t.ok('+1 in der neu geladenen Liste', E.calls('getCollection').length === nLoad + 1 && E.group(SK).count === 2 && $('gh' + k).querySelector('.cnt').textContent === '2', E.group(SK));
+    t.ok('+ Exemplar in der neu geladenen Liste, Karte offen', E.calls('getCollection').length === nLoad + 1 && E.group(SK).count === 2 && headCount(E, k) === '2×' &&
+      E.group(SK).open, E.group(SK));
     checkUiMatchesServer(E, 'nach Neu laden');
-    // Neu laden läuft schon, dann −1: die alte Antwort wird verworfen und noch einmal geladen
+    // Neu laden läuft schon, dann −1 (Doppelklick): die alte Antwort wird verworfen und noch einmal geladen
     E.click($('collReload'));
     t.ok('Knopf zeigt „Lädt …“', $('collReload').disabled && /Lädt/.test($('collReload').textContent));
-    E.click(E.btn($('gh' + k), '−1'));
+    E.click(rowBtn(E, k, 0, '−1'));
+    E.click(rowBtn(E, k, 0, '−1')); // Doppelklick: Knopf ist gesperrt
+    t.ok('Doppelklick: nur ein adjustEntry offen', E.pending.filter(p => p.fn === 'adjustEntry').length === 1, E.pending.map(p => p.fn));
     await E.serveFn('adjustEntry');
     await E.serveFn('getCollection'); // Stand von vor dem −1? Egal, das UI lädt noch einmal
     await E.settle();
     k = E.gIdx(SK);
-    t.ok('−1 während Neu laden: kein doppeltes Abziehen', E.group(SK).count === 1 && $('gh' + k).querySelector('.cnt').textContent === '1' &&
+    t.ok('−1 während Neu laden: kein doppeltes Abziehen', E.group(SK).count === 1 && headCount(E, k) === '1×' &&
       E.calls('getCollection').length === nLoad + 3 && !$('collReload').disabled, [E.group(SK).count, E.calls('getCollection').length - nLoad]);
     checkUiMatchesServer(E, '−1 während Neu laden');
     t.ok('Daten: Staff wieder 1', dataRows(env).find(r => r.key === 'swsh3-025|normal|Staff|LP|EN').count === 1);
@@ -709,12 +785,20 @@ function seedImport(env) {
   // ---- 10. Eigener Preis für die Gruppe ----
   t.section('Eigener Preis');
   gi = E.gIdx(GK);
+  // hinter einem Link in der Zeile Preis (#52): erst ein Tipp öffnet das Feld
+  t.ok('Feld erst nach dem Link', !$('op' + gi) && !!E.btn($('gp' + gi), 'Eigener Preis …'));
+  E.click(E.btn($('gp' + gi), 'Eigener Preis …'));
+  t.ok('Link öffnet Feld, Entfernen gesperrt (noch kein eigener Preis)', !!$('op' + gi) && $('op' + gi).value === '' && E.btn($('gp' + gi), 'Entfernen').disabled &&
+    E.doc.activeElement === $('op' + gi));
   E.type($('op' + gi), '3,10');
   await E.clickSettle(E.btn($('gp' + gi), 'Speichern'));
   t.eq('setGroupOwnPrice(gkey, 3.1)', E.lastCall('setGroupOwnPrice').args, [GK, 3.1]);
   D = dataRows(env).filter(r => env.ctx.groupKey_(env.run('readData_(sheet_(SHEETS.data))').find(x => x[23] === r.eid)) === GK);
   t.ok('Daten: alle Zeilen der Gruppe 3,10 mit Datum', D.length === 2 && D.every(r => r.ownPrice === 3.1 && r.ownPriceDate === TODAY), D.map(r => [r.eid, r.ownPrice, r.ownPriceDate]));
-  t.ok('UI: „3,10 € manuell“, Entfernen aktiv', /3,10\s€ manuell/.test(headText(E, gi)) && !E.btn($('gp' + gi), 'Entfernen').disabled && /Eigener Preis gespeichert/.test($('collMsg').textContent), headText(E, gi));
+  t.ok('UI: „3,10 € (eigener Preis)“, Feld zu, Meldung', /^3,10\s€ \(eigener Preis\)/.test(infoRow(E, gi, 'Preis')) && !$('op' + gi) &&
+    /Eigener Preis gespeichert/.test($('collMsg').textContent), infoRow(E, gi, 'Preis'));
+  E.click(E.btn($('gp' + gi), 'Eigener Preis …'));
+  t.ok('wieder offen: gespeicherter Preis im Feld, Entfernen aktiv', $('op' + gi).value === '3,10' && !E.btn($('gp' + gi), 'Entfernen').disabled);
   checkSheets(env, 'nach eigenem Preis');
   G = env.groups().find(x => x['Gruppenschlüssel'] === GK);
   t.ok('Gruppen: Preis 3,1 manuell', G['Preis (EUR)'] === 3.1 && G['Preisstand'] === 'manuell ' + TODAY_DMY, G);
@@ -730,7 +814,8 @@ function seedImport(env) {
   checkSheets(env, 'nach Preis entfernen');
   G = env.groups().find(x => x['Gruppenschlüssel'] === GK);
   t.ok('Gruppen: wieder Trendpreis', G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
-  t.ok('UI: kein „manuell“ mehr', !/manuell/.test(headText(E, gi)) && E.btn($('gp' + gi), 'Entfernen').disabled, headText(E, gi));
+  t.ok('UI: wieder der Trendpreis mit Stand, Feld zu', /^1,50\s€ · Stand 13\.10\./.test(infoRow(E, gi, 'Preis')) && !/eigener Preis\)/.test(infoRow(E, gi, 'Preis')) && !$('op' + gi),
+    infoRow(E, gi, 'Preis'));
   checkUiMatchesServer(E, 'nach Preis entfernen');
 
   // ---- 11. Freie Karte mit tcgdex-Karte verknüpfen (zusammenlegen mit Zeile von Hand) ----
@@ -768,7 +853,7 @@ function seedImport(env) {
   E.click(E.btn($('addResults'), 'Als freie Karte speichern'));
   $('frName').value = 'Mewtu Spezial'; $('frSet').value = 'Altes Set'; $('frNumber').value = '7';
   E.pick($('frVariant'), 'reverse'); E.pick($('frCond'), 'GD'); E.pick($('frLang'), 'JP');
-  $('frQty').value = '2';
+  t.ok('freie Karte: kein Feld Anzahl mehr (#50)', !$('frQty'));
   await E.clickSettle($('frSave'));
   const free2 = E.lastCall('addFreeCard').res;
   t.ok('zweite freie Karte', free2 && free2.key === 'frei:mewtu spezial~altes set~7|reverse||GD|JP' && /Japanisch/.test($('addLast').textContent), [free2, $('addLast').textContent]);
@@ -776,6 +861,19 @@ function seedImport(env) {
   fkey = free2.gkey;
   fi2 = E.gIdx(fkey);
   E.expand(fi2);
+  // freie Karte: „+ Exemplar“ öffnet das Formular der freien Karte, schon ausgefüllt (#49)
+  E.click(E.btn($('gx' + fi2), '+ Exemplar'));
+  t.ok('+ Exemplar (frei): Formular mit Name, Set, Nummer und Variante', /Weiteres Exemplar \(freie Karte\)/.test($('addResults').textContent) && $('frName').value === 'Mewtu Spezial' &&
+    $('frSet').value === 'Altes Set' && $('frNumber').value === '7' && $('frVariant').value === 'reverse' && $('frCond').value === '' && $('frLang').value === 'DE',
+    [$('frName').value, $('frSet').value, $('frNumber').value, $('frVariant').value]);
+  E.pick($('frCond'), 'GD'); E.pick($('frLang'), 'JP');
+  await E.clickSettle($('frSave'));
+  t.eq('addFreeCard: dieselbe freie Karte noch einmal', noRid(E.lastCall('addFreeCard').args[0]),
+    { name: 'Mewtu Spezial', setName: 'Altes Set', number: '7', variant: 'reverse', condition: 'GD', qty: 1, cardLang: 'JP', version: '', ownPrice: null });
+  fi2 = E.gIdx(fkey);
+  t.ok('zurück in der Sammlung: 2 Stück, Karte offen', !$('paneColl').classList.contains('hidden') && E.lastCall('addFreeCard').res.eid === free2.eid &&
+    E.group(fkey).count === 2 && headCount(E, fi2) === '2×' && E.group(fkey).open, E.group(fkey));
+  checkUiMatchesServer(E, 'nach + Exemplar (frei)');
   E.click(E.btn($('gl' + fi2), 'Mit tcgdex-Karte verknüpfen'));
   E.type($('lkName' + fi2), 'Mewtu'); E.type($('lkSet' + fi2), '');
   await E.clickSettle(E.btn($('gl' + fi2), 'Suchen'));
@@ -904,8 +1002,9 @@ function seedImport(env) {
   t.ok('Web: Daten geändert', dataRows(env).find(r => r.eid === handA.eid).cond === 'EX');
   checkSheets(env, 'Web nach Bearbeiten');
   checkUiMatchesServer(W, 'Web nach Bearbeiten');
-  await W.clickSettle(W.btn(W.$('gh' + W.gIdx(GK)), '−1'));
-  t.ok('Web: −1 mit Auswahl', /Welches Exemplar\?/.test(W.$('gc' + W.gIdx(GK)).textContent));
+  const wi2 = W.gIdx(GK);
+  t.ok('Web: Exemplare mit −1 und Bearbeiten, darunter „+ Exemplar“ (#49)', W.btns(W.$('gr' + wi2), /^−1$/).length === W.group(GK).rows.length &&
+    !!W.btn(W.$('gx' + wi2), '+ Exemplar') && !W.btn(W.$('gh' + wi2), '−1') && !W.$('gc' + wi2));
   t.ok('keine Skriptfehler (Web)', W.errors.length === 0, W.errors);
 
   // ---- 13b. Umstieg: Blatt mit der alten Code.gs gebaut, dann neue Code.gs, Seitenleiste vor „Einrichtung“ ----
@@ -950,7 +1049,8 @@ function seedImport(env) {
     await U.clickSettle(U.$('tabColl'));
     t.ok('Sammlung im UI: 3 Gruppen', U.win.state.groups.length === 3, U.win.state.groups.map(g => g.gkey));
     const ui0 = U.gIdx('swsh3-025|normal|');
-    await U.clickSettle(U.btn(U.$('gh' + ui0), '−1'));
+    U.expand(ui0);
+    await U.clickSettle(U.btn(U.$('gr' + ui0).querySelector('.erow'), '−1'));
     t.ok('−1 auf alte Zeile geht', nu.data().find(r => r.key === 'swsh3-025|normal||NM|DE').count === 1);
     checkUiMatchesServer(U, 'nach Umstieg');
     t.ok('keine Skriptfehler (Umstieg)', U.errors.length === 0, U.errors);
@@ -981,6 +1081,8 @@ function seedImport(env) {
     t.ok('direkt bei tcgdex: Namensliste, Details, englische Daten für das fehlende Bild', fetched.some(u => /\/de\/cards\?name=Glurak$/.test(u)) &&
       fetched.some(u => /\/de\/cards\/swsh3-136$/.test(u)) && fetched.some(u => /\/en\/cards\/base1-4$/.test(u)), fetched);
     const k4 = tiles().findIndex(el => /· 4\//.test(el.textContent));
+    t.ok('Kacheln: Set-Symbol, ohne Symbol der Set-Name (#47)', tiles().filter(el => el.querySelector('.cap img.sym')).length === 2 && k4 >= 0 &&
+      /Grundset · 4\/102/.test(tiles()[k4].textContent) && !tiles()[k4].querySelector('img.sym'), tiles().map(el => el.textContent));
     D.click(tiles()[k4]);
     await D.settle();
     t.ok('Antippen: Bestätigung sofort, mit Preis, ohne getCardDetail', !!$d('cAdd') && D.calls('getCardDetail').length === 0 &&
@@ -997,6 +1099,9 @@ function seedImport(env) {
     await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
     t.ok('Mewtu: einziger Skriptaufruf ist die Übersetzung, englische Ersatzdaten', D.calls('translateCardName').length === 1 && D.calls('searchCards').length === 0 &&
       /Englische Ersatzdaten/.test($d('addResults').textContent) && !!$d('cAdd'), [D.callLog.map(c => c.fn), $d('addResults').textContent.slice(0, 160)]);
+    const fold = $d('addResults').querySelector('details.inote');
+    t.ok('Ersatzdaten als graue, zugeklappte Zeile mit dem Namen der Suche (#48)', !!fold && !fold.open && fold.querySelector('summary').textContent === 'ⓘ Englische Ersatzdaten ▾' &&
+      /unter deinem eingegebenen Namen „Mewtu“/.test(fold.textContent) && !$d('addResults').querySelector('.warn'), fold && fold.outerHTML.slice(0, 200));
     // Kartenzahl hinter der Nummer: die Sets kommen einmal von tcgdex
     D.click(D.btn($d('addResults'), 'Zurück'));
     D.type($d('fName'), 'Glurak'); D.type($d('fNumber'), '25/189');
@@ -1006,6 +1111,15 @@ function seedImport(env) {
     t.ok('mit Kartenzahl: Treffer, die Sets nur einmal geholt', !!$d('cAdd') && /136\/189/.test($d('addResults').textContent) &&
       fetched.filter(u => /\/de\/sets$/.test(u)).length === 1 && fetched.filter(u => /\/en\/sets$/.test(u)).length === 1, fetched.filter(u => /sets/.test(u)));
     t.ok('Preis aus den englischen Daten (deutsch fehlt er)', /Preis aus den englischen tcgdex-Daten/.test($d('addResults').textContent));
+    // Nummer im Namensfeld (#51): im Browser getrennt wie am Server
+    D.type($d('fName'), 'Glurak 025'); D.type($d('fNumber'), '');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    t.ok('„Glurak 025“: die Karte direkt, ohne Skriptaufruf', !!$d('cAdd') && /025\/189/.test($d('addResults').textContent) && D.calls('searchCards').length === 0 &&
+      fetched.some(u => /\/de\/cards\/swsh3-025$/.test(u)), $d('addResults').textContent.slice(0, 120));
+    await D.clickSettle($d('cAdd'));
+    t.ok('danach: nur der Name markiert im Feld, Nummer leer, Treffer als Kachel (#53)', $d('fName').value === 'Glurak' && $d('fNumber').value === '' &&
+      D.doc.activeElement === $d('fName') && /1 Treffer – Karte antippen/.test($d('addResults').textContent) && $d('addResults').querySelectorAll('.tile').length === 1,
+      [$d('fName').value, $d('addResults').textContent.slice(0, 80)]);
     // Set-Auswahl: Liste aus den tcgdex-Sets, die Karte direkt
     D.type($d('fName'), 'Unbekannt'); D.type($d('fNumber'), '4');
     await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));

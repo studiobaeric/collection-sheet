@@ -677,10 +677,13 @@ class FakeSpreadsheet {
 // tcgdex-Attrappe (wie die alte harness.js)
 // ---------------------------------------------------------------------------
 
+// Set-Symbol von Flammende Finsternis (#47); die anderen Sets der Attrappe haben keins
+const SYM_SWSH3 = 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol';
 const card = (id, lang, extra = {}) => Object.assign({
   id, localId: id.split('-').pop(), name: lang === 'de' ? 'Glurak' : 'Charizard', image: `https://assets.tcgdex.net/${lang}/x/${id}`,
   category: 'Pokemon', rarity: 'Rare', illustrator: 'X',
-  set: { id: id.slice(0, id.lastIndexOf('-')), name: lang === 'de' ? 'Flammende Finsternis' : 'Darkness Ablaze', cardCount: { official: 189, total: 201 } },
+  set: Object.assign({ id: id.slice(0, id.lastIndexOf('-')), name: lang === 'de' ? 'Flammende Finsternis' : 'Darkness Ablaze', cardCount: { official: 189, total: 201 } },
+    id.indexOf('swsh3-') === 0 ? { symbol: SYM_SWSH3 } : {}),
   variants: { normal: true, reverse: true, holo: false, firstEdition: false },
   pricing: { cardmarket: { trend: 1.5, 'trend-holo': 3.25, updated: '2026-10-13T00:00:00Z' } }
 }, extra);
@@ -694,8 +697,8 @@ function defaultDb() {
     'en/cards/swsh3-136': card('swsh3-136', 'en'),
     'de/cards/base1-4': card('base1-4', 'de', { image: undefined, variants: { holo: true, normal: false, reverse: false, firstEdition: true } }),
     'en/cards/base1-4': card('base1-4', 'en'),
-    'de/sets': [{ id: 'swsh3', name: 'Flammende Finsternis', logo: 'L', cardCount: { official: 189, total: 201 } }, { id: 'base1', name: 'Grundset', cardCount: { official: 102, total: 102 } }],
-    'en/sets': [{ id: 'swsh3', name: 'Darkness Ablaze', cardCount: { official: 189, total: 201 } }, { id: 'base1', name: 'Base Set', cardCount: { official: 102, total: 102 } }, { id: 'old9', name: 'Old Set', cardCount: { official: 50 } }],
+    'de/sets': [{ id: 'swsh3', name: 'Flammende Finsternis', logo: 'L', symbol: SYM_SWSH3, cardCount: { official: 189, total: 201 } }, { id: 'base1', name: 'Grundset', cardCount: { official: 102, total: 102 } }],
+    'en/sets': [{ id: 'swsh3', name: 'Darkness Ablaze', symbol: SYM_SWSH3, cardCount: { official: 189, total: 201 } }, { id: 'base1', name: 'Base Set', cardCount: { official: 102, total: 102 } }, { id: 'old9', name: 'Old Set', cardCount: { official: 50 } }],
     'de/sets/swsh3': { id: 'swsh3', name: 'Flammende Finsternis', releaseDate: '2020-08-14', cards: [{ id: 'swsh3-025', localId: '025', name: 'Glurak' }, { id: 'swsh3-136', localId: '136', name: 'Glurak' }] },
     'en/sets/swsh3': { id: 'swsh3', name: 'Darkness Ablaze', releaseDate: '2020-08-14', cards: [{ id: 'swsh3-025', localId: '025', name: 'Charizard' }, { id: 'swsh3-136', localId: '136', name: 'Charizard' }] },
     'de/sets/base1': { id: 'base1', name: 'Grundset', releaseDate: '1999-01-09', cards: [{ id: 'base1-4', localId: '4', name: 'Glurak' }] },

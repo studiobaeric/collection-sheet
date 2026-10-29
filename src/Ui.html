@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.2.0
+     Pokémon-Sammlung · Version 1.2.1
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -36,8 +36,8 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 12px; }
   .tile { border: 1px solid var(--line); border-radius: 8px; padding: 6px; text-align: center; cursor: pointer; background: #fff; }
   .tile:hover { border-color: var(--accent); }
-  .tile img { width: 100%; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 4px; }
-  .tile.set img { aspect-ratio: 2 / 1; padding: 6px; }
+  .tile > img { width: 100%; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 4px; }
+  .tile.set > img { aspect-ratio: 2 / 1; padding: 6px; }
   .tile .cap { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
   .confirm img.big { width: 100%; max-width: 320px; display: block; margin: 0 auto; border-radius: 10px; background: var(--soft); aspect-ratio: 245 / 342; object-fit: contain; }
   .confirm h2 { font-size: 18px; margin: 12px 0 2px; }
@@ -47,7 +47,7 @@
   .check { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 15px; }
   .check input { width: 22px; height: 22px; }
   .item { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
-  .item img { width: 48px; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 3px; flex: none; }
+  .item > img { width: 48px; aspect-ratio: 245 / 342; object-fit: contain; background: var(--soft); border-radius: 3px; flex: none; }
   .item .info { flex: 1; min-width: 0; min-height: 44px; }
   .item .info.tap { cursor: pointer; }
   .item .info .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -112,6 +112,38 @@
   .item.addfail .actions { margin-top: 6px; }
   .item .info .s.done { color: var(--ok); }
   .lasthead { margin-top: 14px; }
+  /* Set-Symbol statt Set-Name (#47) */
+  .sym { height: 1.25em; width: auto; max-width: 3.2em; object-fit: contain; vertical-align: -0.3em; }
+  .promo { color: #202124; font-size: 1.1em; line-height: 1; }
+  .setdrop { position: absolute; z-index: 30; background: #fff; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); max-height: 264px; overflow-y: auto; }
+  .setdrop .opt { display: flex; align-items: center; gap: 8px; padding: 6px 10px; min-height: 40px; cursor: pointer; font-size: 14px; }
+  .setdrop .opt.on { background: var(--soft); }
+  .setdrop .opt .mk { width: 34px; flex: none; text-align: center; }
+  .setdrop .opt .mk .sym { height: 22px; vertical-align: middle; }
+  .setdrop .none { padding: 10px; font-size: 13px; color: var(--muted); }
+  /* Hinweis zum Aufklappen (#48) */
+  details.inote { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  details.inote summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+  details.inote summary::-webkit-details-marker { display: none; }
+  details.inote .arr { display: inline-block; font-size: 11px; }
+  details.inote[open] .arr { transform: rotate(180deg); }
+  details.inote .txt { padding: 0 0 4px 18px; line-height: 1.4; }
+  /* Sammlung-Tab (#46, #52): ganze Zeile klappt auf, rechts Anzahl und Pfeil, drei Bildgrößen */
+  .item.head { cursor: pointer; }
+  .item .side { display: flex; align-items: center; gap: 2px; flex: none; }
+  .item .side .n { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .item .side .chev { font-size: 22px; min-width: 30px; text-align: center; }
+  #collResults.isz-m .item > img { width: 80px; }
+  #collResults.isz-l .item > img { width: 120px; }
+  #collResults.isz-m .item .info .t, #collResults.isz-l .item .info .t { white-space: normal; overflow-wrap: anywhere; } /* schmale Spalte: Name umbrechen statt abschneiden */
+  #addResults { scroll-margin-top: 56px; } /* unter der Leiste mit den Tabs */
+  .sortbar > div.szbox { flex: none; width: 92px; }
+  table.itab { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0 2px; }
+  table.itab th { text-align: left; font-weight: 400; color: var(--muted); padding: 4px 10px 4px 0; white-space: nowrap; vertical-align: top; width: 1%; }
+  table.itab td { padding: 4px 0; overflow-wrap: anywhere; }
+  table.itab .lnk { padding: 4px 0; min-height: 32px; font-size: 13px; }
+  .pedit { margin: 2px 0 8px; }
+  .pedit .actions { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -136,16 +168,15 @@
       </div>
       <div>
         <label for="fSet">Set (optional)</label>
-        <input type="text" id="fSet" list="setList" autocomplete="off" placeholder="Set-Name">
+        <input type="text" id="fSet" data-sets="1" autocomplete="off" placeholder="Set-Name">
       </div>
     </div>
-    <datalist id="setList"></datalist>
     <datalist id="versionList"></datalist>
     <div class="actions"><button class="btn primary" type="submit">Suchen</button></div>
   </form>
   <div id="addMsg"></div>
-  <div id="addResults"></div>
   <div id="addLast"></div>
+  <div id="addResults"></div>
 </div>
 
 <!-- Sammlung -->
@@ -157,7 +188,7 @@
     </div>
     <div>
       <label for="colSet">Set (optional)</label>
-      <input type="text" id="colSet" list="setList" autocomplete="off" oninput="debouncedCollection()">
+      <input type="text" id="colSet" data-sets="1" autocomplete="off" oninput="debouncedCollection()">
     </div>
   </div>
   <div class="sortbar">
@@ -166,6 +197,10 @@
       <select id="colSort" onchange="sortChanged()"></select>
     </div>
     <button class="btn small" id="colDir" type="button" onclick="toggleDir()">↑</button>
+    <div class="szbox">
+      <label for="colImg">Bilder</label>
+      <select id="colImg" onchange="imgSizeChanged()"><option value="s">klein</option><option value="m">mittel</option><option value="l">groß</option></select>
+    </div>
   </div>
   <div class="hint" id="colDirHint"></div>
   <div id="colDex"></div>
@@ -219,7 +254,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
-var UI_FILE_VERSION = '1.2.0'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
+var UI_FILE_VERSION = '1.2.1'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -257,6 +292,128 @@ function call(fn) {
 }
 function setMsg(id, html, kind) { $(id).innerHTML = html ? '<div class="msg ' + (kind || '') + '">' + html + '</div>' : ''; }
 function spinner(id, text) { $(id).innerHTML = '<div class="spin">' + esc(text) + '</div>'; }
+/** Hinweis als graue Zeile zum Aufklappen (#48); text ist schon HTML */
+function noteFold(title, text) {
+  return '<details class="inote"><summary>ⓘ ' + esc(title) + ' <span class="arr">▾</span></summary><div class="txt">' + text + '</div></details>';
+}
+
+// ---------- Sets: Symbol statt Name (#47) ----------
+// SETS kommt von getSetSuggestions: [{id, name, en, symbol, promo}], neueste zuerst. Karten aus der Suche bringen ihr
+// Symbol selbst mit (setSymbol), Karten der Sammlung bekommen es vom Server (setSymbol, setPromo). Promo-Sets zeigen
+// einen einheitlichen Stern, Sets ohne Symbol (und freie Karten) ihren Namen.
+var SETS = { list: [], byId: {} };
+
+function applySets(list) {
+  SETS.list = (list || []).map(function (s) {
+    return typeof s === 'string' ? { id: '', name: s, en: '', symbol: '', promo: isPromoSet(s) } : s; // ältere Code.gs: nur Namen
+  }).filter(function (s) { return s && s.name; });
+  SETS.byId = {};
+  SETS.list.forEach(function (s) { if (s.id) SETS.byId[s.id] = s; });
+}
+function isPromoSet(name) { return /promo/i.test(String(name || '')); }
+
+/** Set als Zeichen: {html, text: true, wenn statt Symbol oder Stern der Name dasteht}. o: Karte oder Gruppe */
+function setMark(o) {
+  var s = (o.setId && SETS.byId[o.setId]) || null;
+  var name = o.setName || (s && s.name) || o.setId || '';
+  if (o.setPromo || isPromoSet(name) || (s && (s.promo || isPromoSet(s.en)))) {
+    return { html: '<span class="promo" title="' + esc(name || 'Promo') + '" role="img" aria-label="Promo">★</span>', text: false };
+  }
+  var sym = o.setSymbol || (s && s.symbol) || '';
+  if (sym) {
+    return { html: '<img class="sym" loading="lazy" src="' + esc(sym + '.webp') + '" alt="' + esc(name) + '" title="' + esc(name) + '" onerror="symFail(this)">', text: false };
+  }
+  return { html: esc(name), text: true };
+}
+/** Bild des Symbols nicht da: der Set-Name an seiner Stelle */
+function symFail(img) { if (img.parentNode) img.parentNode.replaceChild(document.createTextNode(img.getAttribute('alt') || ''), img); }
+/** „[Symbol] 12/40“; ohne Symbol „Set-Name · 12/40“. num ist schon HTML. */
+function setNumHtml(o, num) {
+  var m = setMark(o);
+  if (!m.html) return num || '';
+  return num ? m.html + (m.text ? ' · ' : ' ') + num : m.html;
+}
+function numText(localId, size) { return localId ? esc(localId) + (size ? '/' + esc(size) : '') : ''; }
+
+// Auswahlliste unter jedem Setfeld (data-sets): Symbol und Name, beim Tippen gefiltert, mit Pfeiltasten und Enter
+var setDrop = { el: null, input: null, items: [], on: -1, timer: null, picking: false };
+var SET_DROP_MAX = 100;
+
+function isSetField(el) { return !!(el && el.tagName === 'INPUT' && el.getAttribute && el.getAttribute('data-sets')); }
+function setDropEl() {
+  if (setDrop.el) return setDrop.el;
+  var el = document.createElement('div');
+  el.className = 'setdrop hidden';
+  el.setAttribute('role', 'listbox');
+  el.addEventListener('mousedown', function (e) { e.preventDefault(); }); // Feld behält den Fokus
+  el.addEventListener('click', function (e) {
+    var o = e.target.closest ? e.target.closest('.opt') : null;
+    if (o) pickSetDrop(Number(o.getAttribute('data-k')));
+  });
+  document.body.appendChild(el);
+  setDrop.el = el;
+  return el;
+}
+function openSetDrop(input) {
+  if (setDrop.picking) return;
+  clearTimeout(setDrop.timer);
+  var el = setDropEl();
+  setDrop.input = input;
+  var t = input.value.trim().toLowerCase();
+  setDrop.items = SETS.list.filter(function (s) {
+    return !t || (s.name + ' ' + (s.en || '') + ' ' + (s.id || '')).toLowerCase().indexOf(t) >= 0;
+  }).slice(0, SET_DROP_MAX);
+  setDrop.on = -1;
+  if (!SETS.list.length) { closeSetDrop(); return; }
+  el.innerHTML = setDrop.items.length ? setDrop.items.map(function (s, k) {
+    var m = setMark({ setId: s.id, setName: s.name, setSymbol: s.symbol, setPromo: s.promo });
+    return '<div class="opt" role="option" data-k="' + k + '"><span class="mk">' + (m.text ? '' : m.html) + '</span><span>' + esc(s.name) + '</span></div>';
+  }).join('') : '<div class="none">Kein Set passt.</div>';
+  var r = input.getBoundingClientRect();
+  var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+  var w = Math.max(r.width, 230);
+  var left = r.left + (window.scrollX || 0);
+  if (vw && left + w > vw - 4) left = Math.max(4, vw - w - 4);
+  el.style.left = left + 'px';
+  el.style.top = (r.bottom + (window.scrollY || 0) + 2) + 'px';
+  el.style.width = w + 'px';
+  el.classList.remove('hidden');
+}
+function closeSetDrop() {
+  clearTimeout(setDrop.timer);
+  if (setDrop.el) setDrop.el.classList.add('hidden');
+  setDrop.input = null; setDrop.items = []; setDrop.on = -1;
+}
+function pickSetDrop(k) {
+  var s = setDrop.items[k], input = setDrop.input;
+  if (!s || !input) return;
+  input.value = s.name;
+  closeSetDrop();
+  setDrop.picking = true; // das input-Ereignis (Sammlung filtert, Verknüpfen merkt sich das Feld) öffnet die Liste nicht wieder
+  try { input.dispatchEvent(new Event('input', { bubbles: true })); } finally { setDrop.picking = false; }
+}
+function setDropKey(e) {
+  var n = setDrop.items.length;
+  if (e.key === 'Escape') { closeSetDrop(); return; }
+  if (!n || !setDrop.el || setDrop.el.classList.contains('hidden')) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    setDrop.on = e.key === 'ArrowDown' ? (setDrop.on + 1) % n : (setDrop.on <= 0 ? n - 1 : setDrop.on - 1);
+    var opts = setDrop.el.querySelectorAll('.opt');
+    for (var k = 0; k < opts.length; k++) opts[k].classList.toggle('on', k === setDrop.on);
+    if (opts[setDrop.on] && opts[setDrop.on].scrollIntoView) opts[setDrop.on].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && setDrop.on >= 0) {
+    e.preventDefault(); // nicht gleich suchen: erst das Set übernehmen
+    pickSetDrop(setDrop.on);
+  }
+}
+document.addEventListener('focusin', function (e) { if (isSetField(e.target)) openSetDrop(e.target); });
+document.addEventListener('input', function (e) { if (isSetField(e.target)) openSetDrop(e.target); });
+document.addEventListener('keydown', function (e) { if (setDrop.input && e.target === setDrop.input) setDropKey(e); });
+document.addEventListener('focusout', function (e) {
+  if (setDrop.input && e.target === setDrop.input) setDrop.timer = setTimeout(closeSetDrop, 150);
+});
+window.addEventListener('resize', closeSetDrop);
 
 // Auswahllisten (auch für ImportUi)
 function condOptions(sel) {
@@ -296,7 +453,6 @@ function readOwnPrice(fieldId, msgId) {
   if (isNaN(v) || v <= 0) { setMsg(msgId, 'Eigener Preis: bitte einen Betrag wie 1,50 eingeben.', 'err'); return { ok: false }; }
   return { ok: true, value: Math.round(v * 100) / 100 };
 }
-function qtyOf(v) { return Math.max(1, Math.floor(Number(v)) || 1); }
 
 function applyConfig(cfg) {
   if (!cfg) return;
@@ -335,9 +491,12 @@ function rememberVersion(v) {
 
 var lastTab = 'add'; // für „Zurück“ aus dem Bereich Updates
 
-function showTab(t) {
+/** Bereich zeigen; quiet: kein Feld anwählen (sonst springt am Handy die Tastatur auf) */
+function showTab(t, quiet) {
   if (t === 'remove') t = 'coll';
   if (t === 'import' && MODE !== 'sidebar') t = 'add'; // Import gibt es nur in der Seitenleiste
+  closeSetDrop();
+  if (t !== 'add' && state.addCopy) leaveCopy(false); // „+ Exemplar“ verlassen: Hinzufügen steht wieder wie vorher
   if (t !== 'upd') lastTab = t;
   var tabs = { add: ['tabAdd', 'paneAdd'], coll: ['tabColl', 'paneColl'], dex: ['tabDex', 'paneDex'], 'import': ['tabImport', 'paneImport'], upd: ['', 'paneUpd'] };
   Object.keys(tabs).forEach(function (k) {
@@ -345,11 +504,11 @@ function showTab(t) {
     if (b) b.classList.toggle('active', k === t);
     if (p) p.classList.toggle('hidden', k !== t);
   });
-  if (t === 'coll') { collShow(); $('colQuery').focus(); }
+  if (t === 'coll') { collShow(); if (!quiet) $('colQuery').focus(); }
   else if (t === 'dex') loadDex();
   else if (t === 'import') { if (typeof impInit === 'function') impInit(); } // erst ein echter Import ändert die Sammlung (impAsk)
   else if (t === 'upd') updRender();
-  else $('fName').focus();
+  else if (!quiet) $('fName').focus();
 }
 
 // ---------- Suche direkt bei tcgdex (#43) ----------
@@ -463,10 +622,20 @@ function directCards(id) {
 
 // ---------- Hinzufügen ----------
 
+/** Name und Nummer aus den Feldern; eine Nummer im Namensfeld („Pikachu 12“) zählt wie das Feld Nummer (#51) */
+function splitQuery(name, number) {
+  if (window.SEARCH && typeof SEARCH.split === 'function') return SEARCH.split(name, number);
+  return { name: String(name || '').trim(), number: String(number || '').trim() }; // dann trennt der Server
+}
+
 function doSearch(ev) {
   if (ev) ev.preventDefault();
-  var q = { name: $('fName').value.trim(), number: $('fNumber').value.trim(), set: $('fSet').value.trim() };
+  closeSetDrop();
+  var nn = splitQuery($('fName').value, $('fNumber').value);
+  var q = { name: nn.name, number: nn.number, set: $('fSet').value.trim() };
   state.lastQuery = q;
+  state.lastTyped = $('fName').value; // nach dem Hinzufügen steht dann nur der Name im Feld (#53)
+  state.addCopy = null; // eine neue Suche: kein Exemplar mehr aus dem Tab Sammlung
   setMsg('addMsg', '');
   spinner('addResults', 'Suche bei tcgdex …');
   var gen = ++searchGen;
@@ -488,6 +657,8 @@ function freeButtonHtml() {
 
 function renderSearch(res) {
   state.lastRes = res;
+  // hat der Server die Nummer aus dem Namen genommen (#51), gilt sein Name, z. B. für englische Ersatzdaten
+  if (state.lastQuery && typeof res.inputName === 'string') state.lastQuery.name = res.inputName;
   var box = $('addResults');
   if (res.tooMany) { box.innerHTML = notesHtml(res.notes); return; }
   if (res.stage === 'pickSet') { renderSetPicker(res); return; }
@@ -496,14 +667,22 @@ function renderSearch(res) {
     return;
   }
   if (res.cards.length === 1) { openConfirm(res.cards[0], res.notes); return; }
-  var html = notesHtml(res.notes) + '<div class="notes">' + res.cards.length + ' Treffer – Karte antippen:</div><div class="grid">';
-  res.cards.forEach(function (c, i) {
-    html += '<div class="tile" onclick="pickCard(' + i + ')">' + imgTag(cardImg(c.image, 'low')) +
-      '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId) + ' · ' + esc(c.localId) +
-      (c.setSize ? '/' + esc(c.setSize) : '') + '</div></div>';
+  renderHits(res.cards, res.notes);
+}
+
+/** Bildunterschrift einer Kachel: Name, darunter Set-Symbol und Nummer (#47) */
+function cardCap(c, extra) {
+  return '<div class="cap"><b>' + esc(c.name) + '</b><br>' + setNumHtml(c, numText(c.localId, c.setSize)) + (extra || '') + '</div>';
+}
+
+/** Treffer als Kacheln, auch ein einzelner (nach dem Hinzufügen, #53) */
+function renderHits(cards, notes) {
+  var html = notesHtml(notes) + '<div class="notes">' + (cards.length === 1 ? '1 Treffer' : cards.length + ' Treffer') + ' – Karte antippen:</div><div class="grid">';
+  cards.forEach(function (c, i) {
+    html += '<div class="tile" onclick="pickCard(' + i + ')">' + imgTag(cardImg(c.image, 'low')) + cardCap(c) + '</div>';
   });
-  box.innerHTML = html + '</div>';
-  state.cards = res.cards;
+  $('addResults').innerHTML = html + '</div>';
+  state.cards = cards;
 }
 
 function pickCard(i) { openConfirm(state.cards[i], null); }
@@ -556,35 +735,44 @@ function openConfirm(c, notes) {
   var gen = searchGen;
   spinner('addResults', 'Lade Karte …');
   cardAny(c).then(function (card) { if (gen === searchGen) renderConfirm(card, notes); })
-    .catch(function (e) { if (gen !== searchGen) return; $('addResults').innerHTML = ''; setMsg('addMsg', esc(errText(e)), 'err'); });
+    .catch(function (e) {
+      if (gen !== searchGen) return;
+      $('addResults').innerHTML = state.addCopy ? '<div class="actions"><button class="btn" type="button" onclick="backToSearch()">Zurück zur Sammlung</button></div>' : '';
+      setMsg('addMsg', esc(errText(e)), 'err');
+    });
 }
 
 function renderConfirm(c, notes) {
   state.current = c;
-  var html = notesHtml(notes) + '<div class="confirm">' + imgTag(cardImg(c.image, 'high'), 'big') +
+  var cp = state.addCopy;
+  var html = (cp ? '<div class="notes">Weiteres Exemplar für die Sammlung</div>' : '') + notesHtml(notes) +
+    '<div class="confirm">' + imgTag(cardImg(c.image, 'high'), 'big') +
     '<h2>' + esc(c.name) + '</h2>' +
-    '<div class="meta">' + esc(c.setName) + ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') +
+    '<div class="meta">' + setNumHtml(c, numText(c.localId, c.setSize)) +
     (c.rarity ? ' · ' + esc(c.rarity) : '') + ' · ' + esc(c.baseLabel) + '</div>' +
     '<div class="price" id="cPrice"></div>';
+  var fromEn = c.priceFromEn ? 'Preis aus den englischen tcgdex-Daten derselben Karte.' : '';
   if (c.lang === 'en') {
     var nm = state.lastQuery && state.lastQuery.name;
-    html += '<div class="warn">Englische Ersatzdaten: Diese Karte gibt es bei tcgdex nicht auf Deutsch. ' +
+    html += noteFold('Englische Ersatzdaten', 'Diese Karte gibt es bei tcgdex nicht auf Deutsch. ' +
       (nm ? 'Gespeichert wird sie unter deinem eingegebenen Namen „' + esc(nm) + '“.'
-          : 'Gespeichert wird sie unter dem englischen Namen „' + esc(c.name) + '“.') + '</div>';
+          : 'Gespeichert wird sie unter dem englischen Namen „' + esc(c.name) + '“.') + (fromEn ? ' ' + fromEn : ''));
+  } else if (fromEn) {
+    html += noteFold('Preis aus englischen Daten', fromEn);
   }
-  if (c.priceFromEn) html += '<div class="notes">Preis aus den englischen tcgdex-Daten derselben Karte.</div>';
   if (c.canReverse) html += '<label class="check"><input type="checkbox" id="cReverse" onchange="variantChanged(\'reverse\')"> Reverse Holo</label>';
   if (c.canFirstEdition) html += '<label class="check"><input type="checkbox" id="cFirst" onchange="variantChanged(\'first\')"> 1. Edition</label>';
-  html += '<div class="row"><div><label for="cCond">Zustand</label><select id="cCond">' + condOptions('') +
-    '</select></div><div><label for="cQty">Anzahl</label><input type="number" id="cQty" min="1" value="1" inputmode="numeric"></div></div>' +
-    '<div class="row"><div><label for="cLang">Sprache</label><select id="cLang">' + langOptions('DE') + '</select></div>' +
-    '<div><label for="cVersion">Sonderversion (optional)</label><input type="text" id="cVersion" list="versionList" autocomplete="off" placeholder="z. B. Snowflake"></div></div>' +
-    '<label for="cOwnPrice">Eigener Preis in EUR (optional)</label>' +
-    '<input type="text" id="cOwnPrice" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50">' +
-    '<div class="hint">Nur nötig, wenn tcgdex keinen Preis hat.</div>' +
+  // ohne Anzahl (#50): jedes Hinzufügen ist ein Exemplar mit eigenem Zustand und eigener Sprache
+  html += '<div class="row"><div><label for="cCond">Zustand</label><select id="cCond">' + condOptions('') + '</select></div>' +
+    '<div><label for="cLang">Sprache</label><select id="cLang">' + langOptions('DE') + '</select></div></div>' +
+    '<div class="row"><div><label for="cVersion">Sonderversion (optional)</label><input type="text" id="cVersion" list="versionList" autocomplete="off" placeholder="z. B. Snowflake" value="' + esc(cp ? cp.version : '') + '"></div>' +
+    '<div><label for="cOwnPrice">Eigener Preis (EUR)</label><input type="text" id="cOwnPrice" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50"></div></div>' +
+    '<div class="hint">Eigener Preis nur nötig, wenn tcgdex keinen Preis hat.</div>' +
     '<div class="actions"><button class="btn" onclick="backToSearch()">Zurück</button>' +
     '<button class="btn primary" id="cAdd" onclick="addCurrent()">Hinzufügen</button></div></div>';
   $('addResults').innerHTML = html;
+  if (cp && cp.variant === 'reverse' && $('cReverse')) $('cReverse').checked = true;
+  else if (cp && cp.variant === 'firstEdition' && $('cFirst')) $('cFirst').checked = true;
   updatePrice();
 }
 
@@ -608,13 +796,18 @@ function updatePrice() {
     (c.priceUpdated ? ', Stand ' + c.priceUpdated : '');
 }
 
-function backToSearch() {
+/** Die Treffer der letzten Suche wieder zeigen, auch einen einzelnen als Kachel (#53) */
+function showResults() {
   var r = state.lastRes;
+  if (!r) { $('addResults').innerHTML = ''; return; }
+  if (r.cards && r.cards.length) renderHits(r.cards, r.notes);
+  else renderSearch(r); // Set-Auswahl, keine Karte (dann mit freier Karte) oder zu viele Treffer
+}
+
+function backToSearch() {
   setMsg('addMsg', '');
-  if (r && r.stage === 'pickSet') { renderSetPicker(r); return; }
-  if (r && r.cards && r.cards.length > 1) { renderSearch(r); return; }
-  if (r && !r.tooMany && (!r.cards || !r.cards.length)) { renderSearch(r); return; }
-  $('addResults').innerHTML = r ? notesHtml(r.notes) : '';
+  if (state.addCopy) { leaveCopy(true); return; } // „+ Exemplar“ abgebrochen: zurück zur Sammlung
+  showResults();
   $('fName').focus();
 }
 
@@ -628,7 +821,7 @@ function addCurrent() {
   var v = chosenVariant();
   var req = {
     id: c.id, lang: c.lang, variant: v, condition: $('cCond').value,
-    qty: qtyOf($('cQty').value), inputName: inputName,
+    qty: 1, inputName: inputName, // ein Exemplar pro Hinzufügen (#50)
     cardLang: $('cLang').value || 'DE', version: $('cVersion').value.trim(), ownPrice: op.value
   };
   var given = directCards(c.id);
@@ -636,14 +829,18 @@ function addCurrent() {
   var name = c.lang === 'en' && inputName ? inputName : c.name;
   startAdd('addCard', req, {
     name: name, number: c.localId, image: c.image,
-    sub: [c.setName, c.localId + (c.setSize ? '/' + c.setSize : ''), v === 'base' ? c.baseLabel : VARIANT_LABELS[v]]
+    subHtml: subJoin([setNumHtml(c, numText(c.localId, c.setSize)), esc(v === 'base' ? c.baseLabel : VARIANT_LABELS[v])])
   });
 }
 
-// Hinzufügen im Hintergrund (#33): Das leere Formular steht sofort wieder da, die Karte speichert über die Warteschlange
-// der Sammlung (nacheinander, nie gleichzeitig mit einer Änderung dort). Jede Karte hat eine Anfrage-ID (rid), so rechnet
-// der Server eine Wiederholung nie doppelt ein. Unter dem Formular steht die zuletzt hinzugefügte Karte, darüber jede,
-// die nicht gespeichert werden konnte, bis sie gespeichert oder verworfen ist.
+/** Teile einer Zeile (schon HTML) mit „ · “ verbinden, leere fallen weg */
+function subJoin(parts) { return parts.filter(function (x) { return x != null && String(x) !== ''; }).join(' · '); }
+
+// Hinzufügen im Hintergrund (#33): Die Karte speichert über die Warteschlange der Sammlung (nacheinander, nie
+// gleichzeitig mit einer Änderung dort). Jede Karte hat eine Anfrage-ID (rid), so rechnet der Server eine Wiederholung
+// nie doppelt ein. Unter dem Formular steht die zuletzt hinzugefügte Karte, darüber jede, die nicht gespeichert werden
+// konnte, bis sie gespeichert oder verworfen ist. Danach bleiben die Treffer stehen und der Name markiert im Feld (#53),
+// so geht die nächste Karte derselben Suche mit einem Tipp.
 var adds = [], addSeq = 0;
 var ADD_RETRY_MS = [1500, 4000]; // zwei Wiederholungen, dann rote Zeile
 
@@ -651,31 +848,96 @@ function newRid() { return Date.now().toString(36) + '-' + Math.random().toStrin
 function addById(n) { for (var k = 0; k < adds.length; k++) if (adds[k].n === n) return adds[k]; return null; }
 function addPending(a) { return a.status === 'wait' || a.status === 'saving'; }
 
-/** Karte abschicken und sofort das leere Formular zeigen. show: {name, number, image, sub: [..]} für die Anzeige */
+/** Karte abschicken. show: {name, number, image, subHtml} für die Anzeige */
 function startAdd(fn, req, show) {
   req.rid = newRid();
+  var cp = state.addCopy;
   var item = { n: addSeq, fn: fn, req: req, name: show.name, number: show.number || '', image: show.image || '',
-    sub: show.sub.filter(function (x) { return x != null && String(x) !== ''; }).join(' · '), status: 'wait', err: '', res: null };
+    subHtml: show.subHtml || '', gkey: cp ? cp.gkey : '', status: 'wait', err: '', res: null };
   adds.push(item);
   ++searchGen; // späte Antworten zur alten Karte nicht mehr anzeigen
-  $('addResults').innerHTML = '';
-  $('searchForm').reset();
-  state.lastQuery = null;
-  state.lastRes = null;
   state.current = null;
-  $('fName').focus();
-  queueAdd(item);
+  queueAdd(item); // zuerst: die Karte in der Sammlung zeigt dann gleich „speichert …“
+  if (cp) leaveCopy(true); // vom Tab Sammlung („+ Exemplar“, #49): zurück dorthin, die Karte bleibt aufgeklappt
+  else keepSearch();
 }
+
+/** Nach dem Hinzufügen (#53): Treffer bleiben, der Name steht markiert im Feld, Nummer und Set sind leer. */
+function keepSearch() {
+  showResults();
+  var f = $('fName'), q = state.lastQuery;
+  // nur den Namen der Suche, ohne eine Nummer darin (#51); was inzwischen neu getippt wurde, bleibt
+  if (q && q.name && (f.value === state.lastTyped || f.value.trim() === q.name)) f.value = q.name;
+  $('fNumber').value = '';
+  $('fSet').value = '';
+  f.focus();
+  f.select();
+}
+
+// „+ Exemplar“ im Tab Sammlung (#49): die Seite Hinzufügen dieser Karte, Variante und Sonderversion schon gewählt.
+// Danach (oder mit Zurück) geht es zurück zur Sammlung, der Tab Hinzufügen steht wieder wie vorher.
+
+function addCopy(i) {
+  var g = state.groups[i];
+  if (!g || g.gone) return;
+  if (state.addCopy) leaveCopy(false);
+  state.addCopy = {
+    gkey: g.gkey, variant: g.variant, version: g.version || '',
+    scroll: document.documentElement.scrollTop || document.body.scrollTop || 0,
+    prev: { q: state.lastQuery, res: state.lastRes, cards: state.cards, typed: state.lastTyped }
+  };
+  state.lastQuery = { name: g.name, number: '', set: '' }; // unter diesem Namen speichert eine Karte mit englischen Ersatzdaten
+  state.lastRes = null;
+  state.lastTyped = null;
+  setMsg('addMsg', '');
+  showTab('add', true);
+  if (g.isFree) {
+    openFreeForm({ name: g.name, set: g.setName, number: g.localId ? g.localId + (g.setSize ? '/' + g.setSize : '') : '',
+      variant: g.variant, version: g.version || '' });
+  } else {
+    openConfirm({ id: g.id, lang: g.source === 'en-Ersatz' ? 'en' : 'de', image: g.image }, null);
+  }
+  var box = $('addResults'); // gleich bei der Karte, nicht beim Suchformular darüber
+  if (box.scrollIntoView) box.scrollIntoView({ block: 'start' }); else scrollToY(0);
+}
+
+/** „+ Exemplar“ verlassen: Hinzufügen wie vorher; back: zurück zur Karte im Tab Sammlung */
+function leaveCopy(back) {
+  var cp = state.addCopy;
+  if (!cp) return;
+  state.addCopy = null;
+  ++searchGen; // eine Karte, die noch lädt, nicht mehr zeigen
+  var p = cp.prev;
+  state.lastQuery = p.q; state.lastRes = p.res; state.cards = p.cards; state.lastTyped = p.typed;
+  state.current = null;
+  setMsg('addMsg', '');
+  showResults();
+  if (!back) return;
+  state.open[cp.gkey] = true;
+  showTab('coll', true);
+  scrollToY(cp.scroll); // wieder bei der Karte
+}
+function scrollToY(y) { document.documentElement.scrollTop = y; document.body.scrollTop = y; }
 
 function queueAdd(item) {
   item.status = 'wait';
   item.err = '';
   enqueue({
+    gkey: item.gkey, // „+ Exemplar“: die Karte in der Sammlung zeigt „speichert …“
     send: function () { item.status = 'saving'; drawAdds(); return tryAdd(item, 0); },
     done: function (res) { addSaved(item, res); },
-    fail: function (e) { item.status = 'err'; item.err = errText(e); drawAdds(); }
+    fail: function (e) { item.status = 'err'; item.err = errText(e); drawAdds(); copyErr(item, true); }
   });
   drawAdds();
+  copyErr(item, false);
+}
+
+/** Fehler (oder keiner mehr) bei „+ Exemplar“ auch an der Karte im Tab Sammlung */
+function copyErr(item, failed) {
+  var g = item.gkey && coll.byKey[item.gkey];
+  if (!g) return;
+  g.err = failed ? 'Exemplar nicht gespeichert: ' + item.err + '. Im Tab Hinzufügen nochmal versuchen.' : '';
+  redraw(g, 'hr'); // auch die Knöpfe: gesperrt, solange es speichert
 }
 
 function tryAdd(item, n) {
@@ -692,8 +954,10 @@ function addSaved(item, res) {
   rememberVersion(item.req.version);
   var g = res && res.delta ? (res.delta.groups || []).filter(function (x) { return x.gkey === res.gkey; })[0] : null;
   if (g) { item.name = g.name || item.name; item.number = g.localId || item.number; }
-  if (res && res.delta && coll.all) { applyDelta(res.delta, null, null); coll.resort = true; } // im Tab Sammlung ohne Neuladen
+  var from = item.gkey ? coll.byKey[item.gkey] || null : null; // „+ Exemplar“: eine neue Karte (andere Variante) steht daneben
+  if (res && res.delta && coll.all) { applyDelta(res.delta, from, res.gkey); coll.resort = true; } // im Tab Sammlung ohne Neuladen
   else markStale();
+  if (from && !from.gone) redraw(from, 'hr'); // „speichert …“ weg, auch wenn das Exemplar bei einer anderen Karte steht
   drawAdds();
 }
 
@@ -711,7 +975,7 @@ function drawAdds() {
   adds.forEach(function (a) {
     if (a.status !== 'err') return;
     html += '<div class="item addfail">' + imgTag(cardImg(a.image, 'low')) + '<div class="info"><div class="t">' + esc(a.name) + '</div>' +
-      '<div class="s">' + esc(a.sub) + '</div><div class="s err">Nicht gespeichert: ' + esc(a.err) + '</div>' +
+      '<div class="s">' + a.subHtml + '</div><div class="s err">Nicht gespeichert: ' + esc(a.err) + '</div>' +
       '<div class="actions"><button class="btn" onclick="retryAdd(' + a.n + ')">Nochmal versuchen</button>' +
       '<button class="btn" onclick="dropAdd(' + a.n + ')">Verwerfen</button></div></div></div>';
   });
@@ -724,7 +988,7 @@ function drawAdds() {
     html += '<div class="notes lasthead">Zuletzt hinzugefügt' + (ok ? ' (antippen zeigt die Karte in der Sammlung)' : '') + '</div>' +
       '<div class="item">' + imgTag(cardImg(last.image, 'low')) +
       '<div class="info' + (ok ? ' tap" role="button" tabindex="0" onclick="openAdded(' + last.n + ')" onkeydown="addedKey(event,' + last.n + ')"' : '"') + '>' +
-      '<div class="t">' + esc(last.name) + '</div><div class="s">' + esc(last.sub) + '</div>' + status + '</div></div>';
+      '<div class="t">' + esc(last.name) + '</div><div class="s">' + last.subHtml + '</div>' + status + '</div></div>';
   }
   if (pending > 1) html += '<div class="notes">Noch ' + pending + ' Karten werden gespeichert …</div>';
   if (pending) html += '<div class="hint">' + (MODE === 'sidebar' ? 'Seitenleiste' : 'Seite') + ' bitte offen lassen, bis alles gespeichert ist.</div>';
@@ -744,6 +1008,7 @@ function dropAdd(n) {
   if (!a || a.status !== 'err') return;
   adds.splice(adds.indexOf(a), 1);
   drawAdds();
+  copyErr(a, false);
 }
 
 /** Die gespeicherte Karte im Tab Sammlung zeigen: Suche mit Name und Nummer, die Karte ganz oben und aufgeklappt. */
@@ -764,24 +1029,24 @@ function addedKey(ev, n) {
   openAdded(n);
 }
 
-// Freie Karte (tcgdex kennt sie nicht)
-function openFreeForm() {
-  var q = state.lastQuery || {};
+// Freie Karte (tcgdex kennt sie nicht). pre: Werte einer freien Karte der Sammlung („+ Exemplar“), sonst aus der Suche
+function openFreeForm(pre) {
+  var q = pre || state.lastQuery || {};
   setMsg('addMsg', '');
-  $('addResults').innerHTML = '<form class="box" id="freeForm" onsubmit="saveFree(event)"><h3>Als freie Karte speichern</h3>' +
+  $('addResults').innerHTML = '<form class="box" id="freeForm" onsubmit="saveFree(event)"><h3>' + (pre ? 'Weiteres Exemplar (freie Karte)' : 'Als freie Karte speichern') + '</h3>' +
     '<div class="hint">Ohne Bild und ohne automatischen Preis. Gib bei Bedarf einen eigenen Preis an.</div>' +
     '<label for="frName">Name</label><input type="text" id="frName" autocomplete="off" value="' + esc(q.name) + '">' +
-    '<div class="row"><div><label for="frSet">Set</label><input type="text" id="frSet" list="setList" autocomplete="off" value="' + esc(q.set) + '"></div>' +
+    '<div class="row"><div><label for="frSet">Set</label><input type="text" id="frSet" data-sets="1" autocomplete="off" value="' + esc(q.set) + '"></div>' +
     '<div><label for="frNumber">Nummer</label><input type="text" id="frNumber" autocomplete="off" value="' + esc(q.number) + '"></div></div>' +
-    '<div class="row"><div><label for="frVariant">Variante</label><select id="frVariant">' + variantOptions('normal') + '</select></div>' +
+    '<div class="row"><div><label for="frVariant">Variante</label><select id="frVariant">' + variantOptions(q.variant || 'normal') + '</select></div>' +
     '<div><label for="frCond">Zustand</label><select id="frCond">' + condOptions('') + '</select></div></div>' +
     '<div class="row"><div><label for="frLang">Sprache</label><select id="frLang">' + langOptions('DE') + '</select></div>' +
-    '<div><label for="frVersion">Sonderversion (optional)</label><input type="text" id="frVersion" list="versionList" autocomplete="off" placeholder="z. B. Snowflake"></div></div>' +
-    '<div class="row"><div><label for="frQty">Anzahl</label><input type="number" id="frQty" min="1" value="1" inputmode="numeric"></div>' +
-    '<div><label for="frOwnPrice">Eigener Preis in EUR (optional)</label><input type="text" id="frOwnPrice" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50"></div></div>' +
+    '<div><label for="frVersion">Sonderversion (optional)</label><input type="text" id="frVersion" list="versionList" autocomplete="off" placeholder="z. B. Snowflake" value="' + esc(q.version || '') + '"></div></div>' +
+    // ohne Anzahl (#50): jedes Speichern ist ein Exemplar
+    '<label for="frOwnPrice">Eigener Preis in EUR (optional)</label><input type="text" id="frOwnPrice" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50">' +
     '<div class="actions"><button class="btn" type="button" onclick="backToSearch()">Zurück</button>' +
     '<button class="btn primary" type="submit" id="frSave">Speichern</button></div></form>';
-  $('frName').focus();
+  if (!pre) $('frName').focus();
 }
 
 function saveFree(ev) {
@@ -794,12 +1059,12 @@ function saveFree(ev) {
   setMsg('addMsg', '');
   var req = {
     name: name, setName: $('frSet').value.trim(), number: $('frNumber').value.trim(),
-    variant: $('frVariant').value || 'normal', condition: $('frCond').value, qty: qtyOf($('frQty').value),
+    variant: $('frVariant').value || 'normal', condition: $('frCond').value, qty: 1,
     cardLang: $('frLang').value || 'DE', version: $('frVersion').value.trim(), ownPrice: op.value
   };
   startAdd('addFreeCard', req, {
     name: name, number: req.number,
-    sub: ['freie Karte', req.setName, req.number, VARIANT_LABELS[req.variant] || req.variant]
+    subHtml: subJoin(['freie Karte', setNumHtml({ setName: req.setName }, esc(req.number)), esc(VARIANT_LABELS[req.variant] || req.variant)])
   });
 }
 
@@ -830,7 +1095,8 @@ function showBase(g) {
   g.rows = g.rows || [];
   queue.forEach(function (op) { if (op.g === g && op.predict) op.predict(g); });
 }
-function saving(g) { var n = 0; queue.forEach(function (op) { if (op.g === g && op.predict) n++; }); return n; }
+/** Änderungen dieser Gruppe in der Warteschlange: Bearbeiten (predict) und „+ Exemplar“ (gkey) */
+function saving(g) { var n = 0; queue.forEach(function (op) { if ((op.g === g && op.predict) || (op.gkey && op.gkey === g.gkey)) n++; }); return n; }
 function isBusy(g) { return !!g.busy || saving(g) > 0; }
 
 function enqueue(op) { queue.push(op); runQueue(); }
@@ -973,13 +1239,15 @@ function refilter() {
   }
   state.groups = list;
   renderCollection();
-  if (top) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }
+  if (top) scrollToY(0);
 }
 
+/** Eine Karte: Zeile zum Aufklappen, darunter Karteninfo mit eigenem Preis, Exemplare, Bearbeiten, „+ Exemplar“, Verknüpfen */
 function groupHtml(g, i) {
-  return '<div class="grp" id="g' + i + '"><div id="gh' + i + '">' + headHtml(g, i) + '</div><div id="gc' + i + '">' + chooserHtml(g, i) + '</div>' +
-    '<div class="gx' + (g.open ? '' : ' hidden') + '" id="gx' + i + '"><div id="gr' + i + '"></div><div id="ge' + i + '"></div>' +
-    '<div id="gp' + i + '"></div><div id="gl' + i + '"></div></div></div>';
+  return '<div class="grp" id="g' + i + '"><div id="gh' + i + '">' + headHtml(g, i) + '</div>' +
+    '<div class="gx' + (g.open ? '' : ' hidden') + '" id="gx' + i + '"><div id="gp' + i + '"></div><div id="gr' + i + '"></div><div id="ge' + i + '"></div>' +
+    '<div class="actions"><button class="btn" type="button" onclick="addCopy(' + i + ')">+ Exemplar</button></div>' +
+    '<div id="gl' + i + '"></div></div></div>';
 }
 
 /** Die ganze Liste in einem Rutsch zeichnen (auch bei vielen Karten schnell); Bilder laden erst beim Scrollen. */
@@ -1005,7 +1273,7 @@ function typing(el) {
 }
 
 /**
- * Teile einer Gruppe neu zeichnen: h Kopf, c Auswahl, r Exemplare, e Bearbeiten, p Preis, l Verknüpfen.
+ * Teile einer Gruppe neu zeichnen: h Kopf, p Karteninfo und eigener Preis, r Exemplare, e Bearbeiten, l Verknüpfen.
  * soft: Teile mit dem Cursor in einem Eingabefeld bleiben stehen.
  */
 function draw(i, g, parts, soft) {
@@ -1017,13 +1285,12 @@ function draw(i, g, parts, soft) {
     if (el && !(soft && typing(el))) el.innerHTML = fn(g, i);
   }
   put('h', headHtml);
-  put('c', chooserHtml);
   var x = $('gx' + i);
   if (x) x.classList.toggle('hidden', !g.open);
   if (!g.open) return;
+  put('p', infoHtml);
   put('r', rowsHtml);
   put('e', editHtml);
-  put('p', priceHtml);
   put('l', linkHtml);
 }
 /** Gruppe neu zeichnen, wo sie gerade in der Liste steht */
@@ -1132,49 +1399,55 @@ function chgHtml(c) {
     (c.since ? ' seit ' + esc(shortDate(c.since)) : '');
 }
 
+/**
+ * Zeile einer Karte (#52): Name, darunter Set-Symbol, Nummer und Variante (außer Normal), rechts die Anzahl und der
+ * Pfeil. Die ganze Zeile klappt auf. Preis, Seltenheit und Illustrator stehen in der Karteninfo.
+ */
 function headHtml(g, i) {
   var sub = [];
   if (g.isFree) sub.push('freie Karte');
-  if (g.setName) sub.push(esc(g.setName));
-  if (g.localId) sub.push(esc(g.localId) + (g.setSize ? '/' + esc(g.setSize) : ''));
-  sub.push(esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant));
-  var p = g.price == null || g.price === '' ? NaN : Number(g.price);
-  if (!isNaN(p)) sub.push(esc(eur(p)) + (g.priceManual ? ' manuell' : ''));
-  var ch = g.priceManual || !g.chg ? null : g.chg[CHG_DAYS];
-  if (ch) sub.push(chgHtml(ch));
-  if (g.exemplare) sub.push(esc(g.exemplare));
-  if (collSort.sort === 'rarity' && g.rarity) sub.push(esc(g.rarity));
-  if (collSort.sort === 'dex' && g.dex && g.dex.length) sub.push('#' + g.dex.map(esc).join(', #'));
+  sub.push(setNumHtml(g, numText(g.localId, g.setSize)));
+  if (g.variant && g.variant !== 'normal') sub.push(esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant));
   var busy = isBusy(g);
-  return '<div class="item' + (g.count ? '' : ' zero') + '">' + imgTag(cardImg(g.image, 'low')) +
-    '<div class="info tap" role="button" tabindex="0" aria-expanded="' + (g.open ? 'true' : 'false') + '" onclick="toggleGroup(' + i + ')"' +
-    ' onkeydown="groupKey(event,this,' + i + ')">' +
-    '<div class="t">' + titleHtml(g) + '</div><div class="s">' + sub.join(' · ') +
-    ' <span class="chev">' + (g.open ? '▲' : '▼') + '</span></div>' +
-    (g.illustrator ? '<div class="s">Illus. ' + esc(g.illustrator) + '</div>' : '') +
+  return '<div class="item head' + (g.count ? '' : ' zero') + '" role="button" tabindex="0" aria-expanded="' + (g.open ? 'true' : 'false') + '"' +
+    ' onclick="toggleGroup(' + i + ')" onkeydown="groupKey(event,this,' + i + ')">' + imgTag(cardImg(g.image, 'low')) +
+    '<div class="info"><div class="t">' + titleHtml(g) + '</div><div class="s">' + subJoin(sub) + '</div>' +
     (saving(g) ? '<div class="s saving">speichert …</div>' : '') +
     (g.err ? '<div class="s err">' + esc(g.err) + '</div>' : '') +
     (g.undo && !busy ? '<button class="undo" onclick="event.stopPropagation();undoGroup(' + i + ')">Rückgängig</button>' : '') + '</div>' +
-    '<div class="ctl"><button class="btn small" onclick="groupMinus(' + i + ')"' + (!g.count || busy ? ' disabled' : '') + '>−1</button>' +
-    '<span class="cnt">' + esc(g.count) + '</span>' +
-    '<button class="btn small" onclick="groupPlus(' + i + ')"' + (busy ? ' disabled' : '') + '>+1</button></div></div>';
+    '<div class="side"><span class="n" title="Exemplare">' + esc(g.count) + '×</span><span class="chev" aria-hidden="true">' + (g.open ? '▲' : '▼') + '</span></div></div>';
 }
 
-function chooserHtml(g, i) {
-  var c = g.choose;
-  if (!c) return '';
-  var html = '<div class="choose"><div class="t">Welches Exemplar?</div>' +
-    (c.delta > 0 ? '<div class="hint">Die neue Karte zählt dann als von Hand erfasst.</div>' : '');
-  c.eids.forEach(function (eid, k) {
-    var r = rowByEid(g, eid);
-    if (r) html += '<button class="btn opt" onclick="pickChoice(' + i + ',' + k + ')"' + (isBusy(g) ? ' disabled' : '') + '>' + rowLabel(r) + '</button>';
-  });
-  return html + '<button class="btn opt" onclick="closeChooser(' + i + ')">Abbrechen</button></div>';
+/** Aufgeklappt (#52): die Karteninfo als Tabelle; der eigene Preis steckt hinter einem kleinen Link in der Zeile Preis */
+function infoHtml(g, i) {
+  var s = g.setId ? SETS.byId[g.setId] : null;
+  var setName = g.setName || (s && s.name) || g.setId || '';
+  var m = setMark(g), rows = [];
+  if (setName) rows.push(['Set', (m.text ? '' : m.html + ' ') + esc(setName)]);
+  if (g.localId) rows.push(['Nummer', numText(g.localId, g.setSize)]);
+  rows.push(['Variante', esc(g.variantLabel || VARIANT_LABELS[g.variant] || g.variant)]);
+  if (g.version) rows.push(['Sonderversion', esc(g.version)]);
+  if (g.rarity) rows.push(['Seltenheit', esc(g.rarity)]);
+  if (g.illustrator) rows.push(['Illustrator', esc(g.illustrator)]);
+  if (g.dex && g.dex.length) rows.push(['Pokédex-Nr.', g.dex.map(function (n) { return '#' + esc(n); }).join(', ')]);
+  rows.push(['Preis', priceCellHtml(g, i)]);
+  return '<table class="itab">' + rows.map(function (r) { return '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>'; }).join('') + '</table>' +
+    (g.priceOpen ? priceEditHtml(g, i) : '');
+}
+
+/** Preis, Veränderung über 30 Tage (nicht beim eigenen Preis) und Stand, darunter der Link zum eigenen Preis */
+function priceCellHtml(g, i) {
+  var p = g.price == null || g.price === '' ? NaN : Number(g.price);
+  var h = isNaN(p) ? 'kein Preis' : esc(eur(p)) + (g.priceManual ? ' (eigener Preis)' : g.priceDate ? ' · Stand ' + esc(shortDate(g.priceDate)) : '');
+  var ch = g.priceManual || !g.chg ? null : g.chg[CHG_DAYS];
+  if (ch) h += '<br>' + chgHtml(ch) + (ch.since ? '' : ' in ' + CHG_DAYS + ' Tagen');
+  return h + '<br><button type="button" class="lnk" aria-expanded="' + (g.priceOpen ? 'true' : 'false') + '" onclick="togglePrice(' + i + ')">Eigener Preis …</button>';
 }
 
 function rowsHtml(g, i) {
   if (!g.rows.length) return '<div class="notes">Keine Exemplare.</div>';
   var busy = isBusy(g);
+  // pro Exemplar nur −1 und Bearbeiten: ein weiteres kommt über „+ Exemplar“ mit eigener Sprache und eigenem Zustand (#49)
   return g.rows.map(function (r, j) {
     var ex = extrasHtml(r);
     var editing = g.edit && g.edit.eid === r.eid;
@@ -1182,7 +1455,6 @@ function rowsHtml(g, i) {
     return '<div class="erow' + (r.count ? '' : ' zero') + (editing ? ' sel' : '') + (r.pending ? ' pend' : '') + '"><div class="einfo">' + rowLabel(r) +
       (r.pending ? ' · <span class="saving">speichert …</span>' : '') + (ex ? '<div class="x">' + ex + '</div>' : '') + '</div><div class="ctl">' +
       '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',-1)"' + (!r.count || busy ? ' disabled' : '') + '>−1</button>' +
-      '<button class="btn small" onclick="rowAdjust(' + i + ',' + j + ',1)"' + (busy ? ' disabled' : '') + '>+1</button>' +
       '<button class="btn small" onclick="openEdit(' + i + ',' + j + ')"' + off + '>Bearbeiten</button></div></div>';
   }).join('');
 }
@@ -1195,51 +1467,18 @@ function toggleGroup(i) {
   draw(i, g, 'all');
 }
 
-/** Enter oder Leertaste auf der Infozeile klappt auf und zu (nicht auf dem Rückgängig-Knopf darin) */
+/** Enter oder Leertaste auf der Zeile klappt auf und zu (nicht auf dem Rückgängig-Knopf darin) */
 function groupKey(ev, el, i) {
   if (ev.target !== el || (ev.key !== 'Enter' && ev.key !== ' ')) return;
   ev.preventDefault();
   toggleGroup(i);
 }
 
-// -1 / +1 auf der Gruppe
-function groupMinus(i) {
-  var g = state.groups[i];
-  if (!g || isBusy(g)) return;
-  var rows = g.rows.filter(function (r) { return r.count > 0; });
-  if (!rows.length) return;
-  if (rows.length === 1) { g.choose = null; adjust(g, rows[0], -1); return; }
-  g.choose = { delta: -1, eids: rows.map(function (r) { return r.eid; }) }; // Kurz nachfragen
-  draw(i, g, 'c');
-}
-
-function groupPlus(i) {
-  var g = state.groups[i];
-  if (!g || isBusy(g) || !g.rows.length) return;
-  var hand = g.rows.filter(isHand);
-  var direct = hand.length === 1 ? hand[0] : (!hand.length && g.rows.length === 1 ? g.rows[0] : null);
-  if (direct) { g.choose = null; adjust(g, direct, 1); return; }
-  g.choose = { delta: 1, eids: g.rows.map(function (r) { return r.eid; }) };
-  draw(i, g, 'c');
-}
-
-function pickChoice(i, k) {
-  var g = state.groups[i];
-  if (!g || !g.choose || isBusy(g)) return;
-  var c = g.choose, r = rowByEid(g, c.eids[k]);
-  g.choose = null;
-  if (!r || (c.delta < 0 && !r.count)) { draw(i, g, 'c'); return; }
-  adjust(g, r, c.delta);
-}
-
-function closeChooser(i) { var g = state.groups[i]; if (g) { g.choose = null; draw(i, g, 'c'); } }
-
 function rowAdjust(i, j, delta) {
   var g = state.groups[i];
   if (!g || isBusy(g)) return;
   var r = g.rows[j];
   if (!r || r.pending || (delta < 0 && !r.count)) return;
-  g.choose = null;
   adjust(g, r, delta);
 }
 
@@ -1255,7 +1494,7 @@ function adjust(g, row, delta) {
   if (isBusy(g)) return;
   clearTimeout(g.undoTimer); g.undo = null; // alte Rückgängig-Option verwerfen
   g.busy = true; g.err = '';
-  redraw(g, 'hcr');
+  redraw(g, 'hr');
   var eid = row.eid;
   enqueue({
     g: g,
@@ -1268,7 +1507,7 @@ function adjust(g, row, delta) {
         clearTimeout(g.undoTimer);
         g.undoTimer = setTimeout(function () { g.undo = null; redraw(g, 'h'); }, 5000);
       }
-      redraw(g, 'hcr');
+      redraw(g, 'hr');
     },
     fail: function (e) { g.busy = false; opFail(g, e, 'Nicht geändert'); }
   });
@@ -1280,11 +1519,11 @@ function undoGroup(i) {
   var token = g.undo;
   g.undo = null; clearTimeout(g.undoTimer);
   g.busy = true; g.err = '';
-  draw(i, g, 'hcr');
+  draw(i, g, 'hr');
   enqueue({
     g: g,
     send: function () { return call('revertAdjust', token); },
-    done: function (res) { g.busy = false; applyDelta(res && res.delta, g); redraw(g, 'hcr'); },
+    done: function (res) { g.busy = false; applyDelta(res && res.delta, g); redraw(g, 'hr'); },
     fail: function (e) { g.busy = false; opFail(g, e, 'Nicht rückgängig gemacht'); }
   });
 }
@@ -1399,14 +1638,23 @@ function saveEdit(i) {
   draw(i, g, 'all');
 }
 
-// Eigener Preis (gilt für die ganze Gruppe)
-function priceHtml(g, i) {
+// Eigener Preis (gilt für die ganze Gruppe): erst der Link „Eigener Preis …“ in der Karteninfo öffnet das Feld (#52)
+function priceEditHtml(g, i) {
   if (g.priceText == null) g.priceText = euroText(g.ownPrice);
-  return '<div class="box"><label for="op' + i + '">Eigener Preis in EUR</label>' +
-    '<div class="row"><input type="text" id="op' + i + '" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50" value="' + esc(g.priceText) + '" oninput="priceInput(' + i + ',this.value)">' +
-    '<button class="btn" onclick="savePrice(' + i + ')"' + (g.priceBusy ? ' disabled' : '') + '>Speichern</button>' +
-    '<button class="btn" onclick="clearPrice(' + i + ')"' + (g.priceBusy || g.ownPrice == null ? ' disabled' : '') + '>Entfernen</button></div>' +
+  return '<div class="pedit"><label for="op' + i + '">Eigener Preis in EUR</label>' +
+    '<input type="text" id="op' + i + '" inputmode="decimal" autocomplete="off" placeholder="z. B. 1,50" value="' + esc(g.priceText) + '" oninput="priceInput(' + i + ',this.value)">' +
+    '<div class="actions"><button class="btn" onclick="clearPrice(' + i + ')"' + (g.priceBusy || g.ownPrice == null ? ' disabled' : '') + '>Entfernen</button>' +
+    '<button class="btn" onclick="savePrice(' + i + ')"' + (g.priceBusy ? ' disabled' : '') + '>Speichern</button></div>' +
     '<div class="hint">' + (g.ownPrice != null ? 'Gilt für alle Exemplare dieser Zeile. Der Preislauf ändert ihn nicht.' : 'Nur nötig, wenn tcgdex keinen Preis hat. Gilt für alle Exemplare dieser Zeile.') + '</div></div>';
+}
+
+function togglePrice(i) {
+  var g = state.groups[i];
+  if (!g || g.priceBusy) return;
+  g.priceOpen = !g.priceOpen;
+  g.priceText = null; // aus dem gespeicherten Preis
+  draw(i, g, 'p');
+  if (g.priceOpen && $('op' + i)) $('op' + i).focus();
 }
 
 function priceInput(i, v) { var g = state.groups[i]; if (g) g.priceText = v; }
@@ -1435,6 +1683,7 @@ function sendPrice(g, price) {
     done: function (res) {
       g.priceBusy = false;
       g.priceText = null; // aus dem neuen Preis
+      g.priceOpen = false; // gespeichert: das Feld geht zu, der Preis steht in der Karteninfo
       applyDelta(res && res.delta, g);
       redraw(g, 'hp');
       setMsg('collMsg', price == null ? 'Eigener Preis entfernt.' : 'Eigener Preis gespeichert.', 'ok');
@@ -1467,7 +1716,7 @@ function linkHtml(g, i) {
   return '<div class="box"><form onsubmit="linkSearch(event,' + i + ')"><h3>Mit tcgdex-Karte verknüpfen</h3>' +
     '<label for="lkName' + i + '">Name</label><input type="text" id="lkName' + i + '" autocomplete="off" value="' + esc(L.name) + '" oninput="linkField(' + i + ',\'name\',this.value)">' +
     '<div class="row"><div><label for="lkNum' + i + '">Nummer</label><input type="text" id="lkNum' + i + '" autocomplete="off" value="' + esc(L.number) + '" oninput="linkField(' + i + ',\'number\',this.value)"></div>' +
-    '<div><label for="lkSet' + i + '">Set (optional)</label><input type="text" id="lkSet' + i + '" list="setList" autocomplete="off" value="' + esc(L.set) + '" oninput="linkField(' + i + ',\'set\',this.value)"></div></div>' +
+    '<div><label for="lkSet' + i + '">Set (optional)</label><input type="text" id="lkSet' + i + '" data-sets="1" autocomplete="off" value="' + esc(L.set) + '" oninput="linkField(' + i + ',\'set\',this.value)"></div></div>' +
     '<div class="actions"><button class="btn" type="button" onclick="closeLink(' + i + ')"' + (L.linking ? ' disabled' : '') + '>Abbrechen</button>' +
     '<button class="btn primary" type="submit"' + (L.linking ? ' disabled' : '') + '>Suchen</button></div></form>' +
     '<div id="lkRes' + i + '">' + linkResHtml(g, i) + '</div></div>';
@@ -1483,8 +1732,7 @@ function linkResHtml(g, i) {
     html += '<div class="notes">Karte antippen, um sie zu verknüpfen:</div><div class="grid">';
     res.cards.forEach(function (c, k) {
       html += '<div class="tile" role="button" onclick="linkPick(' + i + ',' + k + ')">' + imgTag(cardImg(c.image, 'low')) +
-        '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId) + ' · ' + esc(c.localId) +
-        (c.setSize ? '/' + esc(c.setSize) : '') + (c.lang === 'en' ? ' · englische Daten' : '') + '</div></div>';
+        cardCap(c, c.lang === 'en' ? ' · englische Daten' : '') + '</div>';
     });
     return html + '</div>';
   }
@@ -1612,6 +1860,19 @@ function initSort() {
   if (s && sortDef(s)) { collSort.sort = s; collSort.desc = d == null ? sortDef(s)[2] : d === '1'; }
   $('colSort').value = collSort.sort;
   drawDir();
+  setImgSize(memGet('pkmImgSize'));
+}
+
+// Bildgröße im Tab Sammlung (#46): klein (48 px wie bisher), mittel, groß; pro Gerät gemerkt wie die Sortierung
+var IMG_SIZES = ['s', 'm', 'l'];
+function setImgSize(v) {
+  if (IMG_SIZES.indexOf(v) < 0) v = 's';
+  $('colImg').value = v;
+  IMG_SIZES.forEach(function (k) { $('collResults').classList.toggle('isz-' + k, k === v); });
+}
+function imgSizeChanged() {
+  setImgSize($('colImg').value);
+  memSet('pkmImgSize', $('colImg').value);
 }
 function drawDir() {
   var def = sortDef(collSort.sort);
@@ -2144,9 +2405,7 @@ if (MODE === 'sidebar') {
 }
 initSort();
 initDex();
-call('getSetSuggestions').then(function (names) {
-  $('setList').innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
-}).catch(function () { /* ohne Vorschläge weiter */ });
+call('getSetSuggestions').then(applySets).catch(function () { /* ohne Auswahlliste weiter */ });
 loadUiConfig();
 $('takeImgHint').textContent = UPD_IMAGE_HINT;
 updLoad(START === 'upd'); // Menü „Nach Updates suchen“: frisch von GitHub

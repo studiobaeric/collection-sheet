@@ -841,7 +841,7 @@ function missingPaths(res, paths) {
   checkSheets(env, 'Nach Import 1', { verlauf: VERLAUF, hand: HAND });
 
   /* ---------------- 8. Sammlung ---------------- */
-  t.section('8. Sammlung: Import-Zeilen, Zusatzwert, Auswahl bei −1, Bearbeiten');
+  t.section('8. Sammlung: Import-Zeilen, Zusatzwert, −1 am Exemplar, Bearbeiten');
   await E.clickSettle(E.$('tabColl'), 'Tab Sammlung');
   const gIdx = (name) => E.win.state.groups.findIndex((g) => g.name === name);
   const des = gIdx('Despotar');
@@ -850,13 +850,16 @@ function missingPaths(res, paths) {
   const desRows = E.$('gr' + des).textContent.replace(/\s+/g, ' ');
   t.ok('Despotar: Zeile „1× DE · Pokemon Ordner.xlsx, Import 1“ mit Ordner', /1× DE · Pokemon Ordner\.xlsx, Import 1/.test(desRows) && /Ordner: Ordner A/.test(desRows), desRows);
   const nac = gIdx('Nachtara');
-  t.ok('Nachtara: Gruppe mit Hand- und Import-Zeile', E.win.state.groups[nac].rows.length === 2 && /1× DE, 2× DE LP/.test(E.$('gh' + nac).textContent), E.$('gh' + nac).textContent);
-  E.click(E.btn(E.$('gh' + nac), '−1'), 'Nachtara −1');
-  const chooser = E.$('gc' + nac);
-  const opts = [...chooser.querySelectorAll('button.opt')].map((b) => b.textContent);
-  t.ok('−1: Auswahl „Welches Exemplar?“ mit Hand und Import', /Welches Exemplar\?/.test(chooser.textContent) &&
-    opts.indexOf('2× DE LP · von Hand') >= 0 && opts.indexOf('1× DE · ' + ORIGIN_LABEL + '1') >= 0 && opts.indexOf('Abbrechen') >= 0, opts);
-  await E.clickSettle([...chooser.querySelectorAll('button.opt')].find((b) => /Import 1/.test(b.textContent)), 'Import-Exemplar');
+  t.ok('Nachtara: Gruppe mit Hand- und Import-Zeile, 3 Stück', E.win.state.groups[nac].rows.length === 2 && E.$('gh' + nac).querySelector('.side .n').textContent === '3×',
+    E.$('gh' + nac).textContent);
+  // −1 sitzt an jedem Exemplar (#49): Hand und Import stehen aufgeklappt untereinander
+  E.click(E.$('gh' + nac).querySelector('.info'), 'Nachtara aufklappen');
+  const nacRows = [...E.$('gr' + nac).querySelectorAll('.erow')];
+  const nacTexts = nacRows.map((r) => r.querySelector('.einfo').textContent);
+  t.ok('Nachtara aufgeklappt: Zeile von Hand und Import-Zeile', nacTexts.some((x) => x.indexOf('2× DE LP · von Hand') === 0) &&
+    nacTexts.some((x) => x.indexOf('1× DE · ' + ORIGIN_LABEL + '1') === 0), nacTexts);
+  const nacImpRow = nacRows.find((r) => /Import 1/.test(r.querySelector('.einfo').textContent));
+  await E.clickSettle(E.btn(nacImpRow, '−1'), 'Nachtara −1 am Import-Exemplar');
   const nacImp = rowsOf(env, 1).find((d) => d.name === 'Nachtara');
   t.ok('−1 auf das Import-Exemplar: Anzahl 0, „handentfernt“ protokolliert, Hand-Zeile unverändert', nacImp.count === 0 &&
     env.proto().some((p) => p.Typ === 'handentfernt' && Number(p['Import-Nr']) === 1 && Number(p.Menge) === 1) &&

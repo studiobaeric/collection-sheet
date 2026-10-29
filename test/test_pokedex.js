@@ -331,10 +331,21 @@ function boot(env, mode, storage) {
     await E.click(E.$('colDir'));
     eq('Richtung umgedreht, ohne Server', [E.log.length, E.$('colDirHint').textContent, J(ids())], [nCalls, 'Günstigste zuerst', J(['swsh1-178', 'swsh3-025', 'sm9-33'])]);
     eq('gemerkt', [E.win.localStorage.getItem('pkmSort'), E.win.localStorage.getItem('pkmSortDesc')], ['price', '0']);
+    // Seltenheit und Pokédex-Nr. stehen nicht mehr in der Zeile, sondern aufgeklappt in der Info-Tabelle (#52)
+    const infoOf = id => {
+      const i = E.win.state.groups.findIndex(g => g.id === id);
+      const th = [...E.$('gp' + i).querySelectorAll('table.itab th')];
+      const o = {};
+      th.forEach(x => { o[x.textContent] = x.nextElementSibling.textContent; });
+      return o;
+    };
     await E.pick(E.$('colSort'), 'rarity');
-    ok('Seltenheit steht in der Zeile', /Holografisch Selten GX|Selten|Ungewöhnlich/.test(E.$('collResults').textContent));
+    ok('Seltenheit nicht in der Zeile', ![...E.$('collResults').querySelectorAll('.item.head')].some(h => /Selten|Ungewöhnlich/.test(h.textContent)), E.$('collResults').textContent.slice(0, 300));
+    await E.click(E.$('gh' + E.win.state.groups.findIndex(g => g.id === 'sm9-33')).querySelector('.info'));
+    ok('Seltenheit aufgeklappt in der Info-Tabelle', /Selten|Ungewöhnlich/.test(infoOf('sm9-33')['Seltenheit'] || ''), infoOf('sm9-33'));
     await E.pick(E.$('colSort'), 'dex');
-    ok('Pokédex-Nr. steht in der Zeile', /#25, #644/.test(E.$('collResults').textContent), E.$('collResults').textContent.slice(0, 300));
+    ok('Pokédex-Nr. nicht in der Zeile', ![...E.$('collResults').querySelectorAll('.item.head')].some(h => /#\d/.test(h.textContent)), E.$('collResults').textContent.slice(0, 300));
+    ok('Pokédex-Nr. aufgeklappt in der Info-Tabelle', infoOf('sm9-33')['Pokédex-Nr.'] === '#25, #644', infoOf('sm9-33'));
     ok('keine Skriptfehler', E.errors.length === 0, E.errors);
 
     const E2 = boot(env, 'sidebar', { pkmSort: 'rarity', pkmSortDesc: '0' });

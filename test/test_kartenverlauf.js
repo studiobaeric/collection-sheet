@@ -277,14 +277,19 @@ async function boot(env) {
       }
     },
     idx: gkey => win.state.groups.findIndex(g => g.gkey === gkey),
-    head: i => doc.getElementById('gh' + i).textContent.replace(/\s+/g, ' ')
+    head: i => doc.getElementById('gh' + i).textContent.replace(/\s+/g, ' '),
+    /** Wert einer Zeile der Info-Tabelle (aufgeklappt, #52) */
+    info: (i, label) => {
+      const th = [...doc.getElementById('gp' + i).querySelectorAll('table.itab th')].find(x => x.textContent === label);
+      return th ? th.nextElementSibling.textContent.replace(/\s+/g, ' ').trim() : null;
+    }
   };
   await E.settle();
   return E;
 }
 
 (async () => {
-  t.section('Seitenleiste: Künstler, Veränderung über 30 Tage, keine Kurve (#30)');
+  t.section('Seitenleiste: Künstler, Veränderung über 30 Tage in der Info-Tabelle, keine Kurve (#30, #52)');
   const { env, a, r, b, f } = S;
   // eine Karte ohne Verlauf (nach dem letzten Preislauf erfasst)
   const n = env.uiCall('addCard', { id: 'swsh3-136', lang: 'de', variant: 'base', qty: 1 });
@@ -295,18 +300,21 @@ async function boot(env) {
   await E.settle();
   const ia = E.idx(a.gkey), ir = E.idx(r.gkey), ib = E.idx(b.gkey), iff = E.idx(f.gkey), inn = E.idx(n.gkey);
   ok('alle Gruppen da', [ia, ir, ib, iff, inn].every(i => i >= 0), E.win.state.groups.map(g => g.gkey));
-  ok('Glurak: 30 Tage +0,40 € (+25 %) grün', /\+0,40\s€ \(\+25 %\)/.test(E.head(ia)) && E.$('gh' + ia).querySelector('.chg.up'), E.head(ia));
-  ok('Künstler unter der Karte', /Illus\. Mitsuhiro Arita/.test(E.head(ia)), E.head(ia));
-  ok('reverse: ±0,00 € (±0 %) grau', /±0,00\s€ \(±0 %\)/.test(E.head(ir)) && E.$('gh' + ir).querySelector('.chg.flat'), E.head(ir));
-  ok('eigener Preis: keine Veränderung', !E.$('gh' + ib).querySelector('.chg') && /10,00\s€ manuell/.test(E.head(ib)), E.head(ib));
-  ok('freie Karte und Karte ohne Verlauf: keine Veränderung', !E.$('gh' + iff).querySelector('.chg') && !E.$('gh' + inn).querySelector('.chg'));
+  // die Zeile zeigt nur noch Name, Set und Nummer (#52): Preis, Veränderung und Künstler stehen aufgeklappt in der Info-Tabelle
+  ok('Zeilen ohne Preis, Veränderung und Künstler', [ia, ir, ib, iff, inn].every(i => !E.$('gh' + i).querySelector('.chg') && !/€|Illus|Arita/.test(E.head(i))),
+    [ia, ir, ib].map(E.head));
   // Aufklappen: keine Kurve, kein Abruf
   const nCalls = E.log.length;
-  E.win.toggleGroup(ia);
-  E.win.toggleGroup(ib);
+  [ia, ir, ib, iff, inn].forEach(i => E.win.toggleGroup(i));
   await E.settle();
   ok('Aufklappen ohne Serveraufruf und ohne Kurve', E.log.length === nCalls && !E.$('paneColl').querySelector('svg') && !E.$('gv' + ia) &&
     !!E.$('gr' + ia).querySelector('.erow'), E.log.slice(nCalls));
+  ok('Glurak: 30 Tage +0,40 € (+25 %) grün', /\+0,40\s€ \(\+25 %\) in 30 Tagen/.test(E.info(ia, 'Preis')) && E.$('gp' + ia).querySelector('.chg.up'), E.info(ia, 'Preis'));
+  ok('Illustrator in der Info-Tabelle', E.info(ia, 'Illustrator') === 'Mitsuhiro Arita', E.info(ia, 'Illustrator'));
+  ok('reverse: ±0,00 € (±0 %) grau', /±0,00\s€ \(±0 %\)/.test(E.info(ir, 'Preis')) && E.$('gp' + ir).querySelector('.chg.flat'), E.info(ir, 'Preis'));
+  ok('eigener Preis: keine Veränderung', !E.$('gp' + ib).querySelector('.chg') && /^10,00\s€ \(eigener Preis\)/.test(E.info(ib, 'Preis')), E.info(ib, 'Preis'));
+  ok('freie Karte und Karte ohne Verlauf: keine Veränderung', !E.$('gp' + iff).querySelector('.chg') && !E.$('gp' + inn).querySelector('.chg') &&
+    /^kein Preis|€/.test(E.info(iff, 'Preis')), [E.info(iff, 'Preis'), E.info(inn, 'Preis')]);
   ok('Ui.html ohne Preiskurve', !/getPriceHistory|curveHtml|setChgDays/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'Ui.html'), 'utf8')));
   ok('Code.gs ohne getPriceHistory', typeof env.ctx.getPriceHistory === 'undefined');
   // Künstlersuche im Tab: im Browser

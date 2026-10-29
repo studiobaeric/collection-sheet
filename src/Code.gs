@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.2.0
+ *  Pokémon-Sammlung · Version 1.2.1
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -35,7 +35,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.2.0';
+const TOOL_VERSION = '1.2.1';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -3327,8 +3327,9 @@ function findCandidates_(lang, name, num, setIds, sets, suffix) {
  */
 function* searchFlow_(input) {
   input = input || {};
-  const name = String(input.name || '').trim();
-  const num = parseNumberInput_(input.number);
+  const nn = splitNameNumber_(input.name, input.number); // „Pikachu 12“ (#51)
+  const name = nn.name;
+  const num = parseNumberInput_(nn.number);
   const setText = String(input.set || '').trim();
   if (!name && !(num && setText)) throw new Error('Bitte einen Namen eingeben – oder Set und Nummer.');
   const notes = [];
@@ -3409,7 +3410,27 @@ function* searchFlow_(input) {
   }
   if (!sets) sets = dataOf_((yield [['sets']])[0]);
   notes.push('Keine Karte gefunden. Wähle das Set, dann wird Nummer ' + num.raw + ' darin gesucht.');
-  return { stage: 'pickSet', cards: [], notes: notes, inputName: name, number: input.number, sets: setPickerList_(sets, num, setIds) };
+  return { stage: 'pickSet', cards: [], notes: notes, inputName: name, number: nn.number, sets: setPickerList_(sets, num, setIds) };
+}
+
+/**
+ * Nummer im Namensfeld (#51): „Pikachu 12“, „Glurak-ex 025/165“ oder „12 Pikachu“ -> {name, number}. Ein Wort am Ende
+ * oder am Anfang zählt als Nummer, wenn es wie eine Kartennummer aussieht (12, 12/40, SWSH050, TG05/TG30) und daneben
+ * noch ein Name steht; „Porygon2“ allein bleibt ein Name. Steht schon etwas im Feld Nummer, gilt das, das Wort fällt
+ * trotzdem aus dem Namen.
+ */
+function splitNameNumber_(name, number) {
+  const words = String(name == null ? '' : name).trim().split(/\s+/).filter(Boolean);
+  let num = String(number == null ? '' : number).trim();
+  const re = /^[A-Za-z]{0,6}\d{1,4}[A-Za-z]?(\/[A-Za-z]{0,6}\d{1,4})?$/;
+  if (words.length > 1) {
+    const at = re.test(words[words.length - 1]) ? words.length - 1 : re.test(words[0]) ? 0 : -1;
+    if (at >= 0) {
+      const w = words.splice(at, 1)[0];
+      if (!num) num = w;
+    }
+  }
+  return { name: words.join(' '), number: num };
 }
 
 /**
@@ -3446,7 +3467,7 @@ function* finishFlow_(lang, cands, notes, inputName, enNote, sets) {
     // ohne Details (tcgdex hat sie gerade nicht geliefert): die Kurzform, das Antippen holt sie nach
     const s = sets && sets[f.lang] ? sets[f.lang][c.setId] : null;
     return { id: c.id, lang: f.lang, name: c.name, localId: c.localId, setId: c.setId, setName: s ? s.name : c.setId,
-      image: c.image || (f.en && f.en.image) || '' };
+      setSymbol: s ? s.symbol || '' : '', image: c.image || (f.en && f.en.image) || '' };
   });
   if (enNote && cards.some(function (c) { return c.lang === 'en'; })) notes.push(enNote);
   return { stage: lang, cards: cards, notes: notes, inputName: inputName };
@@ -3530,7 +3551,7 @@ function summarizeCard_(card, lang) {
   const base = baseVariant_(v);
   return {
     id: String(card.id), lang: lang, name: String(card.name || ''), localId: String(card.localId),
-    setId: String(set.id || setIdOf_(card)), setName: String(set.name || ''),
+    setId: String(set.id || setIdOf_(card)), setName: String(set.name || ''), setSymbol: String(set.symbol || ''),
     setSize: set.cardCount && set.cardCount.official ? Number(set.cardCount.official) : null,
     image: card.image || '', rarity: card.rarity || '', category: card.category || '',
     illustrator: card.illustrator || '', baseVariant: base, baseLabel: VARIANT_LABELS[base],
@@ -3607,14 +3628,14 @@ function searchJs_() {
   try {
     const fns = [searchFlow_, finishFlow_, cardFlow_, setNumberFlow_, filterCands_, cardInfo_, dataOf_, listOf_, needUrl_,
       setsOf_, ymdOf_, apiUrl_, setIdOf_, cardmarket_, priceFor_, baseVariant_, summarizeCard_, setPickerList_, matchSets_,
-      sizeOk_, squash_, normalizeNumber_, parseNumberInput_, isPocketSet_, splitSuffix_, toNum_];
+      sizeOk_, squash_, normalizeNumber_, parseNumberInput_, splitNameNumber_, isPocketSet_, splitSuffix_, toNum_];
     const vals = { API: API, MAX_CANDIDATES: MAX_CANDIDATES, VARIANT_LABELS: VARIANT_LABELS };
     const res = { SUFFIX_RE: SUFFIX_RE, POCKET_SET_RE: POCKET_SET_RE };
     const src = '(function () {\n' +
       Object.keys(vals).map(function (k) { return 'var ' + k + ' = ' + JSON.stringify(vals[k]) + ';\n'; }).join('') +
       Object.keys(res).map(function (k) { return 'var ' + k + ' = ' + String(res[k]) + ';\n'; }).join('') +
       fns.map(String).join('\n') +
-      '\nreturn { search: searchFlow_, card: cardFlow_, setNumber: setNumberFlow_, url: needUrl_, sets: setsOf_ };\n})()';
+      '\nreturn { search: searchFlow_, card: cardFlow_, setNumber: setNumberFlow_, url: needUrl_, sets: setsOf_, split: splitNameNumber_ };\n})()';
     // nur, wenn der Quelltext wirklich so ankommt (z. B. kein „</script>“ darin, das die Seite abschneiden würde)
     return /<\/script/i.test(src) || fns.some(function (f) { return String(f).indexOf(f.name) < 0; }) ? 'null' : src;
   } catch (e) {
@@ -4238,6 +4259,11 @@ function collGroup_(gkey, rows, headers, ctx) {
   let added = null;
   rows.forEach(function (r) { const x = timeOf_(r[COL.added]); if (isFinite(x) && (added == null || x > added)) added = x; });
   o.dex = dexOfRow_(p, ctx.dexIds);
+  // Set-Symbol statt Set-Name (#47): Symbol aus dem Set-Cache, Promo-Sets (Name enthält „Promo“) zeigen einen Stern
+  const sd = ctx.sets.de && ctx.sets.de[setId], se = ctx.sets.en && ctx.sets.en[setId];
+  o.setId = setId;
+  o.setSymbol = String((sd && sd.symbol) || (se && se.symbol) || '');
+  o.setPromo = /promo/i.test([p[COL.setName], sd ? sd.name : '', se ? se.name : ''].join(' '));
   o.k = {
     words: [low(p[COL.name]), low(p[COL.nameEn]), low(p[COL.version]), low(p[COL.illustrator])],
     num: normalizeNumber_(p[COL.localId]), size: Number(p[COL.setSize]) || 0,
@@ -4582,14 +4608,20 @@ function linkFreeGroup(gkey, cardId, dataLang, variant, cards) {
   return out;
 }
 
-/** Vorschlagsliste fürs Setfeld. */
+/**
+ * Auswahlliste fürs Setfeld (#47): [{id, name, en, symbol, promo}], neueste Sets zuerst (Reihenfolge von tcgdex).
+ * name ist der deutsche Name, sonst der englische; promo: der Name enthält „Promo“ (dann zeigt die Seite einen Stern).
+ */
 function getSetSuggestions() {
   const sets = cachedSets_();
-  const names = {};
-  ['de', 'en'].forEach(function (lang) {
-    Object.keys(sets[lang]).forEach(function (id) { names[sets[lang][id].name] = true; });
-  });
-  return Object.keys(names).filter(Boolean).sort(function (a, b) { return a.localeCompare(b, 'de'); });
+  const seen = {}, ids = [];
+  sets.order.en.concat(sets.order.de).forEach(function (id) { if (!seen[id]) { seen[id] = true; ids.push(id); } });
+  return ids.reverse().map(function (id) {
+    const de = sets.de[id], en = sets.en[id];
+    const name = (de && de.name) || (en && en.name) || '';
+    const enName = en && en.name && en.name !== name ? en.name : '';
+    return { id: id, name: name, en: enName, symbol: (de && de.symbol) || (en && en.symbol) || '', promo: /promo/i.test(name + ' ' + enName) };
+  }).filter(function (s) { return s.name; });
 }
 
 // ---------------------------------------------------------------------------
