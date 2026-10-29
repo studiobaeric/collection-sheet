@@ -7,6 +7,23 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.2.1] – 2026-10-29
+
+- Set-Symbol statt Set-Name in Treffern, Sammlung und Bestätigung
+- Promo-Sets zeigen einen einheitlichen Stern
+- Setfeld mit Auswahlliste aus Symbol und Name
+- Nummer geht auch im Namensfeld, z. B. „Pikachu 12“
+- Nach dem Hinzufügen bleiben Treffer und Name, Nummer und Set leer
+- Feld Anzahl entfernt, jedes Hinzufügen ist ein Exemplar
+- Englische Ersatzdaten als graue Zeile zum Aufklappen
+- Sammlung: schlanke Zeile mit Symbol, Nummer und Anzahl
+- Aufgeklappt: Karteninfo als Tabelle, Preis mit Veränderung
+- „+ Exemplar“ statt +1, mit eigener Sprache und eigenem Zustand
+- −1 nur noch am einzelnen Exemplar
+- Eigener Preis hinter einem Link in der Karteninfo
+- Bilder in der Sammlung klein, mittel oder groß
+- Größerer Pfeil, die ganze Zeile klappt auf
+
 ## [1.2.0] – 2026-10-29
 
 - Sammlung, Pokédex und Dashboard rechnen selbst, ohne Einsortieren

@@ -30,7 +30,7 @@ Das Dashboard kommt im Look Rot-weiß. Zwei weitere Looks, Dunkel und Hell-neutr
 
 ## Speichern und Suchen
 
-Hinzufügen und jede Änderung in Seitenleiste und Web-App (+1, −1, Bearbeiten, eigener Preis, Verknüpfen, Rückgängig) speichern ins versteckte Blatt Daten. Die Blätter **Sammlung**, **Pokédex** und **Dashboard** rechnen mit Formeln direkt daraus und zeigen die Änderung gleich danach. Einsortieren wie in Version 1.1.3 ist seit 1.2.0 nicht mehr nötig.
+Hinzufügen und jede Änderung in Seitenleiste und Web-App (+ Exemplar, −1, Bearbeiten, eigener Preis, Verknüpfen, Rückgängig) speichern ins versteckte Blatt Daten. Die Blätter **Sammlung**, **Pokédex** und **Dashboard** rechnen mit Formeln direkt daraus und zeigen die Änderung gleich danach. Einsortieren wie in Version 1.1.3 ist seit 1.2.0 nicht mehr nötig.
 
 Die Kartensuche fragt tcgdex direkt aus Seitenleiste und Web-App. Antippen eines Treffers öffnet die Karte sofort, mit Preis. Kommt der Browser nicht zu tcgdex durch, sucht wie früher das Skript.
 
@@ -38,13 +38,13 @@ Wie lange etwas gedauert hat, siehst du unter **Erweiterungen > Apps Script > Au
 
 ## Sammlung: Suche und Preisverlauf
 
-Das Suchfeld der Sammlung (im Blatt wie in Seitenleiste und Web-App) findet Karten über Name, Nummer, Sonderversion oder Künstler: „Arita“ zeigt alle Karten von Mitsuhiro Arita, „Arita 025“ nur die mit Nummer 025. Seitenleiste und Web-App zeigen den Künstler unter jeder Karte.
+Das Suchfeld der Sammlung (im Blatt wie in Seitenleiste und Web-App) findet Karten über Name, Nummer, Sonderversion oder Künstler: „Arita“ zeigt alle Karten von Mitsuhiro Arita, „Arita 025“ nur die mit Nummer 025. Seitenleiste und Web-App zeigen den Künstler in der Karteninfo, sobald du eine Karte aufklappst.
 
 Der nächtliche Preislauf merkt sich den Cardmarket-Trendpreis jeder Karte (je Variante) im versteckten Blatt „Kartenverlauf“, immer wenn er sich ändert. Daraus zeigt die Sammlung (Blatt, Seitenleiste und Web-App), wie sich der Preis einer Karte in den letzten 30 Tagen verändert hat, in Euro und Prozent, grün bei Plus und rot bei Minus. Solange es den Verlauf einer Karte noch nicht so lange gibt, zählt er ab ihrem ersten Tag, und das Datum steht dabei („seit 23.10.“).
 
 Die Veränderung gilt für den Preis einer Karte, nicht mal Anzahl. Karten mit eigenem Preis bekommen keine Veränderung, weil ihr Wert nicht Cardmarket folgt; der Preislauf ruft sie trotzdem ab, damit ihr Verlauf weiterläuft.
 
-Seitenleiste und Web-App laden die ganze Sammlung einmal, wenn du den Tab öffnest. Suchen und Sortieren laufen danach ohne Warten. +1, −1 und Bearbeiten speichern im Hintergrund, die Karte zeigt so lange „speichert …“ und bleibt an ihrer Stelle, bis du neu suchst oder sortierst. Hast du im Blatt oder auf einem anderen Gerät etwas geändert, holt **Neu laden** den aktuellen Stand.
+Seitenleiste und Web-App laden die ganze Sammlung einmal, wenn du den Tab öffnest. Suchen und Sortieren laufen danach ohne Warten. Jede Karte steht in einer schlanken Zeile mit Set-Symbol, Nummer und Anzahl; ein Tipp klappt sie auf, mit Karteninfo, Preis und Exemplaren. Unter **Bilder** wählst du klein, mittel oder groß. Ein weiteres Exemplar kommt über **+ Exemplar**, mit eigener Sprache und eigenem Zustand; −1 sitzt an jedem Exemplar. + Exemplar, −1 und Bearbeiten speichern im Hintergrund, die Karte zeigt so lange „speichert …“ und bleibt an ihrer Stelle, bis du neu suchst oder sortierst. Hast du im Blatt oder auf einem anderen Gerät etwas geändert, holt **Neu laden** den aktuellen Stand.
 
 ## Updates
 
