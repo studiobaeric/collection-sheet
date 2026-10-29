@@ -366,6 +366,34 @@ t.section('editEntry');
 }
 
 // ---------------------------------------------------------------------------
+t.section('editEntry: Variante (#54)');
+{
+  const env = setup();
+  const c = env.ctx;
+  const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 3 });
+  const base = env.data()[0];
+  let r = env.uiCall('editEntry', a.eid, { variant: 'reverse' }, 1);
+  let d = env.data();
+  const rev = d.find(x => x.eid === r.eid);
+  ok('Teil wechselt zu Reverse Holo, eigene Gruppe', r.gkey === 'swsh3-025|reverse|' && rev.count === 1 && rev.variant === 'reverse' && rev.key === 'swsh3-025|reverse||NM|DE' &&
+    d.find(x => x.eid === a.eid).count === 2, d.map(x => [x.variant, x.count]));
+  ok('Reverse-Preis aus trend-holo', rev.price === 3.25 && base.price === 1.5, [rev.price, base.price]);
+  ok('Gruppen zählt mit', groupBy(env, 'swsh3-025|reverse|')['Anzahl'] === 1 && groupBy(env, 'swsh3-025|normal|')['Anzahl'] === 2);
+  r = env.uiCall('editEntry', rev.eid, { variant: 'normal' });
+  d = env.data();
+  ok('zurück zur Grundvariante: zusammengelegt', r.eid === a.eid && d.length === 1 && d[0].count === 3 && d[0].variant === 'normal', d.map(x => [x.variant, x.count]));
+  r = env.uiCall('editEntry', a.eid, { variant: 'normal' });
+  ok('gleiche Variante: nichts geändert', r.ok && r.eid === a.eid && !r.delta, r);
+  t.throws('Variante, die die Karte nicht hat', () => env.uiCall('editEntry', a.eid, { variant: 'firstEdition' }), /nicht als 1\. Edition/);
+  t.throws('unbekannte Variante', () => env.uiCall('editEntry', a.eid, { variant: 'gold' }), /Unbekannte Variante/);
+  ok('nichts geändert nach Fehler', env.data().length === 1 && env.data()[0].variant === 'normal');
+  const f = env.uiCall('addFreeCard', { name: 'Testkarte', setName: 'Promo', number: '7', qty: 1 });
+  r = env.uiCall('editEntry', f.eid, { variant: 'holo' });
+  ok('freie Karte: beliebige Variante', env.data().find(x => x.eid === r.eid).variant === 'holo' && /\|holo\|$/.test(r.gkey), r);
+  ok('no nested locks', env.lock.nested === 0, env.lock);
+}
+
+// ---------------------------------------------------------------------------
 t.section('setGroupOwnPrice / Gruppen');
 {
   const env = setup();

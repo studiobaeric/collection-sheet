@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.2.1
+     Pokémon-Sammlung · Version 1.2.2
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -226,6 +226,7 @@
       <input type="text" id="dexQuery" autocomplete="off" placeholder="z. B. Pikachu oder 25" oninput="debouncedDex()">
     </div>
   </div>
+  <details class="inote" id="dexFormsBox" ontoggle="dexFormsToggle(this.open)"><summary>Formen <span class="arr">▾</span></summary><div class="txt" id="dexForms"></div></details>
   <div id="dexMsg"></div>
   <div id="dexSummary" class="notes"></div>
   <div id="dexList"></div>
@@ -254,7 +255,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
-var UI_FILE_VERSION = '1.2.1'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
+var UI_FILE_VERSION = '1.2.2'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -321,12 +322,23 @@ function setMark(o) {
   }
   var sym = o.setSymbol || (s && s.symbol) || '';
   if (sym) {
-    return { html: '<img class="sym" loading="lazy" src="' + esc(sym + '.webp') + '" alt="' + esc(name) + '" title="' + esc(name) + '" onerror="symFail(this)">', text: false };
+    return { html: '<img class="sym" loading="lazy" src="' + esc(symUrl(sym, 0)) + '" data-sym="' + esc(sym) + '" alt="' + esc(name) + '" title="' + esc(name) + '" onerror="symFail(this)">', text: false };
   }
   return { html: esc(name), text: true };
 }
-/** Bild des Symbols nicht da: der Set-Name an seiner Stelle */
-function symFail(img) { if (img.parentNode) img.parentNode.replaceChild(document.createTextNode(img.getAttribute('alt') || ''), img); }
+// Symbole gibt es bei tcgdex nicht in jedem Format: erst .png, dann .webp, danach der Set-Name (#57)
+var SYM_EXT = ['.png', '.webp'];
+function symUrl(sym, k) { return /\.(png|webp|jpg)$/i.test(sym) ? sym : sym + SYM_EXT[k]; }
+/** Bild des Symbols nicht da: nächstes Format, zuletzt der Set-Name an seiner Stelle */
+function symFail(img) {
+  var sym = img.getAttribute('data-sym') || '', k = Number(img.getAttribute('data-k') || 0) + 1;
+  if (sym && !/\.(png|webp|jpg)$/i.test(sym) && k < SYM_EXT.length) {
+    img.setAttribute('data-k', k);
+    img.src = symUrl(sym, k);
+    return;
+  }
+  if (img.parentNode) img.parentNode.replaceChild(document.createTextNode(img.getAttribute('alt') || ''), img);
+}
 /** „[Symbol] 12/40“; ohne Symbol „Set-Name · 12/40“. num ist schon HTML. */
 function setNumHtml(o, num) {
   var m = setMark(o);
@@ -1173,10 +1185,12 @@ function collInfo() {
 
 // Suche und Sortierung wie searchCollection und collCompare_ in Code.gs, mit den Werten in g.k
 function normNum(s) { return String(s == null ? '' : s).trim().toUpperCase().replace(/^([A-Z]*)0+(\d)/, '$1$2'); }
-function collMatch(g, words, stx, dexNr) {
+function collMatch(g, words, stx, dexNr, dexRow) {
   var k = g.k || {};
   if (stx && String(k.setId || '').toLowerCase() !== stx && !(k.sets || []).some(function (s) { return s.indexOf(stx) >= 0; })) return false;
   if (dexNr && (g.dex || []).indexOf(dexNr) < 0) return false;
+  // Zeile einer Form (#55): nur Karten, die zu ihr zählen
+  if (dexRow && dexRow.indexOf('_') >= 0 && !(g.dexf || []).some(function (t) { return dexKeyOf(t) === dexRow; })) return false;
   return words.every(function (w) {
     if (/\d/.test(w)) { // Nummer, auch 025/165
       var parts = w.split('/'), size = parts.length > 1 ? parseInt(parts[1], 10) : NaN;
@@ -1227,8 +1241,8 @@ function refilter() {
   drawCollDex();
   var words = $('colQuery').value.trim().split(/\s+/).filter(Boolean);
   var stx = $('colSet').value.trim().toLowerCase();
-  var nr = collSort.dex ? collSort.dex.nr : 0;
-  var list = coll.all.filter(function (g) { return collMatch(g, words, stx, nr); });
+  var nr = collSort.dex ? collSort.dex.nr : 0, row = collSort.dex ? collSort.dex.key : '';
+  var list = coll.all.filter(function (g) { return collMatch(g, words, stx, nr, row); });
   list.sort(function (a, b) { return collCmp(a, b, collSort.sort, collSort.desc); });
   var top = coll.focus ? coll.byKey[coll.focus] : null;
   if (top) { // eben hinzugefügt und angetippt: ganz oben und aufgeklappt
@@ -1538,11 +1552,85 @@ function openEdit(i, j) {
   var ex = r.extras || {};
   var names = UI_CONFIG.extras.slice();
   Object.keys(ex).forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
-  g.edit = {
+  var e = g.edit = {
     eid: r.eid, cond: r.cond || '', lang: r.lang || 'DE', version: g.version || '', qty: r.count,
-    names: names, extras: names.map(function (n) { return ex[n] == null ? '' : String(ex[n]); })
+    names: names, extras: names.map(function (n) { return ex[n] == null ? '' : String(ex[n]); }),
+    variant: editVariantOf(g), vcard: null, vload: g.isFree ? '' : 'load', forms: null
   };
+  e.variant0 = e.variant;
   draw(i, g, 're');
+  // Form (#55): nur bei Pokémon mit Formen, gilt für die ganze Karte
+  if (g.dex && g.dex.length) {
+    call('getCardForms', g.gkey).then(function (list) {
+      if (g.edit !== e) return;
+      e.forms = (list || []).map(function (f) { return { nr: f.nr, name: f.name, cur: f.cur, sel: f.cur, opts: f.opts || [] }; });
+      if (e.forms.length) redraw(g, 're', true);
+    }, function () { /* ohne Feld Form */ });
+  }
+  // Variante (#54): welche Haken die Karte hat, steht in ihren tcgdex-Daten (wie beim Hinzufügen)
+  if (!g.isFree && g.id) {
+    cardAny({ id: g.id, lang: /^en/i.test(g.source || '') ? 'en' : 'de', image: g.image }).then(function (c) {
+      if (g.edit !== e) return;
+      e.vcard = c; e.vload = c ? 'ok' : 'err';
+      redraw(g, 're', true);
+    }, function () {
+      if (g.edit !== e) return;
+      e.vload = 'err';
+      redraw(g, 're', true);
+    });
+  }
+}
+
+/** Variante im Bearbeiten: freie Karte ihr Code, sonst 'reverse' | 'firstEdition' | 'base' (Haken wie beim Hinzufügen) */
+function editVariantOf(g) {
+  if (g.isFree) return g.variant || 'normal';
+  return g.variant === 'reverse' || g.variant === 'firstEdition' ? g.variant : 'base';
+}
+function editVariantPick(i, which, on) {
+  var g = state.groups[i];
+  if (!g || !g.edit) return;
+  g.edit.variant = on ? which : 'base';
+  var other = $(which === 'reverse' ? 'eFirst' + i : 'eRev' + i);
+  if (on && other) other.checked = false; // schließen sich aus wie beim Hinzufügen
+}
+/** Haken bzw. Auswahl für die Variante im Bearbeiten */
+function editVariantHtml(g, i) {
+  var e = g.edit;
+  if (g.isFree) {
+    return '<label for="eVar' + i + '">Variante</label><select id="eVar' + i + '" onchange="editField(' + i + ',\'variant\',this.value)">' + variantOptions(e.variant) + '</select>';
+  }
+  if (e.vload === 'load') return '<div class="hint">Varianten werden geladen …</div>';
+  var c = e.vcard;
+  if (e.vload === 'err' || !c) return '<div class="hint">Varianten konnten nicht geladen werden, die Variante bleibt.</div>';
+  var html = '';
+  if (c.canReverse || e.variant === 'reverse') {
+    html += '<label class="check"><input type="checkbox" id="eRev' + i + '"' + (e.variant === 'reverse' ? ' checked' : '') + ' onchange="editVariantPick(' + i + ',\'reverse\',this.checked)"> Reverse Holo</label>';
+  }
+  if (c.canFirstEdition || e.variant === 'firstEdition') {
+    html += '<label class="check"><input type="checkbox" id="eFirst' + i + '"' + (e.variant === 'firstEdition' ? ' checked' : '') + ' onchange="editVariantPick(' + i + ',\'firstEdition\',this.checked)"> 1. Edition</label>';
+  }
+  return html;
+}
+/** Feld „Form“ je Pokémon der Karte mit Formen (#55) */
+function editFormsHtml(g, i) {
+  var e = g.edit;
+  if (!e.forms || !e.forms.length) return '';
+  return e.forms.map(function (f, k) {
+    var lbl = e.forms.length > 1 ? 'Form (' + f.name + ')' : 'Form';
+    return '<label for="eForm' + i + '_' + k + '">' + esc(lbl) + '</label><select id="eForm' + i + '_' + k + '" onchange="editForm(' + i + ',' + k + ',this.value)">' +
+      f.opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === f.sel ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') +
+      '</select>';
+  }).join('') + '<div class="hint">Gilt für alle Exemplare und Varianten dieser Karte.</div>';
+}
+function editForm(i, k, v) { var g = state.groups[i]; if (g && g.edit && g.edit.forms && g.edit.forms[k]) g.edit.forms[k].sel = v; }
+
+/** Gewählte Variante als Code fürs Speichern; null = unverändert */
+function editVariantCode(g) {
+  var e = g.edit;
+  if (e.variant === e.variant0) return null;
+  if (g.isFree) return e.variant;
+  if (e.variant !== 'base') return e.variant;
+  return (e.vcard && e.vcard.baseVariant) || null;
 }
 
 function editField(i, field, value) { var g = state.groups[i]; if (g && g.edit) g.edit[field] = value; }
@@ -1556,6 +1644,7 @@ function editHtml(g, i) {
   var html = '<div class="box"><h3>Bearbeiten: ' + rowLabel(r) + '</h3>' +
     '<div class="row"><div><label for="eCond' + i + '">Zustand</label><select id="eCond' + i + '" onchange="editField(' + i + ',\'cond\',this.value)">' + condOptions(e.cond) + '</select></div>' +
     '<div><label for="eLang' + i + '">Sprache</label><select id="eLang' + i + '" onchange="editField(' + i + ',\'lang\',this.value)">' + langOptions(e.lang) + '</select></div></div>' +
+    editVariantHtml(g, i) + editFormsHtml(g, i) +
     '<label for="eVer' + i + '">Sonderversion</label><input type="text" id="eVer' + i + '" list="versionList" autocomplete="off" placeholder="leer = keine" value="' + esc(e.version) + '" oninput="editField(' + i + ',\'version\',this.value)">';
   e.names.forEach(function (n, k) {
     html += '<label for="eX' + i + '_' + k + '">' + esc(n) + '</label><input type="text" id="eX' + i + '_' + k + '" autocomplete="off" value="' + esc(e.extras[k]) + '" oninput="editExtra(' + i + ',' + k + ',this.value)">';
@@ -1586,9 +1675,13 @@ function predictEdit(g, eid, ch, qty) {
   if (ch.cardLang != null) t.lang = ch.cardLang;
   if (ch.extras) Object.keys(ch.extras).forEach(function (k) { t.extras[k] = ch.extras[k]; });
   t.pending = true;
-  if (ch.version != null && ch.version !== (g.version || '')) {
-    if (g.rows.length === 1) g.version = ch.version;
-    else g.rows.splice(g.rows.indexOf(t), 1);
+  var newVer = ch.version != null && ch.version !== (g.version || '');
+  var newVar = ch.variant != null && ch.variant !== (g.variant || '');
+  if (newVer || newVar) { // das Exemplar gehört jetzt zu einer anderen Karte (#54: auch bei anderer Variante)
+    if (g.rows.length === 1) {
+      if (newVer) g.version = ch.version;
+      if (newVar) { g.variant = ch.variant; g.variantLabel = VARIANT_LABELS[ch.variant] || ch.variant; }
+    } else g.rows.splice(g.rows.indexOf(t), 1);
   }
   g.count = sumCounts(g.rows);
   g.exemplare = exemplareText(g.rows);
@@ -1605,6 +1698,10 @@ function saveEdit(i) {
   if (e.lang !== (r.lang || 'DE')) { changes.cardLang = e.lang; any = true; }
   var ver = String(e.version || '').trim();
   if (ver !== (g.version || '')) { changes.version = ver; any = true; }
+  var vc = editVariantCode(g);
+  if (vc && vc !== (g.variant || '')) { changes.variant = vc; any = true; }
+  var fch = (e.forms || []).filter(function (f) { return f.sel !== f.cur; }).map(function (f) { return f.sel; });
+  if (fch.length) { changes.forms = fch; any = true; }
   var ex = {}, anyEx = false;
   e.names.forEach(function (n, k) {
     var v = String(e.extras[k] || '').trim();
@@ -1625,10 +1722,15 @@ function saveEdit(i) {
   enqueue({
     g: g,
     predict: function (x) { predictEdit(x, eid, changes, qty); },
-    send: function () { return call('editEntry', eid, changes, qty); },
+    send: function () {
+      var given = changes.variant && !g.isFree ? directCards(g.id) : [];
+      return given.length ? call('editEntry', eid, changes, qty, given) : call('editEntry', eid, changes, qty);
+    },
     done: function (res) {
+      if (res && res.dexf) setCardDexf(g.gkey, res.dexf); // Form von Hand (#55): gilt für die ganze Karte
       if (res && res.delta) applyDelta(res.delta, g, res.gkey);
       else { showBase(g); redraw(g, 'all', true); } // auf dem Server war nichts zu ändern
+      if (res && res.dexf) setCardDexf(g.gkey, res.dexf);
       var t = res && res.gkey ? coll.byKey[res.gkey] : null; // das bearbeitete Exemplar steht jetzt dort: aufklappen
       if (t && t !== g && g.open && !t.open) { t.open = true; state.open[t.gkey] = true; redraw(t, 'all', true); }
     },
@@ -1636,6 +1738,13 @@ function saveEdit(i) {
   });
   showBase(g);
   draw(i, g, 'all');
+}
+
+/** Kennungen (Pokédex mit Formen) aller Gruppen derselben Karte setzen (alle Varianten und Sonderversionen) */
+function setCardDexf(gkey, dexf) {
+  var head = function (k) { return String(k || '').replace(/\|[^|]*\|[^|]*$/, ''); };
+  var h = head(gkey);
+  (coll.all || []).concat(state.groups || []).forEach(function (x) { if (x && head(x.gkey) === h) x.dexf = dexf.slice(); });
 }
 
 // Eigener Preis (gilt für die ganze Gruppe): erst der Link „Eigener Preis …“ in der Karteninfo öffnet das Feld (#52)
@@ -1899,7 +2008,7 @@ function toggleDir() {
 }
 function drawCollDex() {
   var d = collSort.dex;
-  $('colDex').innerHTML = d ? '<div class="chip">Nur #' + esc(d.nr) + ' ' + esc(d.name) +
+  $('colDex').innerHTML = d ? '<div class="chip">Nur ' + esc(d.label || '#' + d.nr) + ' ' + esc(d.name) +
     '<button type="button" onclick="clearCollDex()" aria-label="Pokédex-Filter entfernen">×</button></div>' : '';
 }
 function clearCollDex() { collSort.dex = null; refilter(); }
@@ -1907,8 +2016,12 @@ function clearCollDex() { collSort.dex = null; refilter(); }
 // ---------- Pokédex ----------
 
 var DEX_GEN_ENDS = [151, 251, 386, 493, 649, 721, 809, 905, 1025];
-// entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]] von getPokedex()
-var dex = { entries: null, status: 'all', open: {}, cards: {} };
+// Gruppen der Formen (#55), wie DEX_FORM_GROUPS in Code.gs (getPokedex schickt sie mit)
+var DEX_FORM_GROUPS = [['mega', 'Mega'], ['regional', 'Regionalformen'], ['gmax', 'Gigadynamax'], ['gender', 'Geschlechter'], ['other', 'Weitere Formen']];
+// entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]] von getPokedex(); forms: [[Kennung, Nr, Form,
+// Gruppe, Name, Name englisch]]; toks: {Kennung: [Karten, Exemplare, Wert]}; show: eingeblendete Gruppen (pro Gerät);
+// rows: die Zeilen der Liste (dexBuild); open und cards nach dem Schlüssel einer Zeile ('6' Art, '6_2' Form)
+var dex = { entries: null, forms: [], toks: {}, show: {}, rows: [], fby: {}, has: {}, status: 'all', open: {}, cards: {} };
 var dexReq = 0, dexTimer = null, dexCardGen = 0;
 
 function initDex() {
@@ -1918,8 +2031,32 @@ function initDex() {
     html += '<option value="' + (i + 1) + '">' + (i + 1) + ' (Nr. ' + start + ' bis ' + end + ')</option>';
   });
   $('dexGen').innerHTML = html;
+  try { dex.show = JSON.parse(memGet('pkmDexForms') || '{}') || {}; } catch (e) { dex.show = {}; }
+  if ($('dexFormsBox') && memGet('pkmDexFormsOpen') === '1') $('dexFormsBox').open = true;
+  drawDexForms();
 }
 function debouncedDex() { clearTimeout(dexTimer); dexTimer = setTimeout(renderDex, 250); }
+
+/** Haken der Formen: „Alle Formen“ und je Gruppe (#55) */
+function drawDexForms() {
+  var box = $('dexForms');
+  if (!box) return;
+  var all = DEX_FORM_GROUPS.every(function (g) { return !!dex.show[g[0]]; });
+  box.innerHTML = '<label class="check"><input type="checkbox" id="dexFormAll"' + (all ? ' checked' : '') + ' onchange="dexFormPick(\'\', this.checked)"> Alle Formen</label>' +
+    DEX_FORM_GROUPS.map(function (g) {
+      return '<label class="check"><input type="checkbox" id="dexForm_' + g[0] + '"' + (dex.show[g[0]] ? ' checked' : '') +
+        ' onchange="dexFormPick(\'' + g[0] + '\', this.checked)"> ' + esc(g[1]) + '</label>';
+    }).join('') + '<div class="hint">Eingeblendete Formen bekommen eine eigene Zeile, z. B. #006.2. Die übrigen zählen zur Grundform.</div>';
+}
+function dexFormsToggle(open) { memSet('pkmDexFormsOpen', open ? '1' : '0'); }
+function dexFormPick(grp, on) {
+  if (!grp) DEX_FORM_GROUPS.forEach(function (g) { dex.show[g[0]] = !!on; });
+  else dex.show[grp] = !!on;
+  memSet('pkmDexForms', JSON.stringify(dex.show));
+  drawDexForms();
+  dex.open = {}; dex.cards = {};
+  if (dex.entries) { dexBuild(); renderDex(); }
+}
 
 /** Liste bei jedem Öffnen neu holen (die Sammlung kann sich geändert haben); die alte bleibt bis dahin stehen. */
 function loadDex() {
@@ -1929,11 +2066,15 @@ function loadDex() {
   call('getPokedex').then(function (res) {
     if (gen !== dexReq) return;
     dex.entries = (res && res.entries) || [];
+    dex.forms = (res && res.forms) || [];
+    dex.toks = (res && res.toks) || {};
+    if (res && res.groups && res.groups.length) { DEX_FORM_GROUPS = res.groups; drawDexForms(); }
     dex.cards = {};
+    dexBuild();
     Object.keys(dex.open).forEach(function (k) {
-      var e = dexEntry(Number(k));
+      var e = dexEntry(k);
       if (!e) delete dex.open[k];
-      else if (e[5] > 0) dexLoadCards(e);
+      else if (e.copies > 0) dexLoadCards(e);
     });
     renderDex();
   }).catch(function (e) {
@@ -1941,6 +2082,48 @@ function loadDex() {
     if (!dex.entries) $('dexList').innerHTML = '';
     setMsg('dexMsg', esc(errText(e)), 'err');
   });
+}
+
+/**
+ * Zeilen des Pokédex (#55): je Art eine; hat sie eingeblendete Formen, stattdessen ihre Grundform und diese Formen.
+ * Die Grundform zählt die Karten ohne Form und die der ausgeblendeten Formen. Wie das Blatt Pokédex (Pokédex-Formen).
+ */
+function dexBuild() {
+  var byNr = {};
+  dex.fby = {}; dex.has = {};
+  dex.forms.forEach(function (f) {
+    (byNr[f[1]] || (byNr[f[1]] = [])).push(f);
+    dex.fby[f[0]] = f;
+    if (f[3] !== 'base' && dex.show[f[3]]) dex.has[f[1]] = true;
+  });
+  var rows = [];
+  (dex.entries || []).forEach(function (e) {
+    var nr = e[0];
+    if (!dex.has[nr]) {
+      rows.push({ key: String(nr), nr: nr, form: 0, name: e[1], en: e[2], gen: e[3], cards: e[4], copies: e[5], value: e[6] });
+      return;
+    }
+    byNr[nr].forEach(function (f) {
+      if (f[3] !== 'base' && !dex.show[f[3]]) return;
+      var st = [0, 0, 0];
+      var add = function (t) { var x = dex.toks[t]; if (x) { st[0] += x[0]; st[1] += x[1]; st[2] += x[2]; } };
+      if (f[3] === 'base') {
+        add(String(nr));
+        byNr[nr].forEach(function (h) { if (h[3] !== 'base' && !dex.show[h[3]]) add(h[0]); });
+      } else add(f[0]);
+      rows.push({ key: f[0], nr: nr, form: f[2], name: f[4], en: f[5], gen: e[3], cards: st[0], copies: st[1], value: Math.round(st[2] * 100) / 100 });
+    });
+  });
+  dex.rows = rows;
+}
+
+/** Zeile, zu der eine Kennung einer Karte zählt ('6_2' eingeblendet, sonst '6_1' oder '6') */
+function dexKeyOf(t) {
+  t = String(t);
+  var nr = Number(t.split('_')[0]);
+  var f = dex.fby[t];
+  if (t.indexOf('_') >= 0 && f && f[3] !== 'base' && dex.show[f[3]]) return t;
+  return dex.has[nr] ? nr + '_1' : String(nr);
 }
 
 function dexSetStatus(s) {
@@ -1955,84 +2138,89 @@ function dexFiltered() {
   var q = $('dexQuery').value.trim().toLowerCase();
   var num = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : 0;
   var gen = Number($('dexGen').value) || 0;
-  return (dex.entries || []).filter(function (e) {
-    var own = e[5] > 0;
+  return dex.rows.filter(function (e) {
+    var own = e.copies > 0;
     if ((dex.status === 'owned' && !own) || (dex.status === 'missing' && own)) return false;
-    if (gen && e[3] !== gen) return false;
+    if (gen && e.gen !== gen) return false;
     if (!q) return true;
-    if (num) return e[0] === num;
-    return String(e[1]).toLowerCase().indexOf(q) >= 0 || String(e[2]).toLowerCase().indexOf(q) >= 0;
+    if (num) return e.nr === num; // „6“: alle Zeilen von Glurak
+    return String(e.name).toLowerCase().indexOf(q) >= 0 || String(e.en).toLowerCase().indexOf(q) >= 0;
   });
 }
 
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
-function dexNr(n) { return '#' + ('00' + n).slice(-3); }
+function dexNr(n, form) { return '#' + ('00' + n).slice(-3) + (form ? '.' + form : ''); }
+function jsq(s) { return "'" + String(s).replace(/[^\w]/g, '') + "'"; }
 
 function renderDex() {
   if (!dex.entries) return;
   var gen = Number($('dexGen').value) || 0;
-  var base = dex.entries.filter(function (e) { return !gen || e[3] === gen; });
-  var owned = base.filter(function (e) { return e[5] > 0; }).length;
+  var base = dex.rows.filter(function (e) { return !gen || e.gen === gen; });
+  var owned = base.filter(function (e) { return e.copies > 0; }).length;
   $('dexSummary').textContent = 'Vorhanden: ' + owned + ' von ' + base.length + (gen ? ' in Generation ' + gen : '') + '.';
   var list = dexFiltered();
   if (!list.length) { $('dexList').innerHTML = '<div class="notes">Kein Pokémon gefunden.</div>'; return; }
   $('dexList').innerHTML = list.map(function (e) {
-    var nr = e[0], own = e[5] > 0, open = !!dex.open[nr];
-    var sub = own ? plural(e[4], 'Karte', 'Karten') + ' · ' + plural(e[5], 'Exemplar', 'Exemplare') + ' · ' + eur(e[6]) : 'fehlt noch';
+    var own = e.copies > 0, open = !!dex.open[e.key], k = jsq(e.key);
+    var sub = own ? plural(e.cards, 'Karte', 'Karten') + ' · ' + plural(e.copies, 'Exemplar', 'Exemplare') + ' · ' + eur(e.value) : 'fehlt noch';
     return '<div class="dex' + (own ? '' : ' miss') + '" role="button" tabindex="0" aria-expanded="' + open + '"' +
-      ' onclick="dexToggle(' + nr + ')" onkeydown="dexKey(event,' + nr + ')">' +
-      '<span class="nr">' + dexNr(nr) + '</span><div class="info"><div class="t">' + esc(e[1]) + '</div><div class="s">' + esc(sub) +
+      ' onclick="dexToggle(' + k + ')" onkeydown="dexKey(event,' + k + ')">' +
+      '<span class="nr">' + dexNr(e.nr, e.form) + '</span><div class="info"><div class="t">' + esc(e.name) + '</div><div class="s">' + esc(sub) +
       '</div></div><span class="chev">' + (open ? '▲' : '▼') + '</span></div>' +
-      '<div class="dexx' + (open ? '' : ' hidden') + '" id="dx' + nr + '">' + (open ? dexCardsHtml(e) : '') + '</div>';
+      '<div class="dexx' + (open ? '' : ' hidden') + '" id="dx' + esc(e.key) + '">' + (open ? dexCardsHtml(e) : '') + '</div>';
   }).join('');
 }
 
-function dexEntry(nr) {
-  var list = dex.entries || [];
-  for (var i = 0; i < list.length; i++) if (list[i][0] === nr) return list[i];
+function dexEntry(key) {
+  key = String(key);
+  for (var i = 0; i < dex.rows.length; i++) if (dex.rows[i].key === key) return dex.rows[i];
   return null;
 }
-function dexKey(ev, nr) {
+function dexKey(ev, key) {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
   ev.preventDefault();
-  dexToggle(nr);
+  dexToggle(key);
 }
 
-function dexToggle(nr) {
-  var e = dexEntry(nr);
+function dexToggle(key) {
+  key = String(key);
+  var e = dexEntry(key);
   if (!e) return;
-  if (dex.open[nr]) delete dex.open[nr]; else dex.open[nr] = true;
-  if (dex.open[nr] && e[5] > 0 && !dex.cards[nr]) dexLoadCards(e);
+  if (dex.open[key]) delete dex.open[key]; else dex.open[key] = true;
+  if (dex.open[key] && e.copies > 0 && !dex.cards[key]) dexLoadCards(e);
   renderDex();
 }
 
 function dexLoadCards(e) {
-  var nr = e[0], gen = ++dexCardGen;
-  dex.cards[nr] = { busy: true, gen: gen };
-  call('searchCollection', '', '', { dex: nr, sort: 'set', desc: false }).then(function (res) {
-    var c = dex.cards[nr];
+  var key = e.key, gen = ++dexCardGen;
+  dex.cards[key] = { busy: true, gen: gen };
+  call('searchCollection', '', '', { dex: e.nr, sort: 'set', desc: false }).then(function (res) {
+    var c = dex.cards[key];
     if (!c || c.gen !== gen) return;
-    dex.cards[nr] = { groups: ((res && res.groups) || []).filter(function (g) { return g.count > 0; }), total: res ? res.total : 0 };
-    dexRedraw(nr);
+    var groups = ((res && res.groups) || []).filter(function (g) {
+      return g.count > 0 && (key.indexOf('_') < 0 || (g.dexf || []).some(function (t) { return dexKeyOf(t) === key; }));
+    });
+    dex.cards[key] = { groups: groups, total: res ? res.total : 0 };
+    dexRedraw(key);
   }).catch(function (err) {
-    var c = dex.cards[nr];
+    var c = dex.cards[key];
     if (!c || c.gen !== gen) return;
-    dex.cards[nr] = { error: errText(err) };
-    dexRedraw(nr);
+    dex.cards[key] = { error: errText(err) };
+    dexRedraw(key);
   });
 }
-function dexRedraw(nr) {
-  var box = $('dx' + nr), e = dexEntry(nr);
-  if (box && e && dex.open[nr]) box.innerHTML = dexCardsHtml(e);
+function dexRedraw(key) {
+  var box = $('dx' + key), e = dexEntry(key);
+  if (box && e && dex.open[key]) box.innerHTML = dexCardsHtml(e);
 }
 
 function dexCardsHtml(e) {
-  var nr = e[0];
-  if (!(e[5] > 0)) {
-    return '<div class="notes">Noch keine Karte von ' + esc(e[1]) + '.</div>' +
-      '<div class="actions"><button class="btn" type="button" onclick="dexAdd(' + nr + ')">Karte von ' + esc(e[1]) + ' suchen</button></div>';
+  var k = jsq(e.key);
+  if (!(e.copies > 0)) {
+    return '<div class="notes">Noch keine Karte von ' + esc(e.name) + '.</div>' +
+      '<div class="actions"><button class="btn" type="button" onclick="dexAdd(' + k + ')">Karte von ' + esc(e.name) + ' suchen</button></div>';
   }
-  var c = dex.cards[nr];
+  var c = dex.cards[e.key];
   if (!c || c.busy) return '<div class="spin">Lade Karten …</div>';
   if (c.error) return '<div class="msg err">' + esc(c.error) + '</div>';
   var html = c.groups.map(function (g) {
@@ -2047,15 +2235,15 @@ function dexCardsHtml(e) {
       (isNaN(p) ? 'kein Preis' : esc(eur(p)) + (g.priceManual ? ' manuell' : '')) + '</div></div></div>';
   }).join('');
   if (!c.groups.length) html = '<div class="notes">Keine Karten gefunden.</div>';
-  else if (c.total > c.groups.length) html += '<div class="notes">Weitere Karten in der Sammlung.</div>';
-  return html + '<div class="actions"><button class="btn" type="button" onclick="dexOpenColl(' + nr + ')">In Sammlung öffnen</button></div>';
+  else if (c.total > c.groups.length && e.key.indexOf('_') < 0) html += '<div class="notes">Weitere Karten in der Sammlung.</div>';
+  return html + '<div class="actions"><button class="btn" type="button" onclick="dexOpenColl(' + k + ')">In Sammlung öffnen</button></div>';
 }
 
-/** Tab Sammlung, gefiltert auf dieses Pokémon (Suche und Set werden geleert). */
-function dexOpenColl(nr) {
-  var e = dexEntry(nr);
+/** Tab Sammlung, gefiltert auf dieses Pokémon bzw. diese Form (Suche und Set werden geleert). */
+function dexOpenColl(key) {
+  var e = dexEntry(key);
   if (!e) return;
-  collSort.dex = { nr: nr, name: e[1] };
+  collSort.dex = { nr: e.nr, name: e.name, key: e.key, label: dexNr(e.nr, e.form) };
   $('colQuery').value = '';
   $('colSet').value = '';
   coll.resort = true;
@@ -2063,11 +2251,11 @@ function dexOpenColl(nr) {
 }
 
 /** Fehlendes Pokémon: Tab Hinzufügen mit dem Namen im Suchfeld. */
-function dexAdd(nr) {
-  var e = dexEntry(nr);
+function dexAdd(key) {
+  var e = dexEntry(key);
   if (!e) return;
   showTab('add');
-  $('fName').value = e[1];
+  $('fName').value = e.name;
   $('fNumber').value = '';
   $('fSet').value = '';
 }

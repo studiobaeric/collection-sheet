@@ -354,7 +354,7 @@ function seedImport(env) {
     const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g), ...raw.matchAll(/\}, '([A-Za-z0-9_]+)', \[/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCardForms', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'translateCardName', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
@@ -362,7 +362,7 @@ function seedImport(env) {
     const code = fs.readFileSync(path.join(SRC, 'Code.gs'), 'utf8');
     const sig = n => { const m = code.match(new RegExp('function ' + n + '\\(([^)]*)\\)')); return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : null; };
     t.eq('adjustEntry(eid, delta)', sig('adjustEntry'), ['eid', 'delta']);
-    t.eq('editEntry(eid, changes, qty)', sig('editEntry'), ['eid', 'changes', 'qty']);
+    t.eq('editEntry(eid, changes, qty, cards)', sig('editEntry'), ['eid', 'changes', 'qty', 'cards']);
     t.eq('setGroupOwnPrice(gkey, price)', sig('setGroupOwnPrice'), ['gkey', 'price']);
     t.eq('linkFreeGroup(gkey, cardId, dataLang, variant, cards)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant', 'cards']);
     t.eq('getCardDetail(id, lang)', sig('getCardDetail'), ['id', 'lang']);
@@ -542,7 +542,7 @@ function seedImport(env) {
   // Zeile (#52): Name; Set-Symbol · Nummer (Variante nur, wenn nicht Normal), rechts die Anzahl. Kein Preis, keine Exemplare.
   t.ok('Glurak: Anzahl rechts, Exemplare erst aufgeklappt', headCount(E, gi) === '4×' && !/DE/.test(headText(E, gi)), headText(E, gi));
   const gSym = $('gh' + gi).querySelector('.s img.sym');
-  t.ok('Glurak: Set-Symbol · Nummer, ohne Normal und Preis (#47)', !!gSym && gSym.getAttribute('title') === 'Flammende Finsternis' && /swsh3\/symbol\.webp$/.test(gSym.getAttribute('src')) &&
+  t.ok('Glurak: Set-Symbol · Nummer, ohne Normal und Preis (#47)', !!gSym && gSym.getAttribute('title') === 'Flammende Finsternis' && /swsh3\/symbol\.png$/.test(gSym.getAttribute('src')) &&
     $('gh' + gi).querySelector('.s').textContent.trim() === '025/189' && !/Normal|€/.test(headText(E, gi)), headText(E, gi));
   const si = E.gIdx('swsh3-025|normal|Staff');
   t.ok('Staff: Titel mit Version, kein Preis in der Zeile', $('gh' + si).querySelector('.t').textContent === 'Glurak · Staff' && !/€/.test(headText(E, si)), headText(E, si));

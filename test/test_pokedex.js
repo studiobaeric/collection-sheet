@@ -98,10 +98,10 @@ t.section('Einrichtung');
   eq('Zeile 25', J(Object.fromEntries(Object.entries(dexRow(env, 25)).slice(0, 8))), J({ 'Nr.': 25, Name: 'Pikachu', 'Name englisch': 'Pikachu', Generation: 1, Karten: 0, Exemplare: 0, 'Wert (EUR)': 0, Auswahl: '#25 Pikachu' }));
   const sh = env.sheet('Pokédex');
   const a6 = sh.getRange('A6').getFormula(), h6 = sh.getRange('H6').getFormula(), d1 = sh.getRange('D1').getFormula();
-  ok('Listenformel liest Pokédex-Daten mit Filtern', /'Pokédex-Daten'!A2:G/.test(a6) && /B4="Fehlend"/.test(a6) && /C4/.test(a6) && /TRIM\(D4\)/.test(a6), a6);
+  ok('Listenformel liest Pokédex-Daten mit Filtern', /'Pokédex-Daten'!A2:M/.test(a6) && /'Pokédex-Daten'!K2:K=1/.test(a6) && /B4="Fehlend"/.test(a6) && /C4/.test(a6) && /TRIM\(D4\)/.test(a6), a6);
   ok('Kartenformel liest Gruppen und I4 (#43)', /'Gruppen'!A2:AG/.test(h6) && /'Gruppen'!AG2:AG/.test(h6) && /TRIM\(I4\)/.test(h6) &&
     /IMAGE\(url & "\/low.png"\)/.test(h6), h6);
-  ok('Zähler oben', /COUNTIF\('Pokédex-Daten'!F2:F, ">0"\)/.test(d1), d1);
+  ok('Zähler oben: sichtbare Zeilen (#55)', /SUMPRODUCT\(\('Pokédex-Daten'!K2:K=1\)\*\('Pokédex-Daten'!F2:F>0\)\)/.test(d1), d1);
   eq('Kopfzeilen', [sh.getRange('A5:F5').getValues()[0], sh.getRange('H5:P5').getValues()[0]],
     [['Nr.', 'Name', 'Generation', 'Karten', 'Exemplare', 'Wert (EUR)'], ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Seltenheit', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)']]);
   eq('Startwerte der Filter', sh.getRange('B4:D4').getValues()[0], ['Alle', 'Alle', '']);
@@ -422,7 +422,7 @@ function boot(env, mode, storage) {
     eq('Aufruf mit Pokédex-Filter', J(E.calls('searchCollection').pop().args), J(['', '', { dex: 6, sort: 'set', desc: false }]));
     ok('Bild der Karte', !!box.querySelector('img'));
     await E.click(E.btn(box, 'In Sammlung öffnen'));
-    ok('Sammlung offen mit Chip', E.$('tabColl').classList.contains('active') && /Nur #6 Glurak/.test(E.$('colDex').textContent));
+    ok('Sammlung offen mit Chip', E.$('tabColl').classList.contains('active') && /Nur #006 Glurak/.test(E.$('colDex').textContent));
     eq('Sammlung gefiltert (einmal geladen, dann im Browser)', [E.calls('getCollection').length, E.win.state.groups.map(g => g.id)], [1, ['swsh3-025']]);
     await E.click(E.$('colDex').querySelector('button'));
     eq('Chip weg, ganze Sammlung', [E.$('colDex').textContent, E.win.state.groups.length], ['', 3]);
