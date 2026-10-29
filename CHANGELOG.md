@@ -7,6 +7,16 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.2.0] – 2026-10-29
+
+- Sammlung, Pokédex und Dashboard rechnen selbst, ohne Einsortieren
+- Änderungen stehen sofort überall, die roten Hinweise sind weg
+- Hinzufügen, +1 und Ändern speichern deutlich schneller
+- Kartensuche fragt tcgdex direkt aus dem Browser und ist schneller
+- Antippen eines Treffers öffnet die Karte sofort, mit Preis
+- Suche nach „Glurak ex“ oder englischen Karten braucht weniger Abrufe
+- Unter Apps Script > Ausführungen steht, wie lange jeder Schritt dauert
+
 ## [1.1.3] – 2026-10-28
 
 - Nächste Suche wartet nicht mehr auf das Speichern der vorigen Karte

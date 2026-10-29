@@ -90,16 +90,16 @@ Regeln für die Variante:
 
 ## Ablauf Hinzufügen
 
-Die Suche läuft in bis zu drei Stufen: deutsch, englisch mit übersetztem Namen, zuletzt Set plus Nummer. Jede Stufe endet in derselben Bildauswahl und Bestätigung. Eine Stufe läuft nur, wenn die vorige nichts findet.
+Die Suche läuft in bis zu drei Stufen: deutsch, englisch mit übersetztem Namen, zuletzt Set plus Nummer. Jede Stufe endet in derselben Bildauswahl und Bestätigung. Eine Stufe läuft nur, wenn die vorige nichts findet. Seit 1.2.0 (#43) fragen Seitenleiste und Web-App tcgdex direkt aus dem Browser, mit demselben Ablauf wie der Server; nur die Übersetzung für die englische Stufe kommt vom Server. Erreicht der Browser tcgdex nicht, sucht der Server. Alle Abrufe einer Runde laufen gleichzeitig, und die Treffer kommen gleich mit Preisen (#38 S1, S2).
 
 1. Eingabe: Name, Nummer und optional Set (Vorschlagsliste aus dem Sets-Cache). Nötig ist der Name oder Set plus Nummer.
 2. Nummer zerlegen: `025/165` ergibt Nummer 25 und Setgröße 165. Führende Nullen fallen weg, Buchstabenpräfixe wie TG05 oder GG01 bleiben als Text erhalten.
 3. Suche deutsch: `GET /v2/de/cards?name=<Name>&localId=<Nummer>`. Beide Filter sind dabei „enthält", also wird danach lokal exakt gefiltert: Nummer normalisiert gleich, Set über die Set-ID gegen den Sets-Cache (Name enthält Eingabe, Setgröße gleich `cardCount.official`). Ohne Namen direkt `GET /v2/de/sets/<setId>/<Nummer>`.
-4. Treffer anzeigen: Details der Kandidaten parallel laden (`UrlFetchApp.fetchAll`, höchstens 24), Galerie mit `low.webp`, darunter Setname und Nummer. Bei mehr als 24 Treffern ein Hinweis, die Eingabe zu verfeinern. Bei genau einem Treffer direkt zur Bestätigung.
+4. Treffer anzeigen: Details der Kandidaten parallel laden (`UrlFetchApp.fetchAll`, höchstens 24), Galerie mit `low.webp`, darunter Setname und Nummer. Bei mehr als 24 Treffern ein Hinweis, die Eingabe zu verfeinern. Bei genau einem Treffer direkt zur Bestätigung. Seit 1.2.0 öffnet auch das Antippen einer Kachel die Bestätigung ohne weiteren Abruf.
 5. Kein deutscher Treffer: Name über das Blatt Übersetzung ins Englische (erst exakt, sonst Grundname plus Zusatz wie ex, V, VMAX, VSTAR, GX), dann dieselbe Suche gegen `/v2/en`.
 6. Immer noch nichts: Set-Auswahl mit Logos (vorbelegt, falls ein Set eingegeben wurde), dann `GET /v2/en/sets/<setId>/<Nummer>`.
 7. Bestätigung: großes Bild (`high.webp`), Name, Set, Nummer, Seltenheit, aktueller Trendpreis; Checkboxen Reverse Holo und 1. Edition (nur wenn vorhanden), Zustand-Dropdown (leer), Anzahl 1. Englische Ersatzdaten tragen einen sichtbaren Hinweis.
-8. Speichern: unter Lock den Schlüssel suchen, Anzahl erhöhen oder neue Zeile mit allen Daten und Preis anlegen. Meldung wie „Glurak, Reverse Holo, NM hinzugefügt, jetzt 3 Stück" (der Knopf Nochmal +1 dazu ist seit 1.1.3 entfernt, #34). Danach wird das Formular geleert und der Cursor steht wieder im Namensfeld. Seit 1.1.3 (#41) schreibt das Speichern nur ins Blatt Daten, so wartet die nächste Suche nicht; die Blätter Sammlung, Pokédex und Dashboard ziehen beim Einsortieren nach (Knopf in Seitenleiste, Web-App und Dashboard, Menü oder nachts nach dem Preislauf). Bis dahin zeigt ein roter Hinweis, wie viele Änderungen noch nicht einsortiert sind. Das gilt auch für +1/−1, Bearbeiten, eigenen Preis, Verknüpfen und Rückgängig.
+8. Speichern: unter Lock den Schlüssel suchen, Anzahl erhöhen oder neue Zeile mit allen Daten und Preis anlegen. Meldung wie „Glurak, Reverse Holo, NM hinzugefügt, jetzt 3 Stück" (der Knopf Nochmal +1 dazu ist seit 1.1.3 entfernt, #34). Danach wird das Formular geleert und der Cursor steht wieder im Namensfeld. Seit 1.1.3 (#41) schreibt das Speichern nur ins Blatt Daten, so wartet die nächste Suche nicht. Seit 1.2.0 (#43) rechnen Sammlung, Pokédex und Dashboard mit Formeln direkt aus Daten und zeigen jede Änderung sofort; das Einsortieren aus 1.1.3 und die roten Hinweise sind weggefallen. Das gilt auch für +1/−1, Bearbeiten, eigenen Preis, Verknüpfen und Rückgängig.
 
 ## Ablauf Entfernen
 
@@ -158,7 +158,7 @@ Ein Menüpunkt Übersetzung und Sets aktualisieren baut beide versteckten Blätt
 Set-Cache:
 
 - Lädt `GET /v2/de/sets` und `GET /v2/en/sets` mit Set-ID, Name, Logo, Symbol und `cardCount`.
-- Das Erscheinungsdatum steht nur im vollen Set-Objekt. Es wird beim ersten Auftauchen eines Sets in der Sammlung einmal über `GET /v2/<Sprache>/sets/<setId>` geholt und gespeichert (seit 1.1.3 beim Einsortieren, #41).
+- Das Erscheinungsdatum steht nur im vollen Set-Objekt. Es wird beim ersten Auftauchen eines Sets in der Sammlung einmal über `GET /v2/<Sprache>/sets/<setId>` geholt und gespeichert (seit 1.2.0 gleich beim Hinzufügen, für importierte Karten im Preislauf, #43).
 - Seit 1.1.3 (#38 S3) liegt die Setliste bis zu 6 Stunden im Zwischenspeicher und Trefferlisten nach Name 3 Stunden, so liest die Suche kein Blatt.
 - Liefert die Vorschlagsliste im Setfeld, den Abgleich der Setgröße bei 025/165 und die Logos für die Set-Auswahl der letzten Suchstufe.
 

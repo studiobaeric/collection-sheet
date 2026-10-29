@@ -4,6 +4,22 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.2.0",
+      "tag": "v1.2.0",
+      "date": "2026-10-29",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Sammlung, Pokédex und Dashboard rechnen selbst, ohne Einsortieren",
+        "Änderungen stehen sofort überall, die roten Hinweise sind weg",
+        "Hinzufügen, +1 und Ändern speichern deutlich schneller",
+        "Kartensuche fragt tcgdex direkt aus dem Browser und ist schneller",
+        "Antippen eines Treffers öffnet die Karte sofort, mit Preis",
+        "Suche nach „Glurak ex“ oder englischen Karten braucht weniger Abrufe",
+        "Unter Apps Script > Ausführungen steht, wie lange jeder Schritt dauert"
+      ]
+    },
+    {
       "version": "1.1.3",
       "tag": "v1.1.3",
       "date": "2026-10-28",

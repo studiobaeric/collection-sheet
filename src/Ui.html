@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.3
+     Pokémon-Sammlung · Version 1.2.0
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -219,7 +219,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
-var UI_FILE_VERSION = '1.1.3'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
+var UI_FILE_VERSION = '1.2.0'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -444,7 +444,7 @@ function directKeep(url, data) {
 function directSets() {
   if (direct.sets) return Promise.resolve({ ok: true, data: direct.sets });
   return Promise.all([directGet(SEARCH.url(['sets', 'de'])), directGet(SEARCH.url(['sets', 'en']))]).then(function (r) {
-    if (!r[0].ok || !r[1].ok) return { ok: false, error: (r[0].error || r[1].error || 'keine Sets') };
+    if (!r[0].ok || !r[1].ok) return { ok: false, error: (r[0].error || r[1].error || 'keine Sets'), slow: !!(r[0].slow || r[1].slow) };
     direct.sets = SEARCH.sets(r[0].data, r[1].data);
     return { ok: true, data: direct.sets };
   });
