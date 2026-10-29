@@ -421,7 +421,17 @@ function boot(mode, opts) {
     $('fSet').focus();
     ok('Setfeld anwählen: Liste mit allen Sets', !!drop() && !drop().classList.contains('hidden') && opts().length === 3, drop() && drop().outerHTML.slice(0, 300));
     const sym = opts()[1].querySelector('img.sym');
-    ok('Liste: Symbol und Name', !!sym && sym.getAttribute('src') === 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol.webp' && opts()[1].textContent === 'Flammende Finsternis', opts()[1].innerHTML);
+    ok('Liste: Symbol und Name', !!sym && sym.getAttribute('src') === 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol.png' && opts()[1].textContent === 'Flammende Finsternis', opts()[1].innerHTML);
+    {
+      // #57: .png lädt nicht -> .webp, lädt auch das nicht -> der Set-Name an seiner Stelle
+      const box = E.doc.createElement('div');
+      box.innerHTML = E.win.setMark({ setId: 'swsh3', setName: 'Flammende Finsternis', setSymbol: 'https://x/sym' }).html;
+      const img = box.querySelector('img.sym');
+      E.win.symFail(img);
+      const second = img.getAttribute('src');
+      E.win.symFail(img);
+      ok('Symbol: erst .png, dann .webp, dann der Set-Name (#57)', second === 'https://x/sym.webp' && !box.querySelector('img') && box.textContent === 'Flammende Finsternis', [second, box.innerHTML]);
+    }
     ok('Liste: Promo-Set mit Stern, Set ohne Symbol nur mit Namen', !!opts()[0].querySelector('.promo') && opts()[0].textContent === '★SWSH Black Star Promos' &&
       !opts()[2].querySelector('img') && opts()[2].textContent === 'Basis-Set', opts().map(o => o.innerHTML));
     E.type($('fSet'), 'darkness');
@@ -897,7 +907,7 @@ function boot(mode, opts) {
       $('gh' + gi).querySelector('.side .chev').textContent === '▼');
     const sym = $('gh' + gi).querySelector('.s img.sym');
     ok('Glurak: Set-Symbol mit Set-Name als Tooltip, dann die Nummer', !!sym && sym.getAttribute('title') === 'Flammende Finsternis' &&
-      /swsh3\/symbol\.webp$/.test(sym.getAttribute('src')) && $('gh' + gi).querySelector('.s').textContent.trim() === '025/189', $('gh' + gi).innerHTML);
+      /swsh3\/symbol\.png$/.test(sym.getAttribute('src')) && $('gh' + gi).querySelector('.s').textContent.trim() === '025/189', $('gh' + gi).innerHTML);
     ok('Glurak: Zeile ohne Preis, Variante Normal, Exemplare, Seltenheit', !/1,50|Normal|DE NM|Flammende/.test(head), head);
     ok('Kopf ohne −1 und +1 (#49)', !E.btn($('gh' + gi), '−1') && !E.btn($('gh' + gi), '+1'));
     const pi = E.gi('Pikachu');

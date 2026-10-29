@@ -321,12 +321,23 @@ function setMark(o) {
   }
   var sym = o.setSymbol || (s && s.symbol) || '';
   if (sym) {
-    return { html: '<img class="sym" loading="lazy" src="' + esc(sym + '.webp') + '" alt="' + esc(name) + '" title="' + esc(name) + '" onerror="symFail(this)">', text: false };
+    return { html: '<img class="sym" loading="lazy" src="' + esc(symUrl(sym, 0)) + '" data-sym="' + esc(sym) + '" alt="' + esc(name) + '" title="' + esc(name) + '" onerror="symFail(this)">', text: false };
   }
   return { html: esc(name), text: true };
 }
-/** Bild des Symbols nicht da: der Set-Name an seiner Stelle */
-function symFail(img) { if (img.parentNode) img.parentNode.replaceChild(document.createTextNode(img.getAttribute('alt') || ''), img); }
+// Symbole gibt es bei tcgdex nicht in jedem Format: erst .png, dann .webp, danach der Set-Name (#57)
+var SYM_EXT = ['.png', '.webp'];
+function symUrl(sym, k) { return /\.(png|webp|jpg)$/i.test(sym) ? sym : sym + SYM_EXT[k]; }
+/** Bild des Symbols nicht da: nächstes Format, zuletzt der Set-Name an seiner Stelle */
+function symFail(img) {
+  var sym = img.getAttribute('data-sym') || '', k = Number(img.getAttribute('data-k') || 0) + 1;
+  if (sym && !/\.(png|webp|jpg)$/i.test(sym) && k < SYM_EXT.length) {
+    img.setAttribute('data-k', k);
+    img.src = symUrl(sym, k);
+    return;
+  }
+  if (img.parentNode) img.parentNode.replaceChild(document.createTextNode(img.getAttribute('alt') || ''), img);
+}
 /** „[Symbol] 12/40“; ohne Symbol „Set-Name · 12/40“. num ist schon HTML. */
 function setNumHtml(o, num) {
   var m = setMark(o);

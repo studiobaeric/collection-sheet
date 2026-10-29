@@ -542,7 +542,7 @@ function seedImport(env) {
   // Zeile (#52): Name; Set-Symbol · Nummer (Variante nur, wenn nicht Normal), rechts die Anzahl. Kein Preis, keine Exemplare.
   t.ok('Glurak: Anzahl rechts, Exemplare erst aufgeklappt', headCount(E, gi) === '4×' && !/DE/.test(headText(E, gi)), headText(E, gi));
   const gSym = $('gh' + gi).querySelector('.s img.sym');
-  t.ok('Glurak: Set-Symbol · Nummer, ohne Normal und Preis (#47)', !!gSym && gSym.getAttribute('title') === 'Flammende Finsternis' && /swsh3\/symbol\.webp$/.test(gSym.getAttribute('src')) &&
+  t.ok('Glurak: Set-Symbol · Nummer, ohne Normal und Preis (#47)', !!gSym && gSym.getAttribute('title') === 'Flammende Finsternis' && /swsh3\/symbol\.png$/.test(gSym.getAttribute('src')) &&
     $('gh' + gi).querySelector('.s').textContent.trim() === '025/189' && !/Normal|€/.test(headText(E, gi)), headText(E, gi));
   const si = E.gIdx('swsh3-025|normal|Staff');
   t.ok('Staff: Titel mit Version, kein Preis in der Zeile', $('gh' + si).querySelector('.t').textContent === 'Glurak · Staff' && !/€/.test(headText(E, si)), headText(E, si));
