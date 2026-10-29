@@ -279,8 +279,10 @@ function withLock_(fn, keepLookups) {
 }
 
 // Zeitprotokoll (#43): Ein Aufruf aus Seitenleiste oder Web-App schreibt am Ende eine Zeile ins Protokoll seiner
-// Ausführung (Erweiterungen > Apps Script > Ausführungen), z. B. „addCard 900 ms: tcgdex 380, Sperre 2, Daten lesen 90,
-// Nachschlagewerte 15, schreiben 40, festschreiben 310“. Die Schritte meldet der Code unterwegs mit tmrStep_.
+// Ausführung (Erweiterungen > Apps Script > Ausführungen), z. B. „addCard 1800 ms: Einstellungen 450, tcgdex 0,
+// Set-Datum 30, Sperre 120, Daten lesen 400, Nachschlagewerte 60, schreiben 220, festschreiben 280“. Die Schritte meldet
+// der Code unterwegs mit tmrStep_. Nicht darin: die feste Anlaufzeit jedes Skriptaufrufs bei Google (die Ausführung
+// dauert insgesamt etwa 1 bis 2 Sekunden länger).
 let tmr_ = null;
 
 /** Zeitprotokoll für diesen Aufruf beginnen. */
@@ -1147,6 +1149,7 @@ function originLabel_(origin, info) {
 function ensureSchema_() {
   if (takenOverBy_()) throw new Error(takenOverText_());
   const stored = settingGet_('SCHEMA_VERSION');
+  tmrStep_('Einstellungen'); // im Zeitprotokoll: Tabelle öffnen und das Blatt Tool-Einstellungen lesen
   if (stored === SCHEMA_VERSION) return;
   if (Number(stored) > Number(SCHEMA_VERSION)) {
     throw new Error('Diese Seite läuft mit älterem Code als die Tabelle. Am Handy: am Computer die Web-App neu bereitstellen ' +

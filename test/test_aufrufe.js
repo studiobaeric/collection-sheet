@@ -134,7 +134,7 @@ newIds.forEach(id => env.run('cacheCards_([{lang: "de", id: "' + id + '", data: 
   bound('neue Karte', m, 18, 80);
   ok('schreibt Daten und je eine Zeile Pokédex-Nummern A:C und D:E', m.seq.filter(x => /^W /.test(x)).join(' ').match(/Pokédex-Nummern\.setValues\(1x3\).*Pokédex-Nummern\.setValues\(1x2\)/) &&
     m.seq.some(x => /^W Daten\.setValues\(1x30\)/.test(x)), m.seq);
-  ok('Zeitprotokoll mit den Schritten', /^addCard \d+ ms: tcgdex \d+, Set-Datum \d+, Sperre \d+, Daten lesen \d+, Nachschlagewerte \d+, schreiben \d+, festschreiben \d+$/.test(m.logs.join('\n')), m.logs);
+  ok('Zeitprotokoll mit den Schritten', /^addCard \d+ ms: Einstellungen \d+, tcgdex \d+, Set-Datum \d+, Sperre \d+, Daten lesen \d+, Nachschlagewerte \d+, schreiben \d+, festschreiben \d+$/.test(m.logs.join('\n')), m.logs);
   const dex = env.values('Pokédex-Nummern');
   ok('Nummern der neuen Karte in A:C und D:E', dex.some(r => r[0] === newIds[0]) && dex.some(r => r[3] === newIds[0]));
 }
@@ -182,7 +182,7 @@ const eid = grp.rows[0].eid;
   const m = measure(() => env.uiCall('adjustEntry', eid, 1));
   bound('+1', m, 8, 30);
   ok('Antwort mit der geänderten Karte', m.res.delta && m.res.delta.groups.length === 1 && m.res.delta.groups[0].count === 2, m.res.delta);
-  ok('Zeitprotokoll', /^adjustEntry \d+ ms: Sperre \d+, Daten lesen \d+, Nachschlagewerte \d+, schreiben \d+, festschreiben \d+$/.test(m.logs.join('\n')), m.logs);
+  ok('Zeitprotokoll', /^adjustEntry \d+ ms: Einstellungen \d+, Sperre \d+, Daten lesen \d+, Nachschlagewerte \d+, schreiben \d+, festschreiben \d+$/.test(m.logs.join('\n')), m.logs);
   const r = measure(() => env.uiCall('revertAdjust', m.res.token));
   bound('Rückgängig', r, 8, 30);
   const minus = measure(() => env.uiCall('adjustEntry', eid, -1));
