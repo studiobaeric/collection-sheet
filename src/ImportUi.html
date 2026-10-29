@@ -1,5 +1,5 @@
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.2.0
+     Pokémon-Sammlung · Version 1.2.1
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <style>
@@ -56,7 +56,7 @@
 // langOptions, CONDITIONS, CONDITION_LABELS, VARIANT_LABELS, PLACEHOLDER, loadUiConfig.
 // =========================================================================
 
-var impFileVersion = '1.2.0'; // Version dieser Datei, Ui.html vergleicht sie (#35); tools/release.js schreibt sie
+var impFileVersion = '1.2.1'; // Version dieser Datei, Ui.html vergleicht sie (#35); tools/release.js schreibt sie
 var impInitCalls = 0;   // wie oft der Import-Tab geöffnet wurde
 var impGen = 0;         // Ansicht-Generation: nur Antworten zur aktuellen Ansicht zählen
 var impPrevGen = 0;     // Vorschau der ersten zehn Zeilen (Schritt 7)
@@ -1359,9 +1359,7 @@ function impTileKey(ev, el) {
 /** Kachel einer Karte (Kandidat oder Suchtreffer); onclick ist eigener Code mit Indizes */
 function impTileHtml(c, onclick, chosen) {
   return '<div class="tile' + (chosen ? ' imp-chosen' : '') + '" role="button" tabindex="0" onclick="' + onclick + '" onkeydown="impTileKey(event,this)">' +
-    imgTag(cardImg(c.image, 'low')) + '<div class="cap"><b>' + esc(c.name) + '</b><br>' + esc(c.setName || c.setId || '') +
-    (c.localId != null && c.localId !== '' ? ' · ' + esc(c.localId) + (c.setSize ? '/' + esc(c.setSize) : '') : '') +
-    (c.lang === 'en' ? ' · englische Daten' : '') + (chosen ? '<br><b>gewählt</b>' : '') + '</div></div>';
+    imgTag(cardImg(c.image, 'low')) + cardCap(c, (c.lang === 'en' ? ' · englische Daten' : '') + (chosen ? '<br><b>gewählt</b>' : '')) + '</div>';
 }
 
 function impRvItemHtml(k) {
@@ -1470,7 +1468,7 @@ function impRvSearchHtml(k) {
   return '<form class="box" onsubmit="impRvSearch(event,' + k + ')"><h3>Neu suchen</h3>' +
     '<label for="impRvN' + k + '">Name</label><input type="text" id="impRvN' + k + '" autocomplete="off" value="' + esc(S.name) + '" oninput="impRvField(' + k + ',\'name\',this.value)">' +
     '<div class="row"><div><label for="impRvNr' + k + '">Nummer</label><input type="text" id="impRvNr' + k + '" autocomplete="off" value="' + esc(S.number) + '" oninput="impRvField(' + k + ',\'number\',this.value)"></div>' +
-    '<div><label for="impRvSet' + k + '">Set (optional)</label><input type="text" id="impRvSet' + k + '" list="setList" autocomplete="off" value="' + esc(S.set) + '" oninput="impRvField(' + k + ',\'set\',this.value)"></div></div>' +
+    '<div><label for="impRvSet' + k + '">Set (optional)</label><input type="text" id="impRvSet' + k + '" data-sets="1" autocomplete="off" value="' + esc(S.set) + '" oninput="impRvField(' + k + ',\'set\',this.value)"></div></div>' +
     '<div class="actions"><button class="btn primary" type="submit">Suchen</button></div></form>' +
     '<div id="impRvRes' + k + '">' + impRvResHtml(k) + '</div>';
 }

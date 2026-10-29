@@ -104,7 +104,7 @@ t.section('Quelltext für die Seite (searchJs_)');
   const env = setup();
   const { src, S } = browserCode(env);
   ok('Hülle mit allen Funktionen, ohne „</script>“', /^\(function \(\) \{\n/.test(src) && !/<\/script/i.test(src) && src.length > 5000, src.slice(0, 60));
-  ok('liefert search, card, setNumber, url, sets', ['search', 'card', 'setNumber', 'url', 'sets'].every(k => typeof S[k] === 'function'), Object.keys(S));
+  ok('liefert search, card, setNumber, url, sets, split', ['search', 'card', 'setNumber', 'url', 'sets', 'split'].every(k => typeof S[k] === 'function'), Object.keys(S));
   ok('keine Apps-Script-Dienste im Quelltext', !/\b(SpreadsheetApp|UrlFetchApp|CacheService|PropertiesService|LockService|Utilities|Session|HtmlService|Logger)\b/.test(src));
   eq('Adressen wie auf dem Server', [S.url(['card', 'de', 'swsh3-025']), S.url(['name', 'en', 'Mr. Mime']), S.url(['set', 'de', 'sv03.5']), S.url(['sets', 'en'])],
     [H.API + 'de/cards/swsh3-025', H.API + 'en/cards?name=Mr.%20Mime', H.API + 'de/sets/sv03.5', H.API + 'en/sets']);
@@ -232,6 +232,50 @@ t.section('fetchAllJson_: zweiter Versuch parallel');
   const s = onServer(env, 'searchCards', { name: 'Glurak' });
   ok('Namensliste fällt aus: „tcgdex nicht erreichbar (HTTP 503)“', s.error === 'tcgdex nicht erreichbar (HTTP 503)', s.error);
   env.fetchFail = null;
+}
+
+t.section('Nummer im Namensfeld (#51), Set-Symbol (#47)');
+{
+  const env = setup();
+  const { S } = browserCode(env);
+  const cases = [
+    [['Pikachu 12', ''], { name: 'Pikachu', number: '12' }],
+    [['12 Pikachu', ''], { name: 'Pikachu', number: '12' }],
+    [['Glurak 025/165', ''], { name: 'Glurak', number: '025/165' }],
+    [['Pikachu SWSH050', ''], { name: 'Pikachu', number: 'SWSH050' }],
+    [['Pikachu TG05/TG30', ''], { name: 'Pikachu', number: 'TG05/TG30' }],
+    [['Pikachu ex 12/40', ''], { name: 'Pikachu ex', number: '12/40' }],
+    [['Porygon2', ''], { name: 'Porygon2', number: '' }],
+    [['Porygon2 12', ''], { name: 'Porygon2', number: '12' }],
+    [['Pikachu V', ''], { name: 'Pikachu V', number: '' }],
+    [['Mr. Mime', ''], { name: 'Mr. Mime', number: '' }],
+    [['Pikachu 12', '25'], { name: 'Pikachu', number: '25' }],
+    [['  Pikachu   12 ', ' '], { name: 'Pikachu', number: '12' }],
+    [['12', ''], { name: '12', number: '' }],
+    [['', '4'], { name: '', number: '4' }]
+  ];
+  cases.forEach(([args, want]) => eq('„' + args[0] + '“ und Nummer „' + args[1] + '“', plain(env.ctx.splitNameNumber_(args[0], args[1])), want));
+  ok('die Seite trennt genauso (SEARCH.split)', cases.every(([args, want]) => J(S.split(args[0], args[1])) === J(want)));
+  const a = onServer(env, 'searchCards', { name: 'Glurak 025' }).value;
+  eq('Server: „Glurak 025“ im Namensfeld wie Name Glurak und Nummer 025', a, onServer(env, 'searchCards', { name: 'Glurak', number: '025' }).value);
+  ok('Name ohne Nummer zurück (inputName)', a.inputName === 'Glurak' && a.cards.length === 1 && a.cards[0].id === 'swsh3-025', a);
+  eq('Browser: gleich wie der Server', runBrowser(env, S, S.search({ name: 'Glurak 025' })).value, a);
+  const u = onServer(env, 'searchCards', { name: 'Unbekannt 7/50' }).value;
+  ok('Set-Auswahl mit der Nummer aus dem Namen', u.stage === 'pickSet' && u.number === '7/50' && u.inputName === 'Unbekannt', u);
+  // Set-Symbol: Treffer bringen es von tcgdex mit, Karten der Sammlung bekommen es aus dem Blatt Sets
+  const SYM = 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol';
+  const g = onServer(env, 'searchCards', { name: 'Glurak' }).value.cards;
+  ok('Treffer mit Set-Symbol, ohne Symbol leer', g.filter(c => c.setId === 'swsh3').every(c => c.setSymbol === SYM) &&
+    g.filter(c => c.setId === 'base1').every(c => c.setSymbol === '') && g.length === 3, g.map(c => [c.id, c.setSymbol]));
+  env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 });
+  env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
+  env.uiCall('addFreeCard', { name: 'Pikachu', setName: 'SWSH Black Star Promos', number: 'SWSH020', qty: 1 });
+  const groups = env.uiCall('getCollection').groups;
+  const by = id => groups.find(x => x.id === id) || {};
+  const promo = groups.find(x => x.isFree) || {};
+  ok('Sammlung: Set-ID und Symbol aus dem Blatt Sets', by('swsh3-025').setId === 'swsh3' && by('swsh3-025').setSymbol === SYM && by('swsh3-025').setPromo === false, by('swsh3-025'));
+  ok('Sammlung: Set ohne Symbol', by('base1-4').setId === 'base1' && by('base1-4').setSymbol === '' && by('base1-4').setPromo === false, by('base1-4'));
+  ok('Sammlung: freie Karte aus einem Promo-Set zeigt den Stern (setPromo)', promo.setId === '' && promo.setSymbol === '' && promo.setPromo === true, promo);
 }
 
 t.section('Speichern mit den Karten aus der Seite');

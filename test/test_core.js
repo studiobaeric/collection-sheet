@@ -633,7 +633,12 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
   ok('menu mit Dashboard, ohne Einsortieren und Einrichtung (#43)', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7 &&
     env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung' || x[1] === 'einsortieren'), env.ui.menus[0].items);
-  ok('getSetSuggestions', env.uiCall('getSetSuggestions').indexOf('Darkness Ablaze') >= 0);
+  // Auswahlliste mit Symbol und Name (#47): neueste Sets zuerst, deutscher Name, englischer nur wenn anders
+  const sug = env.uiCall('getSetSuggestions');
+  const fl = sug.filter(s => s.id === 'swsh3')[0], gs = sug.filter(s => s.id === 'base1')[0];
+  ok('getSetSuggestions: Objekte mit id, Name, englischem Name, Symbol und Promo', fl && fl.name === 'Flammende Finsternis' && fl.en === 'Darkness Ablaze' &&
+    fl.symbol === 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol' && fl.promo === false && gs && gs.name === 'Grundset' && gs.symbol === '', sug);
+  ok('getSetSuggestions: nur englische Sets mit englischem Namen, ohne en', sug.some(s => s.id === 'old9' && s.name === 'Old Set' && s.en === ''), sug);
   ok('Hand row count', a.count === 1);
 }
 

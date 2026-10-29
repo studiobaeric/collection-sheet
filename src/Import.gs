@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.2.0
+ *  Pokémon-Sammlung · Version 1.2.1
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -14,7 +14,7 @@
  * ========================================================================= */
 
 /** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
-const IMPORT_FILE_VERSION = '1.2.0';
+const IMPORT_FILE_VERSION = '1.2.1';
 
 const IMP_SHEETS = {
   imports: 'Importe',
