@@ -23,7 +23,6 @@ const H = 52;
 
 const ICONS = {
   add: '<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>',
-  inbox: '<path d="M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.88 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 12h-4c0 1.66-1.35 3-3 3s-3-1.34-3-3H4.99V5H19v10zm-3-5h-2V7h-4v3H8l4 4 4-4z"/>',
   euro: '<path d="M15 18.5c-2.51 0-4.68-1.42-5.76-3.5H15l1-2H8.58c-.05-.33-.08-.66-.08-1s.03-.67.08-1H15l1-2H9.24C10.32 6.92 12.5 5.5 15 5.5c1.61 0 3.09.59 4.23 1.57L21 5.3C19.41 3.87 17.3 3 15 3c-3.92 0-7.24 2.51-8.48 6H3l-1 2h4.06c-.04.33-.06.66-.06 1s.02.67.06 1H3l-1 2h4.52c1.24 3.49 4.56 6 8.48 6 2.31 0 4.41-.87 6-2.3l-1.78-1.77c-1.13.98-2.6 1.57-4.22 1.57z"/>',
   input: '<path d="M21 3.01H3c-1.1 0-2 .9-2 2V9h2V4.99h18v14.03H3V15H1v4.01c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98v-14c0-1.11-.9-2-2-2zM11 16l4-4-4-4v3H1v2h10v3z"/>',
   update: '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>',
@@ -41,7 +40,6 @@ const ICONS = {
 // Schlüssel = Dateiname, muss zu DASH_BUTTONS in src/Code.gs passen
 const BUTTONS = [
   { key: 'erfassen', label: 'Karten erfassen', icon: 'add', kind: 'primary' },
-  { key: 'einsortieren', label: 'Einsortieren', icon: 'inbox' },
   { key: 'preise', label: 'Preise aktualisieren', icon: 'euro' },
   { key: 'import', label: 'Importieren', icon: 'input' },
   { key: 'updates', label: 'Updates', icon: 'update' },

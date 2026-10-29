@@ -20,19 +20,21 @@ Am Handy nutzt du die Web-App: Erweiterungen > Apps Script > **Bereitstellen > N
 
 ## Dashboard
 
-Das Blatt **Dashboard** steht ganz vorne, und am Computer startet die Tabelle immer dort. Es zeigt den Gesamtwert deiner Sammlung mit der Veränderung seit 7 Tagen, die Zahl deiner Karten, wie viele der 1025 Pokémon du schon hast, und den Wertverlauf der letzten 90 Tage. Die Zahlen rechnet das Tool beim Einsortieren (siehe unten) und nach jedem Preislauf neu.
+Das Blatt **Dashboard** steht ganz vorne, und am Computer startet die Tabelle immer dort. Es zeigt den Gesamtwert deiner Sammlung mit der Veränderung seit 7 Tagen, die Zahl deiner Karten, wie viele der 1025 Pokémon du schon hast, und den Wertverlauf der letzten 90 Tage. Die Zahlen rechnet die Tabelle selbst, sobald sich deine Sammlung oder die Preise ändern.
 
-Mit den Knöpfen öffnest du **Karten erfassen** und den Import, sortierst neue Karten ein, startest den Preislauf, suchst nach Updates, lädst Sets und Übersetzung neu, baust die Ansicht neu auf oder holst den Handy-Link. Die Knöpfe in der Reihe „Blätter“ springen zu Sammlung, Pokédex, Verlauf und Seltenheiten. Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen; Karten erfasst du dort über die Web-App.
+Mit den Knöpfen öffnest du **Karten erfassen** und den Import, startest den Preislauf, suchst nach Updates, lädst Sets und Übersetzung neu, baust die Ansicht neu auf oder holst den Handy-Link. Die Knöpfe in der Reihe „Blätter“ springen zu Sammlung, Pokédex, Verlauf und Seltenheiten. Die Knöpfe funktionieren am Computer. In der Sheets-App am Handy zeigt das Dashboard nur die Zahlen; Karten erfasst du dort über die Web-App.
 
 Die Bilder der Knöpfe lädt das Tool beim Einrichten von GitHub. Fehlen sie (steht unten ein roter Hinweis), wähle später **Pokémon > Ansicht neu aufbauen**. Das Blatt baut das Tool selbst auf, eigene Änderungen daran gehen beim nächsten Neuaufbau verloren. **Pokémon > Dashboard** bringt dich von überall zurück.
 
 Das Dashboard kommt im Look Rot-weiß. Zwei weitere Looks, Dunkel und Hell-neutral, liegen als Konzept mit Vorschau in [`docs/dashboard`](docs/dashboard/README.md).
 
-## Einsortieren
+## Speichern und Suchen
 
-Hinzufügen und jede Änderung in Seitenleiste und Web-App (+1, −1, Bearbeiten, eigener Preis, Verknüpfen, Rückgängig) speichern sofort, aber nur ins versteckte Blatt Daten. So kannst du gleich die nächste Karte suchen. Der Tab Sammlung in Seitenleiste und Web-App zeigt die Änderung sofort.
+Hinzufügen und jede Änderung in Seitenleiste und Web-App (+1, −1, Bearbeiten, eigener Preis, Verknüpfen, Rückgängig) speichern ins versteckte Blatt Daten. Die Blätter **Sammlung**, **Pokédex** und **Dashboard** rechnen mit Formeln direkt daraus und zeigen die Änderung gleich danach. Einsortieren wie in Version 1.1.3 ist seit 1.2.0 nicht mehr nötig.
 
-Die Blätter **Sammlung**, **Pokédex** und **Dashboard** ziehen erst beim Einsortieren nach: mit dem Knopf **Einsortieren** in der roten Leiste von Seitenleiste und Web-App, im Dashboard oder über **Pokémon > Einsortieren**. Dabei holt das Tool auch fehlende Erscheinungsdaten neuer Sets und Pokédex-Nummern neuer Karten von tcgdex. Drückst du nicht, sortiert der nächtliche Preislauf alles ein. Solange etwas fehlt, steht oben in diesen Blättern rot, wie viele Änderungen noch nicht einsortiert sind.
+Die Kartensuche fragt tcgdex direkt aus Seitenleiste und Web-App. Antippen eines Treffers öffnet die Karte sofort, mit Preis. Kommt der Browser nicht zu tcgdex durch, sucht wie früher das Skript.
+
+Wie lange etwas gedauert hat, siehst du unter **Erweiterungen > Apps Script > Ausführungen**: Jeder Aufruf aus Seitenleiste und Web-App schreibt dort eine Zeile mit der Dauer seiner Schritte.
 
 ## Sammlung: Suche und Preisverlauf
 

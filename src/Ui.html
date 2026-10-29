@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.1.3
+     Pokémon-Sammlung · Version 1.2.0
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -92,7 +92,6 @@
   .updbar .btn { min-height: 40px; padding: 6px 10px; font-size: 14px; flex: none; }
   .updbar .x { border: 0; background: none; font-size: 20px; min-width: 44px; min-height: 40px; cursor: pointer; color: inherit; flex: none; }
   .updbar.bad { background: var(--errbg); color: var(--err); }
-  .updbar.good { background: var(--okbg); color: var(--ok); }
   .fodd { color: var(--err); font-weight: 600; }
   .ptitle { font-size: 17px; margin: 12px 0 4px; }
   ul.rel { margin: 4px 0 8px 18px; padding: 0; font-size: 14px; }
@@ -124,7 +123,6 @@
 </div>
 <div id="verBar" class="updbar bad hidden"></div>
 <div id="updBar" class="updbar hidden"></div>
-<div id="sortBar" class="updbar bad hidden"></div>
 
 <!-- Hinzufügen -->
 <div id="paneAdd" class="panel">
@@ -221,7 +219,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
-var UI_FILE_VERSION = '1.1.3'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
+var UI_FILE_VERSION = '1.2.0'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -324,8 +322,7 @@ function applyConfig(cfg) {
 }
 /** getUiConfig neu laden (auch für ImportUi, z. B. nach einem Import mit neuen Zusatzspalten) */
 function loadUiConfig() {
-  var ticket = pendTicket();
-  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); pendSet(cfg && cfg.pending, ticket); return cfg; })
+  return call('getUiConfig').then(function (cfg) { applyConfig(cfg); return cfg; })
     .catch(function () { return null; }); // mit den bisherigen Listen weiter
 }
 function fillVersionList() {
@@ -355,6 +352,115 @@ function showTab(t) {
   else $('fName').focus();
 }
 
+// ---------- Suche direkt bei tcgdex (#43) ----------
+// Derselbe Suchablauf wie auf dem Server (SEARCH aus Code.gs, searchJs_), nur holt hier der Browser die Daten selbst:
+// kein Skriptaufruf, alle Abrufe einer Runde gleichzeitig. Nur die Übersetzung für die englische Suche fragt beim Server.
+// Erreicht der Browser tcgdex nicht, sucht wie bisher der Server. Kam der Browser noch nie durch, bleibt es dann für
+// diese Seite beim Server.
+var direct = { off: false, works: false, memo: {}, keys: [], sets: null };
+var DIRECT_MEMO = 300; // so viele Antworten von tcgdex merkt sich die Seite (Karten, Namenslisten, Sets)
+var DIRECT_WAIT_MS = 8000; // antwortet tcgdex so lange nicht, sucht der Server
+
+function directOn() { return !direct.off && !!window.SEARCH && typeof window.fetch === 'function'; }
+function directFail() { var e = new Error('tcgdex aus dem Browser nicht erreichbar'); e.direct = true; return e; }
+
+/** Erst direkt im Browser (make() gibt den Suchablauf), sonst über den Server (fn mit args). */
+function viaDirect(make, fn, args) {
+  var server = function () { return call.apply(null, [fn].concat(args)); };
+  if (!directOn()) return server();
+  return runDirect(make()).catch(function (e) {
+    if (!e || !e.direct) throw e;
+    return server().then(function (res) { if (!direct.works) direct.off = true; return res; });
+  });
+}
+function searchAny(q) { return viaDirect(function () { return SEARCH.search(q); }, 'searchCards', [q]); }
+function cardAny(c) { return viaDirect(function () { return SEARCH.card(c.id, c.lang, !c.image); }, 'getCardDetail', [c.id, c.lang]); }
+function setNumberAny(setId, number) {
+  return viaDirect(function () { return SEARCH.setNumber(setId, number); }, 'getCardBySetNumber', [setId, number]);
+}
+
+/** Suchablauf ausführen: Runde für Runde, bis er sein Ergebnis liefert. */
+function runDirect(flow) {
+  return new Promise(function (resolve, reject) {
+    function step(answers) {
+      var s;
+      try { s = flow.next(answers); } catch (e) { reject(e); return; }
+      if (s.done) resolve(s.value);
+      else directRound(s.value).then(step, reject);
+    }
+    step(undefined);
+  });
+}
+
+/** Eine Runde: alles gleichzeitig, was scheitert, noch einmal. Scheitert es wieder, übernimmt der Server (directFail). */
+function directRound(needs) {
+  return Promise.all(needs.map(directNeed)).then(function (res) {
+    var again = [];
+    res.forEach(function (a, i) { if (a.error) again.push(i); });
+    if (!again.length) return res;
+    // der Browser kam noch nie durch, oder tcgdex antwortet zu langsam: gleich zum Server
+    if (!direct.works || res.some(function (a) { return a.slow; })) throw directFail();
+    return Promise.all(again.map(function (i) { return directNeed(needs[i]); })).then(function (second) {
+      again.forEach(function (i, k) { res[i] = second[k]; });
+      if (second.some(function (a) { return a.error; })) throw directFail();
+      return res;
+    });
+  });
+}
+
+function directNeed(n) {
+  if (n[0] === 'sets') return directSets();
+  if (n[0] === 'tr') {
+    return call('translateCardName', n[1]).then(function (tr) { return { ok: true, data: tr || null }; },
+      function (e) { return { ok: false, error: errText(e) }; });
+  }
+  return directGet(SEARCH.url(n));
+}
+
+/** Eine Adresse bei tcgdex -> {ok, data} | {ok:false, notFound} | {ok:false, error, slow (keine Antwort)} */
+function directGet(url) {
+  if (direct.memo.hasOwnProperty(url)) return Promise.resolve({ ok: true, data: direct.memo[url] });
+  var timer = null;
+  var slow = new Promise(function (done) {
+    timer = setTimeout(function () { done({ ok: false, error: 'keine Antwort', slow: true }); }, DIRECT_WAIT_MS);
+  });
+  var got = window.fetch(url).then(function (r) {
+    direct.works = true;
+    if (r.status === 404) return { ok: false, notFound: true };
+    if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+    return r.json().then(function (d) { directKeep(url, d); return { ok: true, data: d }; },
+      function () { return { ok: false, error: 'keine gültige Antwort' }; });
+  }, function (e) { return { ok: false, error: errText(e) }; });
+  return Promise.race([got, slow]).then(function (a) { clearTimeout(timer); return a; });
+}
+
+function directKeep(url, data) {
+  if (!direct.memo.hasOwnProperty(url)) direct.keys.push(url);
+  direct.memo[url] = data;
+  while (direct.keys.length > DIRECT_MEMO) delete direct.memo[direct.keys.shift()];
+}
+
+/** Alle Sets (deutsch und englisch) für Set-Filter und Set-Auswahl, einmal pro Seite. */
+function directSets() {
+  if (direct.sets) return Promise.resolve({ ok: true, data: direct.sets });
+  return Promise.all([directGet(SEARCH.url(['sets', 'de'])), directGet(SEARCH.url(['sets', 'en']))]).then(function (r) {
+    if (!r[0].ok || !r[1].ok) return { ok: false, error: (r[0].error || r[1].error || 'keine Sets'), slow: !!(r[0].slow || r[1].slow) };
+    direct.sets = SEARCH.sets(r[0].data, r[1].data);
+    return { ok: true, data: direct.sets };
+  });
+}
+
+/** Kartendaten, die die Suche im Browser schon hat ([{lang, id, data}]): Speichern holt sie dann nicht noch einmal. */
+function directCards(id) {
+  var out = [];
+  if (!window.SEARCH || !id) return out;
+  ['de', 'en'].forEach(function (lang) {
+    var url = SEARCH.url(['card', lang, id]);
+    if (direct.memo.hasOwnProperty(url)) out.push({ lang: lang, id: id, data: direct.memo[url] });
+  });
+  return out;
+}
+
 // ---------- Hinzufügen ----------
 
 function doSearch(ev) {
@@ -364,7 +470,7 @@ function doSearch(ev) {
   setMsg('addMsg', '');
   spinner('addResults', 'Suche bei tcgdex …');
   var gen = ++searchGen;
-  call('searchCards', q).then(function (res) { if (gen === searchGen) renderSearch(res); }).catch(function (e) {
+  searchAny(q).then(function (res) { if (gen === searchGen) renderSearch(res); }).catch(function (e) {
     if (gen !== searchGen) return;
     $('addResults').innerHTML = '';
     setMsg('addMsg', esc(errText(e)), 'err');
@@ -389,7 +495,7 @@ function renderSearch(res) {
     box.innerHTML = (notesHtml(res.notes) || '<div class="notes">Keine Karte gefunden.</div>') + freeButtonHtml();
     return;
   }
-  if (res.cards.length === 1) { openConfirm(res.cards[0].id, res.cards[0].lang, res.notes); return; }
+  if (res.cards.length === 1) { openConfirm(res.cards[0], res.notes); return; }
   var html = notesHtml(res.notes) + '<div class="notes">' + res.cards.length + ' Treffer – Karte antippen:</div><div class="grid">';
   res.cards.forEach(function (c, i) {
     html += '<div class="tile" onclick="pickCard(' + i + ')">' + imgTag(cardImg(c.image, 'low')) +
@@ -400,7 +506,7 @@ function renderSearch(res) {
   state.cards = res.cards;
 }
 
-function pickCard(i) { var c = state.cards[i]; openConfirm(c.id, c.lang, null); }
+function pickCard(i) { openConfirm(state.cards[i], null); }
 
 function renderSetPicker(res) {
   state.pickSets = res.sets || [];
@@ -436,7 +542,7 @@ function pickSet(i) {
   var s = state.pickSets[i];
   var gen = searchGen;
   spinner('addResults', 'Suche Nummer ' + state.pickNumber + ' in ' + s.name + ' …');
-  call('getCardBySetNumber', s.id, state.pickNumber).then(function (card) { if (gen === searchGen) renderConfirm(card, null); })
+  setNumberAny(s.id, state.pickNumber).then(function (card) { if (gen === searchGen) renderConfirm(card, null); })
     .catch(function (e) {
       if (gen !== searchGen) return;
       setMsg('addMsg', esc(errText(e)), 'err');
@@ -444,10 +550,12 @@ function pickSet(i) {
     });
 }
 
-function openConfirm(id, lang, notes) {
+/** Bestätigung zu einem Treffer: Treffer mit Preisen sofort (#38 S1), sonst holt die Seite die Karte erst. */
+function openConfirm(c, notes) {
+  if (c.prices) { renderConfirm(c, notes); return; }
   var gen = searchGen;
   spinner('addResults', 'Lade Karte …');
-  call('getCardDetail', id, lang).then(function (card) { if (gen === searchGen) renderConfirm(card, notes); })
+  cardAny(c).then(function (card) { if (gen === searchGen) renderConfirm(card, notes); })
     .catch(function (e) { if (gen !== searchGen) return; $('addResults').innerHTML = ''; setMsg('addMsg', esc(errText(e)), 'err'); });
 }
 
@@ -523,6 +631,8 @@ function addCurrent() {
     qty: qtyOf($('cQty').value), inputName: inputName,
     cardLang: $('cLang').value || 'DE', version: $('cVersion').value.trim(), ownPrice: op.value
   };
+  var given = directCards(c.id);
+  if (given.length) req.cards = given; // von der Suche im Browser: Speichern holt die Karte nicht noch einmal
   var name = c.lang === 'en' && inputName ? inputName : c.name;
   startAdd('addCard', req, {
     name: name, number: c.localId, image: c.image,
@@ -733,10 +843,8 @@ function runQueue() {
   }
   queueBusy = true;
   var next = function () { queueBusy = false; runQueue(); };
-  var ticket = pendTicket();
   op.send().then(function (res) {
     queue.shift(); coll.opsDone++;
-    pendSet(res && res.pending, ticket); // jede Änderung meldet, wie viel noch nicht einsortiert ist (#41)
     try { op.done(res); } finally { next(); }
   }, function (e) {
     queue.shift();
@@ -753,11 +861,9 @@ function loadCollection(okText) {
   if (!coll.all) spinner('collResults', 'Lade die Sammlung …');
   setMsg('collMsg', '');
   drawCollDex();
-  var ticket = pendTicket();
   call('getCollection').then(function (res) {
     if (gen !== coll.gen) return;
     if (queue.length || coll.opsDone !== seen) { coll.loading = false; coll.reloadWanted = true; runQueue(); return; } // inzwischen geändert
-    pendSet(res && res.pending, ticket);
     coll.loading = false;
     coll.stale = coll.staleSeq !== staleSeq; // während des Ladens woanders geändert: beim nächsten Öffnen noch einmal
     coll.all = []; coll.byKey = {};
@@ -1423,7 +1529,7 @@ function linkSearch(ev, i) {
   var gen = L.gen = ++linkGen;
   L.query = q; L.res = null; L.msg = ''; L.busy = true; L.busyText = 'Suche bei tcgdex …'; L.setFilter = '';
   draw(i, g, 'l');
-  call('searchCards', q).then(function (res) {
+  searchAny(q).then(function (res) {
     if (g.link !== L || L.gen !== gen) return;
     L.busy = false; L.res = res;
     draw(i, g, 'l');
@@ -1443,7 +1549,7 @@ function linkPickSet(i, k) {
   var gen = L.gen = ++linkGen;
   L.busy = true; L.msg = ''; L.busyText = 'Suche Nummer ' + number + ' in ' + s.name + ' …';
   draw(i, g, 'l');
-  call('getCardBySetNumber', s.id, number).then(function (card) {
+  setNumberAny(s.id, number).then(function (card) {
     if (g.link !== L || L.gen !== gen) return;
     L.busy = false; L.res = { stage: 'set', cards: [card], notes: [], sets: prev.sets, back: prev };
     draw(i, g, 'l');
@@ -1465,7 +1571,10 @@ function linkPick(i, k) {
   var variant = linkVariant(g);
   enqueue({
     g: g,
-    send: function () { return call('linkFreeGroup', g.gkey, c.id, c.lang, variant); },
+    send: function () {
+      var given = directCards(c.id);
+      return given.length ? call('linkFreeGroup', g.gkey, c.id, c.lang, variant, given) : call('linkFreeGroup', g.gkey, c.id, c.lang, variant);
+    },
     done: function (res) {
       if (g.link === L) g.link = null;
       applyDelta(res && res.delta, g, res && res.gkey); // die verknüpfte Karte ersetzt die freie an derselben Stelle
@@ -1700,67 +1809,6 @@ function dexAdd(nr) {
   $('fName').value = e[1];
   $('fNumber').value = '';
   $('fSet').value = '';
-}
-
-// ---------- Einsortieren (#41) ----------
-// Jede Änderung speichert nur ins Blatt Daten. Die Blätter Sammlung, Pokédex und Dashboard ziehen erst beim
-// Einsortieren nach (dieser Knopf, Menü, Dashboard oder nachts mit dem Preislauf). Bis dahin zeigt die Leiste unter den
-// Tabs, wie viele Änderungen fehlen. Antworten haben ein Ticket aus der Reihenfolge, in der sie losgeschickt wurden:
-// eine ältere Zahl überschreibt nie eine neuere. Einsortieren läuft über die Warteschlange, also nach allem, was noch
-// gespeichert wird.
-
-var pend = { n: 0, at: 0, seq: 0, busy: false, msg: '', err: '' };
-
-function pendTicket() { return ++pend.seq; }
-/** Zahl aus einer Antwort übernehmen, wenn sie nicht älter ist als die angezeigte */
-function pendSet(n, ticket) {
-  if (typeof n !== 'number' || ticket < pend.at) return;
-  pend.at = ticket;
-  pend.n = n;
-  if (n > 0) pend.msg = '';
-  else pend.err = ''; // inzwischen anders einsortiert (Menü, nachts)
-  sortBar();
-}
-
-function sortBar() {
-  var bar = $('sortBar'), html = '', kind = 'bad';
-  if (pend.busy) {
-    html = '<span class="grow">Sortiere ein … Neue Karten kannst du weiter hinzufügen.</span>';
-  } else if (pend.err) {
-    html = '<span class="grow">Einsortieren ging nicht: ' + esc(pend.err) + '</span>' +
-      '<button class="btn" type="button" onclick="sortIn()">Nochmal</button>';
-  } else if (pend.n > 0) {
-    html = '<span class="grow">⚠ <b>' + pend.n + (pend.n === 1 ? ' Änderung ist' : ' Änderungen sind') + '</b> noch nicht einsortiert. ' +
-      'Sammlung, Pokédex und Dashboard in der Tabelle zeigen den alten Stand.</span>' +
-      '<button class="btn" type="button" onclick="sortIn()">Einsortieren</button>';
-  } else if (pend.msg) {
-    kind = 'good';
-    html = '<span class="grow">' + esc(pend.msg) + '</span>' +
-      '<button class="x" type="button" title="Ausblenden" aria-label="Ausblenden" onclick="sortCloseMsg()">×</button>';
-  }
-  bar.className = 'updbar ' + kind + (html ? '' : ' hidden');
-  bar.innerHTML = html;
-}
-function sortCloseMsg() { pend.msg = ''; sortBar(); }
-
-/** Knopf Einsortieren: holt fehlende Daten bei tcgdex und baut Sammlung, Pokédex und Dashboard neu auf. */
-function sortIn() {
-  if (pend.busy) return;
-  pend.busy = true; pend.err = ''; pend.msg = '';
-  sortBar();
-  enqueue({
-    send: function () { return call('einsortieren', { ui: true }); },
-    done: function (res) {
-      pend.busy = false;
-      pend.msg = (res && res.message) || 'Einsortiert.';
-      sortBar();
-      if (res && res.filled) { // Set-Daten oder Pokédex-Nummern sind dazugekommen
-        markStale();
-        if (!$('paneColl').classList.contains('hidden')) collShow();
-      }
-    },
-    fail: function (e) { pend.busy = false; pend.err = errText(e); sortBar(); }
-  });
 }
 
 // ---------- Updates ----------
@@ -2109,6 +2157,10 @@ if (START === 'upd') showTab('upd');
 else if (START === 'takeover') updOpenTakeover();
 // Knopf „Importieren“: der Bereich Import steht erst nach diesem Skript im Dokument (include am Ende)
 else if (START === 'import') document.addEventListener('DOMContentLoaded', function () { showTab($('paneImport') ? 'import' : 'add'); });
+</script>
+<script>
+// Suchablauf aus Code.gs (searchJs_): damit sucht die Seite direkt bei tcgdex (#43). Ist er null, sucht der Server.
+window.SEARCH = <?!= typeof searchJs_ === 'function' ? searchJs_() : 'null' ?>;
 </script>
 <?!= mode === 'sidebar' ? include('ImportUi') : '' ?>
 <div class="foot"><span id="updVer"></span><button type="button" class="lnk" onclick="showTab('upd')">Updates</button></div>

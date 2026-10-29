@@ -10,6 +10,7 @@ const RAW = fs.readFileSync(SRC, 'utf8');
 const MODE_LET = "<?!= mode ?>";
 const INCLUDE_LET = "<?!= mode === 'sidebar' ? include('ImportUi') : '' ?>";
 const START_LET = '<?!= typeof start === "string" ? start : "" ?>';
+const SEARCH_LET = "<?!= typeof searchJs_ === 'function' ? searchJs_() : 'null' ?>";
 
 let pass = 0, failCount = 0;
 function ok(label, cond, extra) {
@@ -271,10 +272,11 @@ function seedCollection(S) {
 const UI_VERSION = /var UI_FILE_VERSION = '([^']*)'/.exec(RAW)[1];
 const IMPORT_STUB = '<div id="paneImport" class="panel hidden">IMPORT-PANE</div><script>var impFileVersion = \'' + UI_VERSION + '\'; var impInitCalls = 0; function impInit() { impInitCalls++; }</script>';
 
-function render(mode, include, start) {
+function render(mode, include, start, search) {
   // wie HtmlService: den Import-Teil gibt es nur in der Seitenleiste (#36 A3)
   const imp = mode === 'sidebar' ? (include == null ? IMPORT_STUB : include) : '';
-  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(INCLUDE_LET, imp);
+  // ohne Suchablauf (search) sucht die Seite über den Stub-Server
+  return RAW.replace(MODE_LET, mode).replace(START_LET, start || '').replace(SEARCH_LET, search || 'null').replace(INCLUDE_LET, imp);
 }
 
 function boot(mode, opts) {
@@ -358,10 +360,12 @@ function boot(mode, opts) {
   {
     const idxs = []; let k = -1;
     while ((k = RAW.indexOf('<?', k + 1)) >= 0) idxs.push(k);
-    ok('genau drei Scriptlets in Ui.html', idxs.length === 3, idxs);
+    ok('genau vier Scriptlets in Ui.html', idxs.length === 4, idxs);
     ok('Scriptlet 1 ist MODE', RAW.substr(idxs[0], MODE_LET.length) === MODE_LET && /var MODE = '<\?!= mode \?>';/.test(RAW));
     ok('Scriptlet 2 ist START (fehlt start, bleibt es leer)', RAW.substr(idxs[1], START_LET.length) === START_LET && RAW.indexOf("var START = '" + START_LET + "';") >= 0);
-    ok('Scriptlet 3 ist include(ImportUi), nur in der Seitenleiste', RAW.substr(idxs[2], INCLUDE_LET.length) === INCLUDE_LET);
+    ok('Scriptlet 3 ist der Suchablauf (searchJs_, sonst null) in einem eigenen Skript', RAW.substr(idxs[2], SEARCH_LET.length) === SEARCH_LET &&
+      RAW.indexOf('<script>\n// Suchablauf aus Code.gs') >= 0 && RAW.indexOf('window.SEARCH = ' + SEARCH_LET + ';\n</script>') >= 0);
+    ok('Scriptlet 4 ist include(ImportUi), nur in der Seitenleiste', RAW.substr(idxs[3], INCLUDE_LET.length) === INCLUDE_LET);
     const incAt = RAW.indexOf(INCLUDE_LET);
     ok('include steht nach dem Skript am Ende von body', incAt > RAW.lastIndexOf('</script>') && incAt < RAW.indexOf('</body>'));
     ok('kein Gedankenstrich (—) in Ui.html', RAW.indexOf('—') < 0);
@@ -413,64 +417,17 @@ function boot(mode, opts) {
     ok('Übernahme: kein Vorladen', E.calls('getCollection').length === 0, E.pending.map(p => p.fn));
   }
 
-  // ---- Einsortieren (#41): Leiste unter den Tabs; eine ältere Zahl überschreibt nie eine neuere ----
+  // ---- Ohne Einsortieren (#43): keine Leiste, eine Zahl „pending“ aus einer älteren Antwort stört nicht ----
   for (const mode of ['sidebar', 'web']) {
     const E = boot(mode);
     const { $ } = E;
-    const bar = () => $('sortBar');
-    const cfg = n => Object.assign(E.S.getUiConfig(), { pending: n });
-    ok('Leiste versteckt, solange nichts gemeldet ist (' + mode + ')', bar().classList.contains('hidden'));
+    ok('keine Leiste „Einsortieren“ (' + mode + ')', !$('sortBar') && typeof E.win.sortIn === 'undefined' && typeof E.win.pendSet === 'undefined');
     await E.respond('getSetSuggestions');
-    // getCollection (vorgeladen) wurde nach getUiConfig losgeschickt: ihre Zahl ist neuer
     await E.respond('getCollection', { value: Object.assign(E.S.getCollection(), { pending: 5 }) });
-    ok('getCollection: rote Leiste mit Zahl und Knopf (' + mode + ')', !bar().classList.contains('hidden') && bar().classList.contains('bad') &&
-      /^⚠ 5 Änderungen sind noch nicht einsortiert\. Sammlung, Pokédex und Dashboard in der Tabelle zeigen den alten Stand\./.test(bar().textContent) &&
-      !!E.btn(bar(), 'Einsortieren'), bar().textContent);
-    await E.respond('getUiConfig', { value: cfg(2) });
-    ok('spätere Antwort auf eine ältere Anfrage ändert nichts', /⚠ 5 Änderungen/.test(bar().textContent), bar().textContent);
-    await E.respond('getUpdateInfo'); await flush(); await E.respond('getFileVersions');
-    // Änderung aus der Warteschlange gegen getUiConfig, das vorher losging
-    E.win.loadUiConfig();
-    await E.respond('getUiConfig', { value: cfg(1) });
-    ok('Einzahl', /^⚠ 1 Änderung ist noch nicht einsortiert/.test(bar().textContent), bar().textContent);
-    E.win.loadUiConfig();
-    E.win.enqueue({ send: () => E.win.call('adjustEntry', 'E1', 1), done: () => {}, fail: () => {} });
-    await E.respond('adjustEntry', { value: { applied: 1, delta: null, pending: 3 } });
-    await E.respond('getUiConfig', { value: cfg(2) });
-    ok('Antwort der Änderung zählt, nicht die ältere von getUiConfig', /⚠ 3 Änderungen/.test(bar().textContent), bar().textContent);
-    // Knopf: über die Warteschlange, Laufmeldung, dann grün mit Meldung
-    E.click(E.btn(bar(), 'Einsortieren'));
-    const call = E.calls('einsortieren')[0];
-    ok('Knopf ruft einsortieren({ui: true})', call && J(call.args) === J([{ ui: true }]), E.pending.map(p => p.fn));
-    ok('Laufmeldung ohne Knopf', /^Sortiere ein …/.test(bar().textContent) && !E.btn(bar(), 'Einsortieren'), bar().textContent);
-    E.win.sortIn(); // noch einmal, während es läuft
-    ok('nur ein Aufruf, auch bei zweitem Klick', E.calls('einsortieren').length === 1);
-    await E.respond('einsortieren', { value: { message: '3 Änderungen einsortiert. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand.', pending: 0, sorted: 3, filled: 0 } });
-    ok('grün mit Meldung und ×, Sammlung nicht neu geladen', bar().classList.contains('good') && /^3 Änderungen einsortiert\./.test(bar().textContent) &&
-      !!E.btn(bar(), '×') && E.calls('getCollection').length === 0, bar().textContent);
-    E.click(E.btn(bar(), '×'));
-    ok('× blendet die Meldung aus', bar().classList.contains('hidden'));
-    // neue Änderung: wieder rot
-    E.win.enqueue({ send: () => E.win.call('adjustEntry', 'E1', 1), done: () => {}, fail: () => {} });
-    await E.respond('adjustEntry', { value: { applied: 1, delta: null, pending: 1 } });
-    ok('neue Änderung: wieder rot', bar().classList.contains('bad') && /⚠ 1 Änderung/.test(bar().textContent));
-    // Fehler: rot mit „Nochmal“, Zahl kommt zurück, sobald 0 gemeldet wird
-    E.click(E.btn(bar(), 'Einsortieren'));
-    await E.respond('einsortieren', { error: 'Zeitlimit überschritten' });
-    ok('Fehler: Text und Knopf Nochmal', bar().classList.contains('bad') && /Einsortieren ging nicht: Zeitlimit überschritten/.test(bar().textContent) && !!E.btn(bar(), 'Nochmal'), bar().textContent);
-    E.win.loadUiConfig();
-    await E.respond('getUiConfig', { value: cfg(0) });
-    ok('woanders einsortiert (0): Fehler weg, Leiste aus', bar().classList.contains('hidden'), bar().textContent);
-    // Einsortieren holt Daten (filled): offene Sammlung lädt neu
-    E.win.loadUiConfig();
-    await E.respond('getUiConfig', { value: cfg(2) });
-    E.click($('tabColl'));
-    if (E.calls('getCollection').length) await E.respond('getCollection');
-    E.click(E.btn(bar(), 'Einsortieren'));
-    await E.respond('einsortieren', { value: { message: 'Fehlende Daten von tcgdex ergänzt.', pending: 0, sorted: 0, filled: 2 } });
-    ok('filled: Sammlung lädt neu', E.calls('getCollection').length === 1, E.pending.map(p => p.fn));
-    await E.respond('getCollection');
-    ok('keine Skriptfehler (Einsortieren ' + mode + ')', E.errors.length === 0, E.errors);
+    await E.respond('getUiConfig', { value: Object.assign(E.S.getUiConfig(), { pending: 2 }) });
+    ok('kein Hinweis „noch nicht einsortiert“ (' + mode + ')', !/noch nicht einsortiert/.test(E.doc.body.textContent));
+    await E.respondAll();
+    ok('keine Skriptfehler (ohne Einsortieren, ' + mode + ')', E.errors.length === 0, E.errors);
   }
 
   // ---- Sidebar ohne ImportUi (impInit fehlt) ----

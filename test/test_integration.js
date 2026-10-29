@@ -41,8 +41,8 @@ function evaluateTemplate(env, tpl, includeImpl) {
   const html = content.replace(/<\?(!=|=)?([\s\S]*?)\?>/g, (m, kind, expr) => {
     seen.push(m);
     if (!kind) throw new Error('Scriptlet ohne Ausgabe wird hier nicht unterstützt: ' + m);
-    // Vorlagen-Eigenschaften (mode, start) + globale Serverfunktionen (include)
-    const val = new Function('mode', 'start', 'include', 'return (' + expr + ');')(tpl.mode, tpl.start, includeImpl);
+    // Vorlagen-Eigenschaften (mode, start) + globale Serverfunktionen (include, searchJs_)
+    const val = new Function('mode', 'start', 'include', 'searchJs_', 'return (' + expr + ');')(tpl.mode, tpl.start, includeImpl, env.ctx.searchJs_);
     return kind === '!=' ? String(val) : escHtml(val);
   });
   return { html, scriptlets: seen };
@@ -69,7 +69,7 @@ function leaks(x, where, out) {
 // ---------------------------------------------------------------------------
 // Seite starten: echte Vorlage + echter Server
 // ---------------------------------------------------------------------------
-function boot(env, mode) {
+function boot(env, mode, opts) {
   let tpl;
   if (mode === 'sidebar') {
     const before = env.ui.sidebars.length;
@@ -91,7 +91,8 @@ function boot(env, mode) {
     return name === 'ImportUi' && !(REAL_IMPORTUI && real) ? IMPORT_STUB : real;
   };
   const ev = evaluateTemplate(env, tpl, includeImpl);
-  t.ok(mode + ': genau drei Scriptlets ausgewertet (mode, start, include)', ev.scriptlets.length === 3, ev.scriptlets);
+  t.ok(mode + ': genau vier Scriptlets ausgewertet (mode, start, Suchablauf, include)', ev.scriptlets.length === 4, ev.scriptlets);
+  t.ok(mode + ': der Suchablauf kommt mit (searchJs_)', ev.html.indexOf('window.SEARCH = (function () {') >= 0);
   t.ok(mode + ': START ist leer', /var START = '';/.test(ev.html));
   // die Handy-Seite hat keinen Import-Teil (#36 A3)
   t.ok(mode + ': include(ImportUi) ' + (mode === 'sidebar' ? 'aufgerufen' : 'nicht aufgerufen'), J(includeCalls) === J(mode === 'sidebar' ? ['ImportUi'] : []), includeCalls);
@@ -133,6 +134,7 @@ function boot(env, mode) {
         }
       };
       win.google = { script: { get run() { return makeRun(); } } };
+      if (opts && opts.fetch) win.fetch = opts.fetch; // tcgdex für die Suche direkt im Browser (#43)
     }
   });
   const win = dom.window, doc = win.document;
@@ -200,10 +202,8 @@ function dataRows(env) {
 
 function checkSheets(env, label) {
   const COL = env.run('COL');
-  // Änderungen speichern nur in Daten (#41): erst einsortieren, dann muss Gruppen der Neuberechnung aus Daten entsprechen
-  env.sortIn();
+  // Gruppen rechnet per Formel (#43) und muss gleich nach jeder Änderung der Neuberechnung aus Daten entsprechen
   const raw = env.run('readData_(sheet_(SHEETS.data))').filter(r => env.ctx.isDataRow_(r));
-  t.ok(label + ': eingesortiert, nichts mehr offen', env.ctx.pendingCount_(raw) === 0, env.ctx.pendingCount_(raw));
   const eids = raw.map(r => String(r[COL.eid]));
   t.ok(label + ': Eintrag-IDs eindeutig und gesetzt', eids.every(e => /^E[0-9a-f]{10}$/.test(e)) && new Set(eids).size === eids.length, eids);
   const badKey = raw.filter(r => String(r[COL.key]) !== env.ctx.entryKey_(r));
@@ -304,7 +304,7 @@ function seedImport(env) {
       { nr: 3, type: 'neu', eid: rA[COL.eid], fp: 'fpaaaaaaaaaa', qty: 1, data: { id: 'swsh3-025' }, sourceId: 'SRC1' },
       { nr: 3, type: 'neu', eid: rB[COL.eid], fp: 'fpbbbbbbbbbb', qty: 2, data: { id: 'swsh3-136' }, sourceId: 'SRC1' }
     ]);
-    c.rebuildGroups_();
+    c.afterDataChange_();
     return { eidA: String(rA[COL.eid]), eidB: String(rB[COL.eid]) };
   });
 }
@@ -321,15 +321,18 @@ function seedImport(env) {
     try { new vm.Script(code, { filename: 'Code.gs' }); } catch (e) { err = e.message; }
     t.ok('Code.gs kompiliert', !err, err);
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
+    const searchSrc = H.createEnv({ files: FILES.slice() }).ctx.searchJs_();
+    t.ok('searchJs_ liefert den Suchablauf (nicht null)', /^\(function \(\) \{/.test(searchSrc) && searchSrc.length > 5000, searchSrc.slice(0, 80));
     ['sidebar', 'web'].forEach(mode => {
       const html = raw.replace(/<\?!=\s*mode\s*\?>/g, mode).replace(/<\?!= typeof start[^?]*\?>/g, '')
+        .replace("<?!= typeof searchJs_ === 'function' ? searchJs_() : 'null' ?>", () => searchSrc)
         .replace(/<\?!= mode === 'sidebar' \? include\('ImportUi'\) : '' \?>/g, mode === 'sidebar' ? IMPORT_STUB : '');
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
       let bad = [];
       scripts.forEach((s, i) => { try { new vm.Script(s, { filename: 'Ui.html#' + i }); } catch (e) { bad.push(i + ': ' + e.message); } });
       t.ok('Ui.html (' + mode + '): ' + scripts.length + ' Skriptblöcke kompilieren', scripts.length >= (mode === 'sidebar' ? 2 : 1) && bad.length === 0, bad);
     });
-    t.ok('Ui.html: "<?" nur in den drei Scriptlets', (raw.match(/<\?/g) || []).length === 3);
+    t.ok('Ui.html: "<?" nur in den vier Scriptlets', (raw.match(/<\?/g) || []).length === 4);
     t.ok('Ui.html: kein Gedankenstrich (—)', raw.indexOf('—') < 0);
   }
 
@@ -338,12 +341,13 @@ function seedImport(env) {
   {
     const raw = fs.readFileSync(path.join(SRC, 'Ui.html'), 'utf8');
     const env = makeEnv();
-    const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g)].map(m => m[1]))].sort();
+    // call('…') und der Server-Weg der Suche (viaDirect(…, 'searchCards', [q]))
+    const names = [...new Set([...raw.matchAll(/call\('([A-Za-z0-9_]+)'/g), ...raw.matchAll(/\}, '([A-Za-z0-9_]+)', \[/g)].map(m => m[1]))].sort();
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
-    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'einsortieren', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
+    const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
-      'setPrereleases', 'takeoverPreview', 'takeoverRun', 'updateCopy'];
+      'setPrereleases', 'takeoverPreview', 'takeoverRun', 'translateCardName', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
     // Argumentreihenfolge wie in Code.gs
     const code = fs.readFileSync(path.join(SRC, 'Code.gs'), 'utf8');
@@ -351,7 +355,9 @@ function seedImport(env) {
     t.eq('adjustEntry(eid, delta)', sig('adjustEntry'), ['eid', 'delta']);
     t.eq('editEntry(eid, changes, qty)', sig('editEntry'), ['eid', 'changes', 'qty']);
     t.eq('setGroupOwnPrice(gkey, price)', sig('setGroupOwnPrice'), ['gkey', 'price']);
-    t.eq('linkFreeGroup(gkey, cardId, dataLang, variant)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant']);
+    t.eq('linkFreeGroup(gkey, cardId, dataLang, variant, cards)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant', 'cards']);
+    t.eq('getCardDetail(id, lang)', sig('getCardDetail'), ['id', 'lang']);
+    t.eq('getCardBySetNumber(setId, number)', sig('getCardBySetNumber'), ['setId', 'number']);
     t.eq('searchCollection(query, setText, opts)', sig('searchCollection'), ['query', 'setText', 'opts']);
     t.eq('revertAdjust(token)', sig('revertAdjust'), ['token']);
   }
@@ -367,10 +373,10 @@ function seedImport(env) {
   t.ok('Daten und Gruppen versteckt, Dashboard und Sammlung vorne', env.sheet('Daten').hidden && env.sheet('Gruppen').hidden &&
     env.ss.list[0].name === 'Dashboard' && env.ss.list[1].name === 'Sammlung', env.ss.list.map(x => x.name));
   t.eq('Sammlung-Kopf', env.values('Sammlung')[4].slice(0, 16), env.run('VIEW_HEADERS'));
-  t.ok('Sammlung-Formel liest Gruppen', /Gruppen!A2:AF,/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
+  t.ok('Sammlung-Formel liest Gruppen', /FILTER\(VSTACK\('Gruppen'!A2:AG, ""\)/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,einsortieren,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();
@@ -401,18 +407,11 @@ function seedImport(env) {
   let D = dataRows(env);
   const handA = D.find(r => r.eid === addRes.res.eid);
   t.ok('Daten: Zeile von Hand', handA && handA.origin === 'Hand' && handA.fp === '' && handA.lang === 'DE' && handA.version === '' && handA.count === 2 &&
-    handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '', handA); // Set-Datum holt das Einsortieren
+    handA.key === 'swsh3-025|normal||NM|DE' && handA.price === 1.5 && handA.ownPrice === '' && handA.setDate === '2020-08-14', handA); // Set-Datum gleich (#43)
   t.ok('Daten: Datum als Date', handA && handA.added instanceof Date || Object.prototype.toString.call(handA.added) === '[object Date]');
-  // Einsortieren (#41): nur Daten gespeichert, die Leiste nennt die Zahl, ihr Knopf sortiert ein
-  t.ok('Gruppen noch leer (nur Daten gespeichert)', env.groups().length === 0, env.groups().length);
-  t.ok('Leiste: 1 Änderung noch nicht einsortiert, mit Knopf', !$('sortBar').classList.contains('hidden') && $('sortBar').classList.contains('bad') &&
-    /1 Änderung ist noch nicht einsortiert/.test($('sortBar').textContent) && !!E.btn($('sortBar'), 'Einsortieren'), $('sortBar').textContent);
-  await E.clickSettle(E.btn($('sortBar'), 'Einsortieren'));
-  t.eq('Knopf ruft einsortieren({ui: true})', E.lastCall('einsortieren').args, [{ ui: true }]);
-  t.ok('Leiste grün mit Meldung, Gruppen und Set-Datum da', $('sortBar').classList.contains('good') && /1 Änderung einsortiert/.test($('sortBar').textContent) &&
-    env.groups().length === 1 && dataRows(env)[0].setDate === '2020-08-14', [$('sortBar').textContent, env.groups().length, dataRows(env)[0].setDate]);
-  E.click(E.btn($('sortBar'), '×'));
-  t.ok('Meldung lässt sich schließen', $('sortBar').classList.contains('hidden'));
+  // Die Tabelle rechnet selbst (#43): Gruppen gleich da, keine Leiste „Einsortieren“ mehr
+  t.ok('Gruppen gleich da, ohne Einsortieren', env.groups().length === 1 && !$('sortBar') && !('pending' in addRes.res),
+    [env.groups().length, !!$('sortBar'), addRes.res]);
   checkSheets(env, 'nach addCard');
   t.ok('kein Knopf „Nochmal +1“ mehr (#34)', !E.btn($('addLast'), 'Nochmal +1'));
   // dieselbe Karte noch einmal über das Formular: zählt in dieselbe Zeile
@@ -422,7 +421,6 @@ function seedImport(env) {
   await E.clickSettle($('cAdd'));
   t.ok('noch einmal hinzugefügt -> 3 Stück', /jetzt 3 Stück/.test($('addLast').textContent), $('addLast').textContent);
   t.ok('Daten: 3 Stück in derselben Zeile', dataRows(env).find(r => r.eid === handA.eid).count === 3 && E.lastCall('addCard').res.eid === handA.eid);
-  t.ok('Leiste wieder rot: 1 Änderung', /1 Änderung ist noch nicht einsortiert/.test($('sortBar').textContent) && E.lastCall('addCard').res.pending === 1, $('sortBar').textContent);
   checkSheets(env, 'nach dem zweiten Hinzufügen');
   let G = env.groups().find(g => g['Gruppenschlüssel'] === 'swsh3-025|normal|');
   t.ok('Gruppen: 3× DE NM, Preis 1,5, Preisstand Trend', G && G['Exemplare'] === '3× DE NM' && G['Anzahl'] === 3 && G['Preis (EUR)'] === 1.5 && G['Preisstand'] === '2026-10-13', G);
@@ -791,14 +789,7 @@ function seedImport(env) {
     mw.nameEn === 'Mewtwo' && mw.variant === 'reverse' && mw.cond === 'GD' && mw.lang === 'JP' && mw.count === 2 && mw.price === 3.25 && mw.key === 'old9-007|reverse||GD|JP', mw);
   const mi = E.gIdx('old9-007|reverse|');
   t.ok('UI: Titel mit (EN), Gruppe offen', mi >= 0 && /Mewtu Spezial \(EN\)/.test($('gh' + mi).querySelector('.t').textContent) && E.group('old9-007|reverse|').open);
-  // Einsortieren über die Leiste: das Set-Datum von old9 kommt dazu, deshalb lädt die Sammlung neu (#41)
-  const nCollSort = E.calls('getCollection').length;
-  t.ok('Leiste rot mit Knopf', /noch nicht einsortiert/.test($('sortBar').textContent) && !!E.btn($('sortBar'), 'Einsortieren'), $('sortBar').textContent);
-  await E.clickSettle(E.btn($('sortBar'), 'Einsortieren'));
-  t.ok('Einsortieren: Set-Datum geholt, Sammlung neu geladen', dataRows(env).find(r => r.id === 'old9-007').setDate === '2001-01-01' &&
-    E.lastCall('einsortieren').res.filled > 0 && E.calls('getCollection').length === nCollSort + 1 && E.group('old9-007|reverse|').open,
-    [E.lastCall('einsortieren').res, E.calls('getCollection').length - nCollSort]);
-  t.ok('Leiste grün mit Meldung', $('sortBar').classList.contains('good') && /^1 Änderung einsortiert\. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand\./.test($('sortBar').textContent), $('sortBar').textContent);
+  t.eq('Set-Datum gleich beim Verknüpfen geholt (#43)', mw.setDate, '2001-01-01');
   checkSheets(env, 'nach Verknüpfen (en)');
   checkUiMatchesServer(E, 'nach Verknüpfen (en)');
   // freie Holo-Karte: Holo bleibt beim Verknüpfen erhalten
@@ -825,13 +816,13 @@ function seedImport(env) {
   const ve = env.uiCall('setViewExtras', ['Ordner', 'Gibtsnicht']);
   t.eq('setViewExtras behält nur vorhandene', ve, { viewExtras: ['Ordner'] });
   const gh = env.values('Gruppen')[0];
-  t.ok('Gruppen: Spalte 33 = Ordner (nach den Hilfsspalten)', gh.length === 33 && gh[32] === 'Ordner', gh);
+  t.ok('Gruppen: Spalte 34 = Ordner (nach den Hilfsspalten und der Pokédex-Nr.)', gh.length === 34 && gh[32] === 'Pokédex-Nr.' && gh[33] === 'Ordner', gh);
   t.ok('Gruppen: Wert der Gruppe', env.groups().find(x => x['Gruppenschlüssel'] === GK)['Ordner'] === 'Seite 4');
   const view = env.sheet('Sammlung');
   t.ok('Sammlung: Kopf mit Ordner', view.getRange(5, 17).getValue() === 'Ordner' && view.getRange(5, 16).getValue() === 'Preisstand');
   const f = view.getRange('A6').getFormula();
-  t.ok('Formel liest Gruppen!A2:AG und zeigt Spalte 33', /Gruppen!A2:AG,/.test(f) && /CHOOSECOLS\(srt, 33\)\s*\)\)/.test(f) && !/Daten!/.test(f));
-  t.ok('Setliste aus Gruppen', /Gruppen!D2:D/.test(view.getRange('Z2').getFormula()));
+  t.ok('Formel liest Gruppen!A2:AH und zeigt Spalte 34', /'Gruppen'!A2:AH,/.test(f) && /CHOOSECOLS\(srt, 34\)\s*\)\)/.test(f) && !/Daten'?!/.test(f), f);
+  t.ok('Setliste aus Gruppen', /'Gruppen'!D2:D/.test(view.getRange('Z2').getFormula()), view.getRange('Z2').getFormula());
   const before = env.groups().find(x => x['Gruppenschlüssel'] === 'swsh3-025|normal|Snowflake');
   env.DB['de/cards/swsh3-025'] = H.card('swsh3-025', 'de', { pricing: { cardmarket: { trend: 2, 'trend-holo': 4, updated: '2026-10-15T00:00:00Z' } } });
   env.ctx.preiseJetztAktualisieren();
@@ -951,7 +942,7 @@ function seedImport(env) {
     t.ok('alte Einträge: Schlüssel v2, Herkunft Hand', nd.length === 3 && nd.every(r => r.origin === 'Hand' && r.lang === 'DE' && /^E[0-9a-f]{10}$/.test(r.eid)) &&
       nd.map(r => r.key).join(',') === 'swsh3-025|normal||NM|DE,swsh3-025|reverse|||DE,base1-4|holo||LP|DE', nd.map(r => r.key));
     const vf = nu.sheet('Sammlung').getRange('A6').getFormula();
-    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /Gruppen!A2:AF,/.test(vf) && !/Daten!/.test(vf));
+    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /'Gruppen'!A2:AG,/.test(vf) && !/Daten'?!/.test(vf), vf);
     t.ok('Sammlung: Suchfeld und Bilder-Schalter bleiben', nu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && nu.sheet('Sammlung').getRange('H4').getValue() === true);
     t.ok('Sammlung: Spalte Exemplare statt Zustand', nu.sheet('Sammlung').getRange(5, 6).getValue() === 'Exemplare');
     t.ok('Gruppen: 3 Gruppen', nu.groups().length === 3);
@@ -963,6 +954,120 @@ function seedImport(env) {
     t.ok('−1 auf alte Zeile geht', nu.data().find(r => r.key === 'swsh3-025|normal||NM|DE').count === 1);
     checkUiMatchesServer(U, 'nach Umstieg');
     t.ok('keine Skriptfehler (Umstieg)', U.errors.length === 0, U.errors);
+  }
+
+  // ---- 14b. Suche direkt im Browser (#43): echter Suchablauf aus searchJs_, die tcgdex-Attrappe antwortet auf fetch ----
+  t.section('Suche direkt im Browser');
+  {
+    const envD = makeEnv();
+    envD.ctx.onOpen();
+    envD.ctx.setupAll_();
+    const fetched = [];
+    const fakeFetch = url => {
+      fetched.push(String(url));
+      const body = envD.DB[decodeURIComponent(String(url).slice(H.API.length))];
+      return Promise.resolve({ status: body === undefined ? 404 : 200, ok: body !== undefined,
+        json: () => Promise.resolve(JSON.parse(JSON.stringify(body === undefined ? {} : body))) });
+    };
+    envD.ctx.addFreeCard({ name: 'Unbekannt', setName: 'Grundset', number: '4', qty: 1 }); // zum Verknüpfen weiter unten
+    const D = boot(envD, 'sidebar', { fetch: fakeFetch });
+    const $d = D.$;
+    await D.settle();
+    t.ok('Seite hat den Suchablauf', !!D.win.SEARCH && typeof D.win.SEARCH.search === 'function');
+    D.type($d('fName'), 'Glurak');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    const tiles = () => [...$d('addResults').querySelectorAll('.tile')];
+    t.ok('Glurak: drei Treffer, ohne Skriptaufruf', tiles().length === 3 && D.calls('searchCards').length === 0, D.callLog.map(c => c.fn));
+    t.ok('direkt bei tcgdex: Namensliste, Details, englische Daten für das fehlende Bild', fetched.some(u => /\/de\/cards\?name=Glurak$/.test(u)) &&
+      fetched.some(u => /\/de\/cards\/swsh3-136$/.test(u)) && fetched.some(u => /\/en\/cards\/base1-4$/.test(u)), fetched);
+    const k4 = tiles().findIndex(el => /· 4\//.test(el.textContent));
+    D.click(tiles()[k4]);
+    await D.settle();
+    t.ok('Antippen: Bestätigung sofort, mit Preis, ohne getCardDetail', !!$d('cAdd') && D.calls('getCardDetail').length === 0 &&
+      /Trend: 1,50/.test($d('cPrice').textContent) && /Holo/.test($d('addResults').textContent), [D.callLog.map(c => c.fn), $d('cPrice').textContent]);
+    const n0 = envD.fetchLog.length;
+    await D.clickSettle($d('cAdd'));
+    const add = D.lastCall('addCard');
+    t.ok('Hinzufügen schickt die Kartendaten mit (deutsch und englisch)', !!add && J((add.args[0].cards || []).map(c => c.lang + ':' + c.id)) === J(['de:base1-4', 'en:base1-4']),
+      add && add.args[0]);
+    t.ok('der Server holt die Karte nicht noch einmal', !!add && !add.error && !envD.fetchLog.slice(n0).some(u => /\/cards\//.test(u)), envD.fetchLog.slice(n0));
+    t.ok('gespeichert mit dem Bild aus den englischen Daten', /en\/x\/base1-4/.test(envD.data().find(r => r.id === 'base1-4').img));
+    // nichts Deutsches: nur die Übersetzung fragt beim Server
+    D.type($d('fName'), 'Mewtu');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    t.ok('Mewtu: einziger Skriptaufruf ist die Übersetzung, englische Ersatzdaten', D.calls('translateCardName').length === 1 && D.calls('searchCards').length === 0 &&
+      /Englische Ersatzdaten/.test($d('addResults').textContent) && !!$d('cAdd'), [D.callLog.map(c => c.fn), $d('addResults').textContent.slice(0, 160)]);
+    // Kartenzahl hinter der Nummer: die Sets kommen einmal von tcgdex
+    D.click(D.btn($d('addResults'), 'Zurück'));
+    D.type($d('fName'), 'Glurak'); D.type($d('fNumber'), '25/189');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    D.type($d('fName'), 'Glurak'); D.type($d('fNumber'), '136/189');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    t.ok('mit Kartenzahl: Treffer, die Sets nur einmal geholt', !!$d('cAdd') && /136\/189/.test($d('addResults').textContent) &&
+      fetched.filter(u => /\/de\/sets$/.test(u)).length === 1 && fetched.filter(u => /\/en\/sets$/.test(u)).length === 1, fetched.filter(u => /sets/.test(u)));
+    t.ok('Preis aus den englischen Daten (deutsch fehlt er)', /Preis aus den englischen tcgdex-Daten/.test($d('addResults').textContent));
+    // Set-Auswahl: Liste aus den tcgdex-Sets, die Karte direkt
+    D.type($d('fName'), 'Unbekannt'); D.type($d('fNumber'), '4');
+    await D.clickSettle(D.btn($d('searchForm'), 'Suchen'));
+    const setTiles = [...$d('addResults').querySelectorAll('.tile.set')];
+    t.ok('Set-Auswahl mit den Sets von tcgdex', setTiles.length >= 2 && /Grundset/.test($d('addResults').textContent), $d('addResults').textContent.slice(0, 200));
+    D.click(setTiles.find(el => /base1/.test(el.textContent)));
+    await D.settle();
+    t.ok('Set gewählt: Karte direkt, ohne getCardBySetNumber', !!$d('cAdd') && D.calls('getCardBySetNumber').length === 0 && /Grundset|Flammende/.test($d('addResults').textContent),
+      [D.callLog.map(c => c.fn), $d('addResults').textContent.slice(0, 160)]);
+    // Verknüpfen: dieselbe Suche, die Karte geht mit
+    await D.clickSettle($d('tabColl'));
+    const fk = 'frei:unbekannt~grundset~4|normal|';
+    const fi = D.gIdx(fk);
+    D.expand(fi);
+    D.click(D.btn($d('gl' + fi), 'Mit tcgdex-Karte verknüpfen'));
+    D.type($d('lkName' + fi), 'Glurak');
+    await D.clickSettle(D.btn($d('gl' + fi), 'Suchen'));
+    const lt = $d('lkRes' + fi).querySelectorAll('.tile');
+    t.ok('Verknüpfen: Treffer direkt, ohne searchCards', lt.length === 1 && D.calls('searchCards').length === 0, [lt.length, $d('lkRes' + fi).textContent.slice(0, 120)]);
+    const n1 = envD.fetchLog.length;
+    await D.clickSettle(lt[0]);
+    const lk = D.lastCall('linkFreeGroup');
+    t.ok('linkFreeGroup bekommt die Kartendaten mit, der Server holt nichts', !!lk && !lk.error && lk.args.length === 5 &&
+      J(lk.args[4].map(c => c.lang + ':' + c.id)) === J(['de:base1-4', 'en:base1-4']) && !envD.fetchLog.slice(n1).some(u => /\/cards\//.test(u)),
+      lk && [lk.args.slice(0, 4), lk.error, envD.fetchLog.slice(n1)]);
+    t.ok('keine Skriptfehler (direkt)', D.errors.length === 0, D.errors);
+  }
+  {
+    // der Browser kommt nicht durch (z. B. gesperrt): der Server sucht, danach bleibt es für diese Seite beim Server
+    const envF = makeEnv();
+    envF.ctx.onOpen();
+    envF.ctx.setupAll_();
+    let tries = 0;
+    const F = boot(envF, 'sidebar', { fetch: () => { tries++; return Promise.reject(new TypeError('Failed to fetch')); } });
+    await F.settle();
+    F.type(F.$('fName'), 'Glurak');
+    await F.clickSettle(F.btn(F.$('searchForm'), 'Suchen'));
+    t.ok('gesperrt: der Server sucht, die Treffer kommen', F.calls('searchCards').length === 1 && F.$('addResults').querySelectorAll('.tile').length === 3 && tries > 0,
+      [F.callLog.map(c => c.fn), tries]);
+    const t1 = tries;
+    F.click(F.$('addResults').querySelectorAll('.tile')[0]);
+    await F.settle();
+    t.ok('Antippen: Treffer vom Server haben Preise, kein zweiter Aufruf', !!F.$('cAdd') && F.calls('getCardDetail').length === 0, F.callLog.map(c => c.fn));
+    F.type(F.$('fName'), 'Mewtu');
+    await F.clickSettle(F.btn(F.$('searchForm'), 'Suchen'));
+    t.ok('danach gleich über den Server, ohne neuen Versuch im Browser', F.calls('searchCards').length === 2 && tries === t1 && !!F.$('cAdd'), [tries, t1]);
+    t.ok('keine Skriptfehler (gesperrt)', F.errors.length === 0, F.errors);
+  }
+  {
+    // tcgdex antwortet aus dem Browser gar nicht: nach 8 Sekunden sucht der Server
+    const envS = makeEnv();
+    envS.ctx.onOpen();
+    envS.ctx.setupAll_();
+    const S = boot(envS, 'sidebar', { fetch: () => new Promise(() => {}) });
+    await S.settle();
+    S.type(S.$('fName'), 'Glurak');
+    await S.clickSettle(S.btn(S.$('searchForm'), 'Suchen'));
+    t.ok('tcgdex hängt: es wird noch gesucht, kein Serveraufruf', S.calls('searchCards').length === 0 && /Suche bei tcgdex/.test(S.$('addResults').textContent));
+    S.win.__advance(8000);
+    await S.settle();
+    t.ok('nach 8 Sekunden: der Server sucht', S.calls('searchCards').length === 1 && S.$('addResults').querySelectorAll('.tile').length === 3, S.callLog.map(c => c.fn));
+    t.ok('keine Skriptfehler (hängt)', S.errors.length === 0, S.errors);
   }
 
   // ---- 15. Fehlerpfade über die echte Brücke ----

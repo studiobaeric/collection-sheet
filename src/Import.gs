@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.1.3
+ *  Pokémon-Sammlung · Version 1.2.0
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -14,7 +14,7 @@
  * ========================================================================= */
 
 /** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
-const IMPORT_FILE_VERSION = '1.1.3';
+const IMPORT_FILE_VERSION = '1.2.0';
 
 const IMP_SHEETS = {
   imports: 'Importe',
@@ -4074,10 +4074,10 @@ function prFinish_(imp, ap, opt) {
     n = String(n == null ? '' : n).trim();
     if (n && existing.indexOf(n) >= 0 && cur.indexOf(n) < 0 && addNames.indexOf(n) < 0) addNames.push(n);
   });
-  // Der Import ist hier schon fertig: scheitert nur der Neuaufbau der Ansicht, bleibt er trotzdem 'aktiv'
+  // Der Import ist hier schon fertig: scheitert nur das Nachziehen der Ansicht, bleibt er trotzdem 'aktiv'
   try {
     if (addNames.length) setViewExtras_(cur.concat(addNames));
-    else rebuildGroups_();
+    afterDataChange_();
   } catch (e) {
     ap.notes.push('Die Sammlung konnte nicht neu aufgebaut werden (' + e.message + '). Bitte im Menü „Ansicht neu aufbauen“ wählen.');
   }
@@ -4579,7 +4579,8 @@ function importUndo(nr, decisions) {
       const view = getViewExtras_();
       if (dropped.some(function (n) { return view.indexOf(n) >= 0; })) {
         setViewExtras_(view.filter(function (n) { return dropped.indexOf(n) < 0; }));
-      } else rebuildGroups_();
+      }
+      afterDataChange_();
       let msg = 'Import ' + nr + ' ist zurückgenommen: ' + prN_(deleted, 'Eintrag', 'Einträge') + ' gelöscht';
       if (kept) msg += ', ' + kept + ' behalten (jetzt von Hand)';
       if (restored) msg += ', ' + restored + ' auf den alten Stand gesetzt';

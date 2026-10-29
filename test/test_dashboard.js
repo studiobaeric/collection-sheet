@@ -25,18 +25,31 @@ const cell = (env, a1) => dash(env).getRange(a1).getValue();
 const assetFetches = env => env.fetchLog.filter(u => ASSET_RE.test(u));
 const buttons = env => dash(env).getImages().filter(i => /^Dashboard-Knopf /.test(i.getAltTextDescription()));
 const add = (env, extra) => env.ctx.addCard(Object.assign({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 }, extra || {}));
-const refresh = env => env.ctx.refreshDashboard_(env.ctx.readData_(env.sheet('Daten')));
+const header = env => env.ctx.refreshDashboardHeader_();
 const today = env => env.ctx.dateText_(new Date());
 const shift = (env, days) => env.ctx.dashDayShift_(today(env), days);
-const short = (env, ymd) => env.ctx.dashShortDate_(ymd, today(env));
-/** Blatt Verlauf mit diesen Einträgen [['yyyy-MM-dd', Gesamtwert], …] (Datum als Date wie beim Preislauf) */
+/** 'yyyy-MM-dd' -> 'dd.MM.' im laufenden Jahr, sonst 'dd.MM.yyyy' (wie die Formel in C7) */
+const short = (env, ymd) => { const p = ymd.split('-'); return p[2] + '.' + p[1] + '.' + (p[0] === today(env).slice(0, 4) ? '' : p[0]); };
+/** Schriftfarbe einer Zelle samt bedingter Regeln „Text beginnt mit“ (C7: Plus grün, Minus rot) */
+function fontColor(env, a1) {
+  const sh = dash(env);
+  const text = String(cell(env, a1));
+  const rule = sh.getConditionalFormatRules().find(r => typeof r.arg('whenTextStartsWith') === 'string' &&
+    r.arg('setRanges')[0].getA1Notation() === a1 && text.indexOf(r.arg('whenTextStartsWith')) === 0);
+  return rule ? rule.arg('setFontColor') : sh.getRange(a1).getFontColor();
+}
+/**
+ * Blatt Verlauf mit diesen Einträgen [['yyyy-MM-dd', Gesamtwert], …] (Datum als Date wie beim Preislauf). Mit 'text'
+ * als drittem Wert bleibt das Datum Text; anderer Text in der Datumsspalte (z. B. „Summe“) bleibt immer Text.
+ */
 function history(env, list) {
   const sh = env.sheet('Verlauf');
   if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 5).clearContent();
   if (!list.length) return;
   sh.getRange(2, 1, list.length, 5).setValues(list.map(x => {
     const p = x[0].split('-').map(Number);
-    return [typeof x[2] === 'string' ? x[0] : new Date(p[0], p[1] - 1, p[2]), x[1], 1, 0, 0];
+    const asText = typeof x[2] === 'string' || !/^\d{4}-\d\d-\d\d$/.test(x[0]);
+    return [asText ? x[0] : new Date(p[0], p[1] - 1, p[2]), x[1], 1, 0, 0];
   }));
 }
 
@@ -47,7 +60,7 @@ const ASSETS = H.createEnv().run('DASH_ASSETS');
 t.section('Knöpfe: Liste, Funktionen, Bilder im Repo');
 {
   const env = H.createEnv();
-  eq('12 Knöpfe: 8 Aktionen, 4 Blätter', BTN.map(b => b.key + (b.nav ? ' (Blatt)' : '')), ['erfassen', 'einsortieren', 'preise', 'import', 'updates', 'sets', 'ansicht', 'handy',
+  eq('11 Knöpfe: 7 Aktionen, 4 Blätter (ohne Einsortieren, #43)', BTN.map(b => b.key + (b.nav ? ' (Blatt)' : '')), ['erfassen', 'preise', 'import', 'updates', 'sets', 'ansicht', 'handy',
     'sammlung (Blatt)', 'pokedex (Blatt)', 'verlauf (Blatt)', 'seltenheiten (Blatt)']);
   ok('jede Funktion ist öffentlich und vorhanden', BTN.every(b => !/_$/.test(b.fn) && typeof env.ctx[b.fn] === 'function'), BTN.filter(b => typeof env.ctx[b.fn] !== 'function'));
   eq('Zeichen-Skript und Code.gs: gleiche Schlüssel und Beschriftungen', KN.BUTTONS.map(b => [b.key, b.label]), BTN.map(b => [b.key, b.label]));
@@ -65,7 +78,7 @@ t.section('Knöpfe: Liste, Funktionen, Bilder im Repo');
   ok('Bilder fest auf einen Commit (nicht main)', /^https:\/\/raw\.githubusercontent\.com\/studiobaeric\/collection-sheet\/[0-9a-f]{40}\/assets\/dashboard\/$/.test(ASSETS), ASSETS);
   eq('Lage der Knöpfe', BTN.map((b, i) => J(env.ctx.dashButtonCell_(i))), [
     '{"row":12,"col":2}', '{"row":12,"col":6}', '{"row":12,"col":10}', '{"row":12,"col":14}',
-    '{"row":13,"col":2}', '{"row":13,"col":6}', '{"row":13,"col":10}', '{"row":13,"col":14}',
+    '{"row":13,"col":2}', '{"row":13,"col":6}', '{"row":13,"col":10}',
     '{"row":17,"col":2}', '{"row":17,"col":6}', '{"row":17,"col":10}', '{"row":17,"col":14}']);
 }
 
@@ -95,7 +108,7 @@ t.section('Einrichtung legt das Dashboard an');
     env.setupMsg.indexOf(env.run('DASH_LOAD_FAILED')) < 0, [env.setupMsg, env.ui.alerts]);
   ok('Gitternetz aus, Hilfsspalten R:T versteckt', sh.hasHiddenGridlines() && [18, 19, 20].every(k => sh.isColumnHiddenByUser(k)) && !sh.isColumnHiddenByUser(17));
   eq('Kopf', [cell(env, 'C2'), cell(env, 'O2')], ['Pokémon-Sammlung', 'Version ' + env.run('TOOL_VERSION')]);
-  ok('Stand ohne Preislauf', /^Stand \d\d\.\d\d\.\d{4} \d\d:\d\d · noch kein Preislauf$/.test(cell(env, 'C3')), cell(env, 'C3'));
+  eq('Stand ohne Preislauf', cell(env, 'C3'), 'Noch kein Preislauf');
   eq('Überschriften der Kacheln', ['C5', 'G5', 'K5', 'O5'].map(a => cell(env, a)), ['GESAMTWERT', 'KARTEN', 'POKÉDEX · 0,0 %', 'WERTVERLAUF · 90 TAGE']);
   eq('leere Sammlung', ['C6', 'G6', 'K6', 'C7', 'G7'].map(a => cell(env, a)), [0, 0, '0 von 1025', 'Noch kein Verlauf', '']);
   eq('Abschnitte und Hinweis', [cell(env, 'C10'), cell(env, 'C15'), cell(env, 'C19')], ['Aktionen', 'Blätter', env.run('DASH_HELP')]);
@@ -108,7 +121,7 @@ t.section('Einrichtung legt das Dashboard an');
   ok('Wertverlauf leer', sh.getRange('R2:R91').getValues().every(r => r[0] === ''));
   // Knöpfe
   const imgs = buttons(env);
-  eq('12 Knöpfe, je einmal geladen', [imgs.length, assetFetches(env).length], [12, 12]);
+  eq('11 Knöpfe, je einmal geladen', [imgs.length, assetFetches(env).length], [11, 11]);
   eq('geladen von DASH_ASSETS', assetFetches(env).map(u => u.slice(ASSETS.length)).sort(), BTN.map(b => b.key + '.png').sort());
   const wrong = BTN.map((b, i) => {
     const img = imgs.find(x => x.getAltTextDescription() === 'Dashboard-Knopf ' + b.key + ' v' + env.run('DASH_ASSET_VERSION'));
@@ -129,16 +142,14 @@ t.section('Einrichtung legt das Dashboard an');
 t.section('Kennzahlen nach Änderungen');
 {
   const env = setup();
+  const w0 = env.writesBy['Dashboard'] || 0;
   add(env, { qty: 2 });
+  eq('erste Karte: Kacheln gleich da (Formeln, #43)', ['G6', 'K6'].map(a => cell(env, a)), [2, '1 von 1025']);
   add(env, { variant: 'reverse' });
-  // nur gespeichert (#41): die Kacheln stehen noch auf dem alten Stand, darunter der rote Hinweis
-  eq('nur gespeichert: Kacheln beim alten Stand', ['C6', 'G6', 'K6'].map(a => cell(env, a)), [0, 0, '0 von 1025']);
-  const f9 = dash(env).getRange('C9').getFormula();
-  ok('Hinweis unter den Kacheln: Formel mit der Zahl, rot', /^=LET\(offen, SUMPRODUCT\(ISNUMBER\(Daten!V2:V\)\*\(Daten!V2:V>MAX\(Gruppen!V2:V\)\)\), IF\(offen>0, "⚠ "&offen&/.test(f9) &&
-    /noch nicht einsortiert, die Zahlen zeigen den alten Stand\. Knopf Einsortieren unten", ""\)\)$/.test(f9) &&
-    dash(env).getRange('C9').getFontColor() === env.run('DASH_COLORS').warn, f9);
-  env.ctx.einsortieren(); // wie der Knopf im Dashboard (ohne Argument)
-  ok('Knopf Einsortieren: Meldung unten rechts', env.ss.toasts.slice(-1)[0] === '2 Änderungen einsortiert. Sammlung, Pokédex und Dashboard sind auf dem neuesten Stand.', env.ss.toasts.slice(-2));
+  eq('Hinzufügen schreibt nichts ins Dashboard', (env.writesBy['Dashboard'] || 0) - w0, 0);
+  eq('kein Hinweis „noch nicht einsortiert“ mehr', [dash(env).getRange('C9').getFormula(), cell(env, 'C9')], ['', '']);
+  env.ctx.einsortieren(); // alter Knopf in einer Tabelle, deren Dashboard noch nicht neu aufgebaut ist
+  eq('alter Knopf Einsortieren: nur ein Hinweis', env.ss.toasts.slice(-1)[0], 'Einsortieren ist nicht mehr nötig: Sammlung, Pokédex und Dashboard rechnen jetzt von selbst.');
   const v = env.ctx.collectionValue_(env.ctx.readData_(env.sheet('Daten')));
   ok('Wert der Sammlung > 0', v.total > 0 && v.cards === 3, v);
   eq('Gesamtwert, Karten, Pokédex', ['C6', 'G6', 'K6'].map(a => cell(env, a)), [v.total, 3, '1 von 1025']);
@@ -155,10 +166,6 @@ t.section('Kennzahlen nach Änderungen');
   data.getRange(r, COL.count + 1).setValue(0);
   env.ctx.onEdit({ range: data.getRange(r, COL.count + 1) });
   eq('eine Karte: kein Zusatz', [cell(env, 'G6'), cell(env, 'G7')], [1, '']);
-  // Schreibvorgänge: Kopf, zwei Kachelzeilen, Unterzeile, Hilfsspalten
-  const d0 = env.writesBy['Dashboard'] || 0;
-  refresh(env);
-  ok('Neuberechnung in 5 Schreibvorgängen', (env.writesBy['Dashboard'] || 0) - d0 === 5, (env.writesBy['Dashboard'] || 0) - d0);
   ok('Formeln bleiben stehen', /SPARKLINE/.test(dash(env).getRange('O6').getFormula()) && /SPARKLINE/.test(dash(env).getRange('K7').getFormula()));
 }
 
@@ -169,36 +176,31 @@ t.section('Veränderung des Gesamtwerts seit 7 Tagen');
   add(env, { qty: 4 });
   const total = env.ctx.collectionValue_(env.ctx.readData_(env.sheet('Daten'))).total;
   const c = env.run('DASH_COLORS');
-  const color = () => dash(env).getRange('C7').getFontColor();
+  const color = () => fontColor(env, 'C7');
   history(env, []);
-  refresh(env);
   eq('ohne Verlauf', [cell(env, 'C7'), color()], ['Noch kein Verlauf', c.sub]);
   history(env, [[today(env), total]]);
-  refresh(env);
   eq('nur heute: ab wann es einen Vergleich gibt', cell(env, 'C7'), 'Vergleich ab ' + short(env, shift(env, 7)));
   history(env, [[shift(env, -3), total - 1], [today(env), total]]);
-  refresh(env);
   eq('jüngster Eintrag 3 Tage alt: noch kein Vergleich', cell(env, 'C7'), 'Vergleich ab ' + short(env, shift(env, 4)));
   history(env, [[shift(env, -7), total - 12.4], [shift(env, -1), total - 2]]);
-  refresh(env);
   eq('genau 7 Tage: plus, grün', [cell(env, 'C7'), color()], ['+12,40 € seit ' + short(env, shift(env, -7)), c.up]);
   history(env, [[shift(env, -20), total + 50], [shift(env, -9), total + 3.1], [shift(env, -5), total - 9]]);
-  refresh(env);
   eq('Tag fehlt: der nächstältere, minus, rot', [cell(env, 'C7'), color()], ['−3,10 € seit ' + short(env, shift(env, -9)), c.down]);
   history(env, [[shift(env, -8), total]]);
-  refresh(env);
   eq('gleich geblieben', [cell(env, 'C7'), color()], ['±0,00 € seit ' + short(env, shift(env, -8)), c.sub]);
   history(env, [[shift(env, -7), total - 1000], [shift(env, -7), total - 1234.5]]);
-  refresh(env);
   eq('zwei Einträge am selben Tag: der letzte zählt, Tausenderpunkt', cell(env, 'C7'), '+1.234,50 € seit ' + short(env, shift(env, -7)));
   history(env, [[shift(env, -7), total - 5, 'text'], ['Summe', 99]]);
-  refresh(env);
   eq('Datum als Text yyyy-MM-dd zählt, andere Zeilen nicht', cell(env, 'C7'), '+5,00 € seit ' + short(env, shift(env, -7)));
+  history(env, [[shift(env, -400), total - 3]]);
+  eq('Datum aus einem anderen Jahr: mit Jahr', cell(env, 'C7'), '+3,00 € seit ' + short(env, shift(env, -400)));
+  ok('… und das Jahr steht wirklich da', /\.\d{4}$/.test(cell(env, 'C7')), cell(env, 'C7'));
+  history(env, [[shift(env, -7), total - 1234567.891]]);
+  eq('Millionen mit zwei Tausenderpunkten, auf Cent gerundet', cell(env, 'C7'), '+1.234.567,89 € seit ' + short(env, shift(env, -7)));
   // Hilfen
-  eq('Datum kurz: im selben Jahr ohne Jahr', [env.ctx.dashShortDate_('2026-10-15', '2026-10-22'), env.ctx.dashShortDate_('2025-12-30', '2026-01-03')], ['15.10.', '30.12.2025']);
   eq('Tage verschieben über Monats- und Jahresgrenzen', [env.ctx.dashDayShift_('2026-03-01', -1), env.ctx.dashDayShift_('2024-03-01', -1), env.ctx.dashDayShift_('2026-12-31', 1),
     env.ctx.dashDayShift_('2026-10-22', -7)], ['2026-02-28', '2024-02-29', '2027-01-01', '2026-10-15']);
-  eq('Euro', [env.ctx.dashEur_(0), env.ctx.dashEur_(1234.5), env.ctx.dashEur_(1234567.891), env.ctx.dashEur_(-2.005)], ['0,00 €', '1.234,50 €', '1.234.567,89 €', '2,01 €']);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,18 +211,16 @@ t.section('Wertverlauf und Preislauf');
   const list = [];
   for (let d = -120; d <= -1; d++) list.push([shift(env, d), 100 + d]);
   history(env, list);
-  refresh(env);
   const r = dash(env).getRange('R2:R91').getValues().map(x => x[0]);
   ok('nur die letzten 90 Tage, älteste zuerst', r.length === 90 && r[0] === 100 - 89 && r[88] === 99 && r[89] === '', [r[0], r[88], r[89]]);
   history(env, list.slice(-3));
-  refresh(env);
   const r2 = dash(env).getRange('R2:R91').getValues().map(x => x[0]);
   ok('kürzerer Verlauf: Rest leer', r2.slice(0, 3).join() === '97,98,99' && r2.slice(3).every(x => x === ''), r2.slice(0, 5));
   // Preislauf schreibt Verlauf und Kopfzeile
   history(env, []);
   env.ctx.preiseJetztAktualisieren();
   const total = env.ctx.collectionValue_(env.ctx.readData_(env.sheet('Daten'))).total;
-  ok('nach dem Preislauf: Preise vom heute', new RegExp(' · Preise vom ' + env.ctx.dmyText_(today(env)).replace(/\./g, '\\.') + '$').test(cell(env, 'C3')), cell(env, 'C3'));
+  eq('nach dem Preislauf: Preise vom heute', cell(env, 'C3'), 'Preise vom ' + env.ctx.dmyText_(today(env)));
   eq('heutiger Wert im Wertverlauf', dash(env).getRange('R2').getValue(), total);
 }
 
@@ -230,17 +230,17 @@ t.section('Hinweis auf neue Version');
   const env = setup();
   const v = env.run('TOOL_VERSION');
   env.cache.set('UPD_CHANNEL', J({ releases: [{ version: '9.9.9', prerelease: false, notes: [] }] }));
-  refresh(env);
+  header(env);
   eq('neue Version aus dem Zwischenspeicher', cell(env, 'O2'), 'Version ' + v + ' · Version 9.9.9 ist da');
   env.cache.set('UPD_CHANNEL', J({ releases: [{ version: '9.9.9-beta.1', prerelease: true, notes: [] }] }));
-  refresh(env);
+  header(env);
   eq('Vorabversion nur mit Vorabversionen an', cell(env, 'O2'), 'Version ' + v);
   env.cache.set('UPD_CHANNEL', '{kaputt');
-  refresh(env);
+  header(env);
   eq('kaputter Zwischenspeicher: nur die Version', cell(env, 'O2'), 'Version ' + v);
   const n = env.httpLog.length + env.fetchLog.length;
   env.cache.clear();
-  refresh(env);
+  header(env);
   ok('ohne Zwischenspeicher kein Abruf', env.httpLog.length + env.fetchLog.length === n && cell(env, 'O2') === 'Version ' + v);
   // nächtlicher Lauf: erst Preise, dann die Prüfung auf Updates; das Dashboard zeigt die neue Version danach gleich
   env.http = url => (/\/releases\/channel\.json/.test(url) ? { code: 200, body: J({ repo: 'studiobaeric/collection-sheet', templateUrl: '', releases: [
@@ -345,7 +345,7 @@ t.section('Blätter öffnen, Dashboard, Import');
   // Dashboard gelöscht: Menü baut es wieder auf
   env.ss.deleteSheet(dash(env));
   add(env);
-  ok('ohne Dashboard: Änderungen legen keins an', !env.sheet('Dashboard') && env.ctx.refreshDashboard_([]) === false);
+  ok('ohne Dashboard: Änderungen legen keins an', !env.sheet('Dashboard') && env.ctx.refreshDashboardHeader_() === false);
   env.ctx.zumDashboard();
   ok('Menü Dashboard: neu aufgebaut, vorne, offen, mit Knöpfen', env.ss.list[0].name === 'Dashboard' && active() === 'Dashboard' && buttons(env).length === BTN.length && cell(env, 'G6') === 1);
   // Importieren: Seitenleiste im Bereich Import

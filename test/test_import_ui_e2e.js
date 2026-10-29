@@ -871,10 +871,8 @@ function missingPaths(res, paths) {
   await E.clickSettle(E.btn(E.$('ge' + des), 'Speichern'), 'Speichern');
   t.ok('Bearbeiten: gespeichert, ohne die Liste neu zu laden', rowsOf(env, 1).find((d) => d.name === 'Despotar').cond === 'LP' &&
     !/speichert/.test(E.$('gh' + des).textContent) && /1× DE LP · Pokemon Ordner\.xlsx, Import 1/.test(E.$('gr' + des).textContent), E.$('gr' + des).textContent);
-  // beide Änderungen stehen nur in Daten, bis jemand einsortiert (#41)
-  t.ok('Leiste: 2 Änderungen noch nicht einsortiert', /2 Änderungen sind noch nicht einsortiert/.test(E.$('sortBar').textContent), E.$('sortBar').textContent);
-  await E.clickSettle(E.btn(E.$('sortBar'), 'Einsortieren'), 'Einsortieren');
-  t.ok('Einsortiert: Leiste grün', E.$('sortBar').classList.contains('good') && /2 Änderungen einsortiert/.test(E.$('sortBar').textContent), E.$('sortBar').textContent);
+  // beide Änderungen stehen gleich in Gruppen und Sammlung (Formeln, #43), ohne Leiste „Einsortieren“
+  t.ok('keine Leiste „Einsortieren“', !E.$('sortBar'));
   checkSheets(env, 'Nach der Sammlung', { verlauf: VERLAUF });
 
   /* ---------------- 9. Zurücknehmen ---------------- */
