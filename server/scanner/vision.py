@@ -42,8 +42,10 @@ def find_cards(img):
     h, w = img.shape[:2]
     scale = 1000.0 / max(h, w)
     small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
-    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0)
-    edges = cv2.dilate(cv2.Canny(gray, 30, 100), np.ones((3, 3), np.uint8), iterations=2)
+    # Kanten je Farbkanal: ein gelber Rand auf hellgrauem Grund ist in Graustufen fast unsichtbar, im Blaukanal nicht
+    blur = cv2.GaussianBlur(small, (5, 5), 0)
+    edges = np.max([cv2.Canny(blur[:, :, k], 30, 100) for k in range(3)], axis=0)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     area_img = small.shape[0] * small.shape[1]
     found = []
@@ -134,6 +136,14 @@ def num_key(s):
     return (m.group(1), int(m.group(2))) if m else str(s).strip().upper()
 
 
+def num_match(local_id, num):
+    """Passt die gelesene Nummer zur Karte? Ohne Buchstaben auf der Karte zählen nur die Ziffern („DE136“ = „136“)."""
+    a, b = num_key(local_id), num_key(num)
+    if isinstance(a, tuple) and isinstance(b, tuple) and not a[0]:
+        return a[1] == b[1]
+    return a == b
+
+
 class NumberReader:
     """Liest die Nummer unten auf der Karte (PP-OCR-Modelle von PaddleOCR über RapidOCR, ohne Download)."""
 
@@ -191,11 +201,10 @@ def rank(sims, meta, number, top=3):
     """Ähnlichkeiten einer Karte zu allen im Index -> die besten `top` nach Bild und Nummer"""
     k = min(TOP_K, len(sims))
     idx = np.argpartition(-sims, k - 1)[:k]
-    want = num_key(number['num']) if number else None
     out = []
     for i in idx:
         m = meta[i]
-        hit = want is not None and num_key(m['localId']) == want
+        hit = bool(number) and num_match(m['localId'], number['num'])
         bonus = NUM_BONUS if hit else 0.0
         if hit and number.get('total') and m.get('official') == number['total']:
             bonus += TOTAL_BONUS

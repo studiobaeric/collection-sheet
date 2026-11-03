@@ -85,6 +85,8 @@ def test_parse_number():
     assert p('') is None and p('Illus. Ken Sugimori') is None
     assert vision.num_key('025') == vision.num_key('25') == ('', 25)
     assert vision.num_key('TG05') == ('TG', 5)
+    assert vision.num_match('136', 'DE136') and vision.num_match('025', '25') and vision.num_match('TG05', 'TG5')
+    assert not vision.num_match('TG05', '5') and not vision.num_match('136', '137')
 
 
 def test_find_cards_binder_page_in_reading_order():
