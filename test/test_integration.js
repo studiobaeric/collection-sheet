@@ -355,7 +355,7 @@ function seedImport(env) {
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
     const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCardForms', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
-      'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
+      'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'scanPage', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'translateCardName', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
     // Argumentreihenfolge wie in Code.gs
@@ -385,7 +385,7 @@ function seedImport(env) {
   t.ok('Sammlung-Formel liest Gruppen', /FILTER\(VSTACK\('Gruppen'!A2:AG, ""\)/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen,kartenerkennungEinrichten', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();
@@ -1182,6 +1182,114 @@ function seedImport(env) {
     await S.settle();
     t.ok('nach 8 Sekunden: der Server sucht', S.calls('searchCards').length === 1 && S.$('addResults').querySelectorAll('.tile').length === 3, S.callLog.map(c => c.fn));
     t.ok('keine Skriptfehler (hängt)', S.errors.length === 0, S.errors);
+  }
+
+  // ---- Kartenerkennung aus Fotos (#19): Einrichten im Menü, Foto, Liste, Hinzufügen ----
+  t.section('Kartenerkennung (#19)');
+  {
+    const envK = makeEnv();
+    envK.ctx.onOpen();
+    envK.ctx.setupAll_();
+    envK.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1 }); // schon in der Sammlung
+    const K0 = boot(envK, 'sidebar', {});
+    await K0.settle();
+    t.ok('ohne Adresse: Foto-Knopf ausgeblendet', K0.$('scanBox').classList.contains('hidden'));
+    t.ok('ohne Adresse: scanPage erklärt das Einrichten', /Kartenerkennung einrichten/.test((() => { try { envK.ctx.scanPage('QUJD'); return ''; } catch (e) { return e.message; } })()));
+
+    const cand = (id, name, localId, official, owned) => ({ id, name, localId, setId: id.split('-')[0], setName: 'Set', official,
+      image: 'https://assets.tcgdex.net/en/x/' + id.split('-')[0] + '/' + localId, score: 0.9, numberMatch: true });
+    let answer = null, check = null;
+    const sent = [];
+    envK.http = (url, opt) => {
+      if (url !== 'https://karten.example.de/scan') return undefined;
+      const body = JSON.parse(opt.payload);
+      sent.push({ body, auth: opt.headers.Authorization });
+      if (!body.image) return check || { code: 400, body: { detail: 'Kein lesbares Foto' } }; // Test beim Einrichten
+      return answer;
+    };
+    // Menü: Adresse speichern, gleich testen
+    envK.promptButton = 'OK';
+    envK.promptResponse = 'http://karten.example.de';
+    envK.ctx.kartenerkennungEinrichten();
+    t.ok('Einrichten: nur https', /https:\/\//.test(envK.ui.alerts[envK.ui.alerts.length - 1]) && !envK.setting('SCAN_URL'), [envK.ui.alerts, envK.setting('SCAN_URL')]);
+    envK.promptResponse = ' https://karten.example.de/ ';
+    envK.ctx.kartenerkennungEinrichten();
+    t.ok('Einrichten: gespeichert ohne Schrägstrich, Test mit Ausweis', envK.setting('SCAN_URL') === 'https://karten.example.de' &&
+      sent.length === 1 && sent[0].auth === 'Bearer IDTOKEN' && /freigeschaltet/.test(envK.ui.alerts[envK.ui.alerts.length - 1]), [envK.ui.alerts, sent]);
+    envK.promptResponse = 'aus';
+    envK.ctx.kartenerkennungEinrichten();
+    t.ok('Einrichten: „aus“ blendet aus', !envK.setting('SCAN_URL') && envK.ctx.getUiConfig().scan === false);
+    envK.promptResponse = 'https://karten.example.de';
+    check = { code: 403, body: { detail: 'Konto ich@example.org ist nicht freigeschaltet' } };
+    envK.ctx.kartenerkennungEinrichten();
+    check = null;
+    t.ok('Einrichten: Test meldet fehlenden Zugang', /Kein Zugang/.test(envK.ui.alerts[envK.ui.alerts.length - 1]) && envK.ctx.getUiConfig().scan === true,
+      envK.ui.alerts[envK.ui.alerts.length - 1]);
+
+    const K = boot(envK, 'sidebar', {});
+    await K.settle();
+    t.ok('mit Adresse: Foto-Knopf über dem Suchfeld', !K.$('scanBox').classList.contains('hidden') &&
+      K.$('scanBox').nextElementSibling === K.$('searchForm') && K.$('scanFile').getAttribute('accept') === 'image/*');
+    answer = { code: 200, body: { seconds: 2.1, cards: [
+      { crop: 'QUJD', number: '136/189', candidates: [cand('swsh3-136', 'Furret', '136', 189), cand('swsh3-025', 'Pikachu', '025', 189)] },
+      { crop: 'QUJD', number: '025/189', candidates: [cand('swsh3-025', 'Pikachu', '025', 189)] },
+      { crop: 'QUJD', number: '4/102', candidates: [cand('base1-4', 'Charizard', '4', 102)] },
+      { crop: 'QUJD', number: '7/50', candidates: [cand('old9-007', 'Mewtwo', '007', 50)] },
+      { crop: '', number: '', candidates: [] }
+    ] } };
+    K.win.scanShrink = () => Promise.resolve('Rk9UTw=='); // Canvas gibt es in jsdom nicht
+    K.win.scanPicked({ files: [{ name: 'seite.jpg' }] });
+    await K.settle();
+    const rows = [...K.$('addResults').querySelectorAll('.srow')];
+    const box = i => rows[i].querySelector('input[type=checkbox]');
+    t.ok('Foto: geht ans Skript, Skript an den Server', K.calls('scanPage').length === 1 && K.calls('scanPage')[0].args[0] === 'Rk9UTw==' &&
+      sent[sent.length - 1].body.image === 'Rk9UTw==' && sent[sent.length - 1].auth === 'Bearer IDTOKEN');
+    t.ok('Liste ersetzt die Treffer: eine Zeile je Karte mit Ausschnitt', rows.length === 5 && /5 Karten erkannt/.test(K.$('addResults').textContent) &&
+      rows[0].querySelector('img.scrop').getAttribute('src') === 'data:image/jpeg;base64,QUJD');
+    t.ok('deutsche Daten geladen (über den Server, kein tcgdex im Browser)', K.calls('getCardDetail').length >= 4 &&
+      rows[0].textContent.indexOf(envK.DB['de/cards/swsh3-136'].name) >= 0, rows[0].textContent);
+    t.ok('schon in der Sammlung: markiert und abgewählt', !box(1).checked && /Schon 1× in der Sammlung/.test(rows[1].textContent) && box(0).checked && box(2).checked);
+    t.ok('nur englisch bei tcgdex: Hinweis, englische Daten', /Nur mit englischen Daten/.test(rows[3].textContent) && box(3).checked);
+    t.ok('nichts erkannt: Hinweis, Weg zur Suche', /Keine Karte erkannt/.test(rows[4].textContent) && !box(4) && !!K.btn(rows[4], 'Andere Karte suchen'));
+    const sel = rows[2].querySelector('select');
+    t.ok('Variante wählbar wie beim Hinzufügen (Holo oder 1. Edition)', !!sel && [...sel.options].map(o => o.value + ':' + o.textContent).join() === 'base:Holo,firstEdition:1. Edition',
+      sel && [...sel.options].map(o => o.value + ':' + o.textContent));
+    t.ok('Knopf zählt die angehakten Karten', K.$('scanAdd').textContent === '3 Karten hinzufügen' && !K.$('scanAdd').disabled, K.$('scanAdd').textContent);
+    // andere Karte antippen: Pikachu ist schon da, also abgewählt; zurück zu Furret wieder angehakt
+    K.click(rows[0].querySelectorAll('.salts .alt')[1]);
+    await K.settle();
+    t.ok('Alternative gewählt: ihre Daten, abgewählt (schon da)', !K.$('scanRow0').querySelector('input').checked && /Schon 1×/.test(K.$('scanRow0').textContent) &&
+      K.$('scanAdd').textContent === '2 Karten hinzufügen');
+    K.click(K.$('scanRow0').querySelectorAll('.salts .alt')[0]);
+    await K.settle();
+    t.ok('wieder der beste Treffer: angehakt', K.$('scanRow0').querySelector('input').checked && K.$('scanAdd').textContent === '3 Karten hinzufügen');
+    K.pick(K.$('scanRow2').querySelector('select'), 'firstEdition');
+    const before = envK.data().length;
+    K.click(K.$('scanAdd'));
+    await K.settle();
+    const adds = K.calls('addCard').map(c => noRid(c.args[0]));
+    t.ok('Hinzufügen: je ein Exemplar, mit Variante und Datensprache', adds.length === 3 &&
+      J(adds.map(a => [a.id, a.lang, a.variant, a.qty])) === J([['swsh3-136', 'de', 'base', 1], ['base1-4', 'de', 'firstEdition', 1], ['old9-007', 'en', 'base', 1]]), adds);
+    t.ok('gespeichert, Liste weg, Meldung', envK.data().length === before + 3 && !K.$('addResults').querySelector('.srow') &&
+      /3 Karten werden hinzugefügt/.test(K.$('addMsg').textContent), [envK.data().length, before]);
+    checkSheets(envK, 'nach dem Foto');
+    // Keine passt: zur normalen Suche, die gelesene Nummer steht schon da
+    K.win.scanPicked({ files: [{ name: 'seite.jpg' }] });
+    await K.settle();
+    K.click(K.btn(K.$('scanRow0'), 'Andere Karte suchen'));
+    t.ok('Andere Karte suchen: Liste weg, Nummer im Feld', !K.$('addResults').querySelector('.srow') && K.$('fNumber').value === '136/189' && K.$('fName').value === '');
+    // Fehler des Servers: verständlich
+    answer = { code: 429, body: { detail: 'Tageslimit von 200 Fotos erreicht' } };
+    K.win.scanPicked({ files: [{ name: 'seite.jpg' }] });
+    await K.settle();
+    t.ok('Tageslimit: Meldung', /alle Fotos verbraucht \(Tageslimit von 200 Fotos erreicht\)/.test(K.$('addMsg').textContent), K.$('addMsg').textContent);
+    envK.http = () => 'throw';
+    K.win.scanPicked({ files: [{ name: 'seite.jpg' }] });
+    await K.settle();
+    t.ok('Server weg: Meldung', /nicht erreichbar/.test(K.$('addMsg').textContent), K.$('addMsg').textContent);
+    envK.idToken = '';
+    t.ok('ohne Ausweis: Hinweis aufs Erlauben', /keinen Ausweis/.test((() => { try { envK.ctx.scanPage('QUJD'); return ''; } catch (e) { return e.message; } })()));
+    t.ok('keine Skriptfehler (Kartenerkennung)', K.errors.length === 0 && K0.errors.length === 0, K.errors.concat(K0.errors));
   }
 
   // ---- 15. Fehlerpfade über die echte Brücke ----

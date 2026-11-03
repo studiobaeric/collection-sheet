@@ -1071,6 +1071,7 @@ function createEnv(opts) {
     getService: () => ({ getUrl: () => null }),
     getScriptId: () => 'SCRIPTID',
     getOAuthToken: () => 'TOKEN',
+    getIdentityToken: () => (env.idToken === undefined ? 'IDTOKEN' : env.idToken), // Ausweis für die Kartenerkennung (#19)
     AuthMode: { FULL: 'FULL', LIMITED: 'LIMITED' }
   };
 

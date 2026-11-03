@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.2.2
+ *  Pokémon-Sammlung · Version 1.3.0
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -20,7 +20,7 @@
  */
 
 /** Version dieser Datei; Code.gs vergleicht sie mit den anderen Dateien (#35). tools/release.js schreibt sie. */
-const UPDATE_FILE_VERSION = '1.2.2';
+const UPDATE_FILE_VERSION = '1.3.0';
 
 const UPD_REPO = 'studiobaeric/collection-sheet';
 const UPD_RAW = 'https://raw.githubusercontent.com/';
@@ -625,7 +625,8 @@ function takeoverRun(url) {
     const have = extraNames_();
     settingsSetMany_({
       VIEW_EXTRAS: JSON.stringify((Array.isArray(extras) ? extras : []).map(String).filter(function (n) { return have.indexOf(n) >= 0; })),
-      PRERELEASES: st.map.PRERELEASES === '1' ? '1' : ''
+      PRERELEASES: st.map.PRERELEASES === '1' ? '1' : '',
+      SCAN_URL: st.map.SCAN_URL || settingGet_('SCAN_URL') // Adresse der Kartenerkennung (#19)
     });
     setupSheets_(ss, true);
     showDashboard_(); // die übernommene Tabelle startet im Dashboard (#28)

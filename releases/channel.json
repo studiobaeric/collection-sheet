@@ -4,6 +4,23 @@
   "guideUrl": "https://github.com/studiobaeric/collection-sheet#von-hand-aktualisieren",
   "releases": [
     {
+      "version": "1.3.0",
+      "tag": "v1.3.0",
+      "date": "2026-11-03",
+      "prerelease": false,
+      "schema": "2",
+      "notes": [
+        "Kartenerkennung: Ordnerseite mit bis zu 9 Karten fotografieren",
+        "Knopf „Ordnerseite fotografieren“ über dem Suchfeld im Tab Hinzufügen",
+        "Liste der erkannten Karten zum Prüfen, je Karte bis zu zwei andere",
+        "Karten aus der Sammlung stehen abgewählt, anhaken für ein weiteres",
+        "Variante je Karte wählbar, ein Knopf fügt alle angehakten hinzu",
+        "Braucht einen eigenen Erkennungs-Server, Anleitung im Ordner server",
+        "Menü Pokémon > Kartenerkennung einrichten speichert die Adresse",
+        "Google fragt einmal neu nach Rechten: dein Konto als Ausweis"
+      ]
+    },
+    {
       "version": "1.2.2",
       "tag": "v1.2.2",
       "date": "2026-10-29",

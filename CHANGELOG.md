@@ -7,6 +7,17 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.3.0] – 2026-11-03
+
+- Kartenerkennung: Ordnerseite mit bis zu 9 Karten fotografieren
+- Knopf „Ordnerseite fotografieren“ über dem Suchfeld im Tab Hinzufügen
+- Liste der erkannten Karten zum Prüfen, je Karte bis zu zwei andere
+- Karten aus der Sammlung stehen abgewählt, anhaken für ein weiteres
+- Variante je Karte wählbar, ein Knopf fügt alle angehakten hinzu
+- Braucht einen eigenen Erkennungs-Server, Anleitung im Ordner server
+- Menü Pokémon > Kartenerkennung einrichten speichert die Adresse
+- Google fragt einmal neu nach Rechten: dein Konto als Ausweis
+
 ## [1.2.2] – 2026-10-29
 
 - Set-Symbole erscheinen wieder, auch wenn tcgdex sie als .webp liefert

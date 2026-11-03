@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.2.2
+ *  Pokémon-Sammlung · Version 1.3.0
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -35,7 +35,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.2.2';
+const TOOL_VERSION = '1.3.0';
 
 const SHEETS = {
   dash: 'Dashboard',
@@ -1585,6 +1585,7 @@ function onOpen() {
     .addItem('Ansicht neu aufbauen', 'ansichtNeuAufbauen')
     .addItem('API prüfen', 'apiPruefen')
     .addItem('Web-App-Link anzeigen', 'webAppLinkAnzeigen')
+    .addItem('Kartenerkennung einrichten', 'kartenerkennungEinrichten')
     .addToUi();
   // Startseite ist das Dashboard (Google öffnet sonst das zuletzt offene Blatt); ein verstecktes bleibt versteckt
   showDashboard_();
@@ -4051,6 +4052,113 @@ function addFreeCard(req) {
 }
 
 // ---------------------------------------------------------------------------
+// 5c. Kartenerkennung aus Fotos (#19)
+// ---------------------------------------------------------------------------
+// Ein Foto einer Ordnerseite geht an einen eigenen Erkennungs-Server (Ordner server/ im Repo). Als Zugang schickt das
+// Tool den Ausweis des angemeldeten Google-Kontos mit (ScriptApp.getIdentityToken, Rechte openid und userinfo.email).
+// Der Server prüft Googles Unterschrift und seine Kontenliste, im Sheet steht nichts Geheimes. Die Adresse steht in
+// den Tool-Einstellungen (SCAN_URL) und geht bei „Neue Version holen“ mit. Ohne Adresse zeigt die Seite keinen Foto-Knopf.
+
+function scanUrl_() {
+  return String(settingGet_('SCAN_URL') || '').trim().replace(/\/+$/, '');
+}
+
+/**
+ * Foto erkennen. image: JPEG als Base64 (die Seite verkleinert es vorher)
+ * -> {cards: [{crop, number, candidates: [{id, name, localId, setId, setName, official, image, score, numberMatch,
+ *    owned (Exemplare in der Sammlung)}]}], seconds}
+ */
+function scanPage(image) {
+  tmrStart_('scanPage');
+  try {
+    const url = scanUrl_();
+    if (!url) throw new Error('Keine Adresse für die Kartenerkennung. Bitte am Computer Pokémon > Kartenerkennung einrichten.');
+    const b64 = String(image == null ? '' : image);
+    if (!b64) throw new Error('Kein Foto angekommen. Bitte noch einmal versuchen.');
+    const r = scanPost_(url, { image: b64 });
+    tmrStep_('Server');
+    if (r.code !== 200 || !r.data || !Array.isArray(r.data.cards)) throw new Error(scanErrorText_(r));
+    const owned = ownedCounts_();
+    r.data.cards.forEach(function (c) {
+      (c.candidates || []).forEach(function (k) { k.owned = owned[String(k.id)] || 0; });
+    });
+    return r.data;
+  } finally {
+    tmrDone_();
+  }
+}
+
+/** POST an den Erkennungs-Server mit dem Ausweis des Kontos -> {code, data (Antwort als Objekt oder null)} */
+function scanPost_(url, body) {
+  const token = ScriptApp.getIdentityToken();
+  if (!token) throw new Error('Google gibt keinen Ausweis für dein Konto heraus. Bitte am Computer Pokémon > Kartenerkennung einrichten öffnen und den Zugriff erlauben.');
+  let r;
+  try {
+    r = UrlFetchApp.fetch(url + '/scan', {
+      method: 'post', contentType: 'application/json', payload: JSON.stringify(body),
+      headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
+    });
+  } catch (e) {
+    throw new Error('Der Erkennungs-Server ist nicht erreichbar (' + (e && e.message ? e.message : e) + ').');
+  }
+  let data = null;
+  try { data = JSON.parse(r.getContentText()); } catch (e) { /* keine JSON-Antwort, z. B. eine Fehlerseite des Webservers */ }
+  return { code: r.getResponseCode(), data: data };
+}
+
+function scanErrorText_(r) {
+  const detail = r.data && r.data.detail ? String(r.data.detail) : 'HTTP ' + r.code;
+  const what = { 400: 'Foto nicht lesbar', 401: 'Ausweis abgelehnt', 403: 'Kein Zugang', 413: 'Foto zu groß',
+    429: 'Für heute sind alle Fotos verbraucht', 503: 'Der Server ist noch nicht bereit' }[r.code];
+  return 'Kartenerkennung: ' + (what ? what + ' (' + detail + ')' : detail) + '.';
+}
+
+/** Karten-ID -> Exemplare in der Sammlung */
+function ownedCounts_() {
+  const sh = ss_().getSheetByName(SHEETS.data);
+  const out = {};
+  (sh ? readData_(sh) : []).forEach(function (r) {
+    const n = Number(r[COL.count]) || 0;
+    const id = String(r[COL.id] || '');
+    if (id && n > 0 && isDataRow_(r)) out[id] = (out[id] || 0) + n;
+  });
+  return out;
+}
+
+/** Menü: Adresse des Erkennungs-Servers speichern und den Zugang gleich testen. */
+function kartenerkennungEinrichten() {
+  const ui = SpreadsheetApp.getUi();
+  const saved = scanUrl_();
+  const res = ui.prompt('Kartenerkennung',
+    (saved ? 'Gespeicherte Adresse:\n' + saved + '\n\nZum Ändern eine neue Adresse eingeben, „aus“ blendet den Foto-Knopf aus, sonst einfach OK.'
+      : 'Adresse deines Erkennungs-Servers eingeben, z. B. https://karten.example.de. Wie du den Server einrichtest, steht im Repo unter server/README.md.') +
+    '\n\nAm Handy erscheint der Knopf nach einer neuen Bereitstellung der Web-App (Bereitstellungen verwalten > Bearbeiten > Version „Neue Version“).',
+    ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  const typed = res.getResponseText().trim();
+  if (typed.toLowerCase() === 'aus') {
+    settingSet_('SCAN_URL', '');
+    ui.alert('Kartenerkennung ausgeschaltet. Der Foto-Knopf ist ausgeblendet.');
+    return;
+  }
+  const url = (typed || saved).replace(/\/+$/, '');
+  if (!url) return;
+  if (!/^https:\/\/[^\s\/]+(\/\S*)?$/.test(url)) { ui.alert('Die Adresse muss mit https:// beginnen, z. B. https://karten.example.de'); return; }
+  settingSet_('SCAN_URL', url);
+  ui.alert('Gespeichert: ' + url + '\n\n' + scanCheckText_(url));
+}
+
+/** Zugang testen: Ein leeres Foto beantwortet der Server mit 400, wenn Ausweis und Konto passen. */
+function scanCheckText_(url) {
+  let email = '';
+  try { email = Session.getEffectiveUser().getEmail(); } catch (e) { /* ohne Adresse im Text */ }
+  let r;
+  try { r = scanPost_(url, {}); } catch (e) { return 'Test: ' + (e && e.message ? e.message : e); }
+  if (r.code === 400) return 'Test: Server erreichbar, dein Konto ' + email + ' ist freigeschaltet. Der Foto-Knopf steht jetzt im Tab Hinzufügen.';
+  return 'Test: ' + scanErrorText_(r) + (r.code === 403 ? '\nAuf dem Server ' + email + ' in data/konten.txt eintragen.' : '');
+}
+
+// ---------------------------------------------------------------------------
 // 6. Sammlung: Gruppen, -1/+1, Rückgängig, Bearbeiten, eigener Preis, Verknüpfen
 // ---------------------------------------------------------------------------
 
@@ -4069,7 +4177,8 @@ function getUiConfig() {
     langs: LANGS.map(function (l) { return { code: l[0], label: l[1] }; }),
     versions: Object.keys(versions).sort(function (a, b) { return a.localeCompare(b, 'de'); }),
     extras: sh ? extraNames_() : [],
-    viewExtras: getViewExtras_()
+    viewExtras: getViewExtras_(),
+    scan: !!scanUrl_()
   };
 }
 

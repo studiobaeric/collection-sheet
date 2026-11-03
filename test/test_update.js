@@ -14,7 +14,8 @@ const REPO = 'studiobaeric/collection-sheet';
 const RAW = 'https://raw.githubusercontent.com/';
 const CHANNEL_URL = RAW + REPO + '/main/releases/channel.json';
 const SCOPES = ['spreadsheets', 'script.container.ui', 'script.external_request', 'script.scriptapp', 'drive']
-  .map(s => 'https://www.googleapis.com/auth/' + s);
+  .map(s => 'https://www.googleapis.com/auth/' + s)
+  .concat(['openid', 'https://www.googleapis.com/auth/userinfo.email']); // Ausweis für die Kartenerkennung (#19)
 const OLD_ID = '1OldSheetIdOldSheetIdOldSheetId0123456789';
 const TEMPLATE_ID = '1TemplateIdTemplateIdTemplateId0123456789';
 const BETA_ID = '1BetaTemplateBetaTemplateBetaTpl012345678';
@@ -303,6 +304,7 @@ t.section('Neue Version holen: Kopie der Vorlage, Übernahme, alte Tabelle');
   old.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
   old.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', condition: 'LP', qty: 1 });
   old.ctx.settingSet_('WEBAPP_URL', 'https://script.google.com/macros/s/ALT/exec');
+  old.ctx.settingSet_('SCAN_URL', 'https://karten.example.de'); // Adresse der Kartenerkennung (#19)
   old.sheet('Sammlung').getRange('B4').setValue('Glurak');
   const { tpl, dir } = addTemplate(old, W, '1.1.0');
   tpl.ctx.settingSet_('PRERELEASES', '1'); // die Vorlage hat Vorabversionen an, die alte Tabelle nicht
@@ -342,6 +344,7 @@ t.section('Neue Version holen: Kopie der Vorlage, Übernahme, alte Tabelle');
   t.ok('neu: Daten, Suchfeld, keine ausstehende Übernahme mehr', neu.data().length === 2 && neu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' &&
     neu.uiCall('getUpdateInfo', false).pendingTake === '' && neu.setting('TAKEN_FROM') === old.ss.getUrl() && neu.setting('TAKE_RUN') === '');
   t.ok('neu: Vorabversionen wie in der alten Tabelle (aus)', neu.setting('PRERELEASES') === '');
+  t.ok('neu: Adresse der Kartenerkennung übernommen (#19)', neu.setting('SCAN_URL') === 'https://karten.example.de', neu.setting('SCAN_URL'));
   const pc = neu.permCreates;
   t.ok('neu: Freigaben der alten ohne E-Mail übernommen, Besitzer nicht doppelt', pc.length === 2 && pc.every(x => x.id === neu.ss.id) &&
     pc[0].res.emailAddress === 'Oma@example.org' && pc[0].res.role === 'writer' && pc[0].args.sendNotificationEmail === false &&

@@ -1,0 +1,22 @@
+# Kartenerkennung (#19). Start: docker compose up -d --build   Anleitung: README.md
+services:
+  scan:
+    build: .
+    image: kartenerkennung
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8000"   # nur lokal; dein Webserver leitet die (Sub-)Domain hierher
+    volumes:
+      - ./data:/data            # Index, Kontenliste konten.txt, Modell-Cache
+    environment:
+      DAILY_LIMIT: "200"        # Fotos pro Konto und Tag
+    mem_limit: 3g
+
+  index:                        # baut die Vergleichsdatenbank und ergänzt sie einmal pro Woche um neue Sets
+    image: kartenerkennung
+    depends_on: [scan]
+    restart: unless-stopped
+    command: ["python", "-m", "scanner.build_index", "--loop"]
+    volumes:
+      - ./data:/data
+    mem_limit: 2g

@@ -40,3 +40,23 @@ jobs:
         run: npm test
       - name: Kanal, CHANGELOG.md und Dateiköpfe
         run: node tools/release.js --check
+
+  server:
+    # Kartenerkennung (#19): Tests mit gezeichneten Testkarten, ohne DINOv2 (das läuft erst auf dem Server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Abhängigkeiten (ohne torch und transformers)
+        run: |
+          grep -v -E '^(transformers)' requirements.txt > /tmp/req.txt
+          pip install -r /tmp/req.txt pytest httpx cryptography pillow
+          sudo apt-get install -y fonts-dejavu-core libgl1
+      - name: Tests
+        run: python -m pytest -q tests

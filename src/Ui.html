@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ==========================================================================
-     Pokémon-Sammlung · Version 1.2.2
+     Pokémon-Sammlung · Version 1.3.0
      https://github.com/studiobaeric/collection-sheet
      ========================================================================== -->
 <html>
@@ -144,6 +144,20 @@
   table.itab .lnk { padding: 4px 0; min-height: 32px; font-size: 13px; }
   .pedit { margin: 2px 0 8px; }
   .pedit .actions { margin-top: 8px; }
+  /* Kartenerkennung aus Fotos (#19) */
+  .scanbtn { width: 100%; margin-top: 10px; }
+  .vh { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .srow { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .srow > img.scrop { width: 64px; flex: none; border-radius: 4px; background: var(--soft); }
+  .srow .sinfo { flex: 1; min-width: 0; }
+  .srow .check { margin-top: 0; }
+  .srow .s { font-size: 12px; color: var(--muted); }
+  .srow.off .sinfo .t { color: var(--muted); }
+  .salts { display: flex; gap: 6px; margin-top: 6px; }
+  .salts .alt { width: 56px; border: 2px solid transparent; border-radius: 5px; padding: 1px; background: none; cursor: pointer; }
+  .salts .alt.on { border-color: var(--accent); }
+  .salts .alt img { width: 100%; aspect-ratio: 245 / 342; object-fit: contain; display: block; background: var(--soft); border-radius: 3px; }
+  .srow select { margin-top: 6px; padding: 6px; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -158,6 +172,10 @@
 
 <!-- Hinzufügen -->
 <div id="paneAdd" class="panel">
+  <div id="scanBox" class="hidden">
+    <button class="btn scanbtn" type="button" onclick="scanStart()">📷 Ordnerseite fotografieren</button>
+    <input type="file" id="scanFile" class="vh" accept="image/*" tabindex="-1" aria-hidden="true" onchange="scanPicked(this)">
+  </div>
   <form id="searchForm" onsubmit="doSearch(event)">
     <label for="fName">Name</label>
     <input type="text" id="fName" autocomplete="off" placeholder="z. B. Glurak-ex" autofocus>
@@ -255,7 +273,7 @@
 
 <script>
 var MODE = '<?!= mode ?>'; // 'sidebar' oder 'web', kommt vom Server (Vorlage)
-var UI_FILE_VERSION = '1.2.2'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
+var UI_FILE_VERSION = '1.3.0'; // Version dieser Datei, verglichen mit den anderen (#35); tools/release.js schreibt sie
 var START = '<?!= typeof start === "string" ? start : "" ?>'; // erster Bereich: '', 'upd', 'takeover' (Menü Updates) oder 'import' (Dashboard)
 var PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 342"><rect width="245" height="342" rx="12" fill="#e8eaed"/>' +
@@ -270,7 +288,7 @@ var LANGS = [
   { code: 'NL', label: 'Niederländisch' }, { code: 'PL', label: 'Polnisch' }, { code: 'JP', label: 'Japanisch' },
   { code: 'KO', label: 'Koreanisch' }, { code: 'ZH', label: 'Chinesisch' }
 ];
-var UI_CONFIG = { versions: [], extras: [], viewExtras: [] };
+var UI_CONFIG = { versions: [], extras: [], viewExtras: [], scan: false };
 var state = { lastQuery: null, lastRes: null, current: null, groups: [], open: {} };
 var searchGen = 0, linkGen = 0; // nur die Antwort auf die neueste Anfrage zählt
 
@@ -486,6 +504,8 @@ function applyConfig(cfg) {
   UI_CONFIG.versions = (cfg.versions || []).map(String).filter(Boolean);
   UI_CONFIG.extras = (cfg.extras || []).map(String).filter(Boolean);
   UI_CONFIG.viewExtras = (cfg.viewExtras || []).map(String).filter(Boolean);
+  UI_CONFIG.scan = !!cfg.scan; // Foto-Knopf nur mit Adresse des Erkennungs-Servers (#19)
+  if ($('scanBox')) $('scanBox').classList.toggle('hidden', !UI_CONFIG.scan);
   fillVersionList();
 }
 /** getUiConfig neu laden (auch für ImportUi, z. B. nach einem Import mit neuen Zusatzspalten) */
@@ -648,6 +668,7 @@ function doSearch(ev) {
   state.lastQuery = q;
   state.lastTyped = $('fName').value; // nach dem Hinzufügen steht dann nur der Name im Feld (#53)
   state.addCopy = null; // eine neue Suche: kein Exemplar mehr aus dem Tab Sammlung
+  scan = null; // die Liste eines Fotos ist weg
   setMsg('addMsg', '');
   spinner('addResults', 'Suche bei tcgdex …');
   var gen = ++searchGen;
@@ -862,16 +883,21 @@ function addPending(a) { return a.status === 'wait' || a.status === 'saving'; }
 
 /** Karte abschicken. show: {name, number, image, subHtml} für die Anzeige */
 function startAdd(fn, req, show) {
-  req.rid = newRid();
   var cp = state.addCopy;
-  var item = { n: addSeq, fn: fn, req: req, name: show.name, number: show.number || '', image: show.image || '',
-    subHtml: show.subHtml || '', gkey: cp ? cp.gkey : '', status: 'wait', err: '', res: null };
-  adds.push(item);
   ++searchGen; // späte Antworten zur alten Karte nicht mehr anzeigen
   state.current = null;
-  queueAdd(item); // zuerst: die Karte in der Sammlung zeigt dann gleich „speichert …“
+  pushAdd(fn, req, show, cp ? cp.gkey : ''); // zuerst: die Karte in der Sammlung zeigt dann gleich „speichert …“
   if (cp) leaveCopy(true); // vom Tab Sammlung („+ Exemplar“, #49): zurück dorthin, die Karte bleibt aufgeklappt
   else keepSearch();
+}
+
+/** Karte in die Warteschlange; gkey: „+ Exemplar“ zu dieser Karte im Tab Sammlung */
+function pushAdd(fn, req, show, gkey) {
+  req.rid = newRid();
+  var item = { n: addSeq, fn: fn, req: req, name: show.name, number: show.number || '', image: show.image || '',
+    subHtml: show.subHtml || '', gkey: gkey || '', status: 'wait', err: '', res: null };
+  adds.push(item);
+  queueAdd(item);
 }
 
 /** Nach dem Hinzufügen (#53): Treffer bleiben, der Name steht markiert im Feld, Nummer und Set sind leer. */
@@ -884,6 +910,191 @@ function keepSearch() {
   $('fSet').value = '';
   f.focus();
   f.select();
+}
+
+// ---------- Kartenerkennung aus Fotos (#19) ----------
+// Ein Foto einer Ordnerseite geht über das Skript (scanPage) an den Erkennungs-Server. Die Liste der erkannten Karten
+// ersetzt die Treffer: je Karte der Ausschnitt aus dem Foto, der beste Treffer und bis zu zwei andere zum Antippen.
+// Karten, die schon in der Sammlung sind, stehen abgewählt da. Ein Knopf fügt alle angehakten hinzu, je ein Exemplar.
+var SCAN_MAX_PX = 3000; // lange Seite des Fotos beim Senden
+var scan = null; // {cards: [{crop, number, cands, pick, on, detail, variant, err}]} der Liste, die gerade zu sehen ist
+
+function scanStart() { var f = $('scanFile'); f.value = ''; f.click(); }
+
+function scanPicked(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  closeSetDrop();
+  if (state.addCopy) leaveCopy(false);
+  setMsg('addMsg', '');
+  var gen = ++searchGen;
+  scan = null;
+  spinner('addResults', 'Foto wird vorbereitet …');
+  scanShrink(file).then(function (b64) {
+    if (gen !== searchGen) return null;
+    spinner('addResults', 'Erkenne Karten …');
+    return call('scanPage', b64).then(function (res) { if (gen === searchGen) scanShow(res); });
+  }).catch(function (e) {
+    if (gen !== searchGen) return;
+    $('addResults').innerHTML = '';
+    setMsg('addMsg', esc(errText(e)), 'err');
+  });
+}
+
+/** Foto auf höchstens SCAN_MAX_PX (lange Seite) verkleinern -> JPEG als Base64 */
+function scanShrink(file) {
+  return new Promise(function (ok, fail) {
+    var rd = new FileReader();
+    rd.onerror = function () { fail(new Error('Das Foto lässt sich nicht lesen.')); };
+    rd.onload = function () {
+      var img = new Image();
+      img.onerror = function () { fail(new Error('Das Foto lässt sich nicht öffnen. Bitte ein JPEG- oder PNG-Foto nehmen.')); };
+      img.onload = function () {
+        var k = Math.min(1, SCAN_MAX_PX / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * k);
+        c.height = Math.round(img.naturalHeight * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        ok(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  });
+}
+
+function scanShow(res) {
+  var list = (res && res.cards) || [];
+  scan = { cards: list.map(function (c) {
+    var cands = c.candidates || [];
+    return { crop: c.crop || '', number: c.number || '', cands: cands, pick: 0, on: !!cands.length && !cands[0].owned,
+      detail: null, variant: 'base', err: '' };
+  }) };
+  scanDraw();
+  scan.cards.forEach(function (c, i) { scanResolve(i); });
+}
+
+/** Deutsche Daten der gewählten Karte (Name, Bild, Varianten), sonst die englischen wie bei der Suche */
+function scanResolve(i) {
+  var mine = scan, c = scan.cards[i], k = c.cands[c.pick];
+  if (!k) return;
+  c.detail = null;
+  c.err = '';
+  cardAny({ id: k.id, lang: 'de', image: '' })
+    .catch(function () { return cardAny({ id: k.id, lang: 'en', image: '' }); })
+    .then(function (d) {
+      if (scan !== mine || c.cands[c.pick] !== k) return;
+      c.detail = d;
+      c.variant = 'base';
+      scanDrawRow(i);
+    }, function (e) {
+      if (scan !== mine || c.cands[c.pick] !== k) return;
+      c.err = errText(e);
+      scanDrawRow(i);
+    });
+}
+
+function scanDraw() {
+  var n = scan.cards.length;
+  var html = '<div class="notes">' + (n === 1 ? '1 Karte erkannt' : n + ' Karten erkannt') +
+    ' – prüfen, anhaken und hinzufügen. Passt kein Bild, ein anderes antippen.</div>';
+  scan.cards.forEach(function (c, i) { html += '<div class="srow" id="scanRow' + i + '"></div>'; });
+  html += '<div class="actions"><button class="btn" type="button" onclick="scanClose()">Abbrechen</button>' +
+    '<button class="btn primary" type="button" id="scanAdd" onclick="scanAdd()"></button></div>';
+  $('addResults').innerHTML = html;
+  scan.cards.forEach(function (c, i) { scanDrawRow(i); });
+}
+
+function scanDrawRow(i) {
+  var c = scan.cards[i], el = $('scanRow' + i);
+  if (!el) return;
+  var k = c.cands[c.pick], d = c.detail;
+  el.classList.toggle('off', !c.on);
+  var html = (c.crop ? '<img class="scrop" alt="Ausschnitt" src="data:image/jpeg;base64,' + esc(c.crop) + '">' : '') + '<div class="sinfo">';
+  if (!k) {
+    html += '<div class="t">Keine Karte erkannt</div>' + (c.number ? '<div class="s">Gelesen: ' + esc(c.number) + '</div>' : '');
+  } else {
+    var name = d ? d.name : k.name;
+    html += '<label class="check"><input type="checkbox"' + (c.on ? ' checked' : '') + ' onchange="scanToggle(' + i + ', this.checked)"> <span class="t"><b>' + esc(name) + '</b></span></label>' +
+      '<div class="s">' + setNumHtml(d || k, numText(d ? d.localId : k.localId, d ? d.setSize : k.official)) + (d && d.rarity ? ' · ' + esc(d.rarity) : '') + '</div>';
+    if (k.owned) html += '<div class="s"><b>Schon ' + k.owned + '× in der Sammlung</b> – anhaken, wenn es ein weiteres Exemplar ist</div>';
+    if (d && d.lang === 'en') html += '<div class="s">Nur mit englischen Daten bei tcgdex</div>';
+    if (c.err) html += '<div class="s err">' + esc(c.err) + '</div>';
+    else if (!d) html += '<div class="s">lädt …</div>';
+    else html += scanVariantSelect(i, d);
+    html += '<div class="salts">' + c.cands.map(function (x, j) {
+      return '<button type="button" class="alt' + (j === c.pick ? ' on' : '') + '" title="' + esc(x.name + ' ' + x.localId) + '" onclick="scanPick(' + i + ',' + j + ')">' +
+        imgTag(cardImg(x.image, 'low')) + '</button>';
+    }).join('') + '</div>';
+  }
+  html += '<button type="button" class="lnk" onclick="scanSearch(' + i + ')">Andere Karte suchen</button></div>';
+  el.innerHTML = html;
+  scanButton();
+}
+
+/** Variante wie beim Hinzufügen: Grundvariante, Reverse Holo und 1. Edition nur, wenn die Karte sie hat */
+function scanVariantSelect(i, d) {
+  var opts = [['base', d.baseLabel || 'Normal']];
+  if (d.canReverse) opts.push(['reverse', VARIANT_LABELS.reverse]);
+  if (d.canFirstEdition) opts.push(['firstEdition', VARIANT_LABELS.firstEdition]);
+  if (opts.length < 2) return '<div class="s">' + esc(opts[0][1]) + '</div>';
+  var v = scan.cards[i].variant;
+  return '<select aria-label="Variante" onchange="scanVariant(' + i + ', this.value)">' + opts.map(function (o) {
+    return '<option value="' + o[0] + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+  }).join('') + '</select>';
+}
+
+function scanVariant(i, v) { scan.cards[i].variant = v; }
+function scanToggle(i, on) { scan.cards[i].on = on; $('scanRow' + i).classList.toggle('off', !on); scanButton(); }
+
+function scanPick(i, j) {
+  var c = scan.cards[i];
+  if (c.pick === j) return;
+  c.pick = j;
+  c.on = !c.cands[j].owned;
+  scanResolve(i);
+  scanDrawRow(i);
+}
+
+/** Knopf unten: zählt die angehakten Karten; wartet, solange eine davon noch lädt */
+function scanButton() {
+  var b = $('scanAdd');
+  if (!b || !scan) return;
+  var on = scan.cards.filter(function (c) { return c.on && c.cands[c.pick]; });
+  var ready = on.filter(function (c) { return c.detail; }).length;
+  var waiting = on.some(function (c) { return !c.detail && !c.err; });
+  b.disabled = !ready || waiting;
+  b.textContent = waiting ? 'Lädt noch …' : ready === 1 ? '1 Karte hinzufügen' : ready + ' Karten hinzufügen';
+}
+
+function scanAdd() {
+  if (!scan || $('scanAdd').disabled) return;
+  var todo = scan.cards.filter(function (c) { return c.on && c.detail; });
+  todo.forEach(function (c) {
+    var d = c.detail, v = c.variant;
+    var req = { id: d.id, lang: d.lang, variant: v, condition: '', qty: 1, inputName: '', cardLang: 'DE', version: '', ownPrice: null };
+    var given = directCards(d.id);
+    if (given.length) req.cards = given;
+    pushAdd('addCard', req, { name: d.name, number: d.localId, image: d.image,
+      subHtml: subJoin([setNumHtml(d, numText(d.localId, d.setSize)), esc(v === 'base' ? d.baseLabel : VARIANT_LABELS[v])]) });
+  });
+  scanClose();
+  setMsg('addMsg', (todo.length === 1 ? '1 Karte wird' : todo.length + ' Karten werden') + ' hinzugefügt.', 'ok');
+}
+
+function scanClose() {
+  scan = null;
+  ++searchGen;
+  showResults();
+}
+
+/** Keiner passt: normale Suche, die gelesene Nummer steht schon im Feld */
+function scanSearch(i) {
+  var c = scan.cards[i], m = /([A-Za-z]{0,5}\d{1,4})\s*\/\s*(\d{1,4})/.exec(c.number || '');
+  scanClose();
+  $('fNumber').value = m ? m[1] + '/' + m[2] : '';
+  $('fName').value = '';
+  $('fName').focus();
 }
 
 // „+ Exemplar“ im Tab Sammlung (#49): die Seite Hinzufügen dieser Karte, Variante und Sonderversion schon gewählt.
