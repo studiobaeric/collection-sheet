@@ -194,7 +194,7 @@ def vectors(embed, cards):
     views = [card_views(c) for c in cards]
     full = embed([v[0] for v in views])
     art = embed([v[1] for v in views])
-    return np.hstack([full, art]).astype(np.float32) / np.sqrt(2)
+    return (np.hstack([full, art]) / np.sqrt(2)).astype(np.float32)
 
 
 def rank(sims, meta, number, top=3):

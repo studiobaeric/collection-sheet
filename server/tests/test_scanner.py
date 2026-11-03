@@ -145,6 +145,21 @@ def test_photo_without_cards_gives_one_guess(reader):
     assert len(res) == 1 and len(res[0]['candidates']) == 1
 
 
+def test_dinov2_architecture_with_random_weights(reader):
+    """Aufbau wie facebook/dinov2-base, nur ohne Download: Größen, Normierung, ganzer Ablauf (läuft nur mit torch)"""
+    torch = pytest.importorskip('torch')
+    transformers = pytest.importorskip('transformers')
+    cfg = transformers.Dinov2Config(hidden_size=768, num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072,
+                                    patch_size=14, image_size=518)
+    dino = vision.Dino.__new__(vision.Dino)
+    dino.torch, dino.model = torch, transformers.Dinov2Model(cfg).eval()
+    cards = [card_image(i, NUMBERS[i]) for i in range(9)]
+    v = vision.vectors(dino, [cv2.resize(c, (vision.WARP_W, vision.WARP_H)) for c in cards])
+    assert v.shape == (9, 1536) and v.dtype == np.float32 and np.allclose(np.linalg.norm(v, axis=1), 1, atol=1e-5)
+    res = vision.scan(binder_page(cards), {'vectors': v, 'meta': [meta(i, NUMBERS[i]) for i in range(9)]}, dino, reader)
+    assert len(res) == 9
+
+
 # ---------------------------------------------------------------------------
 # Index
 # ---------------------------------------------------------------------------
