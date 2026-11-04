@@ -606,6 +606,10 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   ob.getSheetByName('Sammlung').getRange('H4').setValue(true);
   ob.getSheetByName('Verlauf').getRange(2, 1, 1, 5).setValues([[new Date(2026, 9, 1), 12.5, 3, 0, 0]]);
   ob.getSheetByName('Seltenheiten').getRange(2, 2).setValue(99);
+  // Pokédex-Formen der alten Tabelle (#58): andere Nummern als in der neuen
+  const OLD_FORMS = [['6_1', 6, 1, 'base', 'Glurak', 'Charizard', 'charizard'], ['6_2', 6, 2, 'mega', 'Mega-Glurak X', 'Mega Charizard X', 'charizard-mega-x'],
+    ['6_3', 6, 3, 'mega', 'Mega-Glurak Y', 'Mega Charizard Y', 'charizard-mega-y']];
+  ob.getSheetByName('Pokédex-Formen').getRange(2, 1, 3, 7).setValues(OLD_FORMS);
   const notes = ob.insertSheet('Notizen');
   notes.getRange('A1:B2').setValues([['Wunsch', 'Preis'], ['Glurak', 5]]);
   notes.getRange('C2').setFormula('=B2*2');
@@ -613,6 +617,10 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 
   const env = setupEnv(W);
   env.sources[OLD_ID] = ob;
+  // Vorlage mit anderer Zählung (PokeAPI hat eine Form eingefügt) und einer Zeile mehr
+  env.sheet('Pokédex-Formen').getRange(2, 1, 4, 7).setValues([['6_1', 6, 1, 'base', 'Glurak', 'Charizard', 'charizard'],
+    ['6_2', 6, 2, 'mega', 'Neue Form', 'New form', 'charizard-new'], ['6_3', 6, 3, 'mega', 'Mega-Glurak X', 'Mega Charizard X', 'charizard-mega-x'],
+    ['6_4', 6, 4, 'mega', 'Mega-Glurak Y', 'Mega Charizard Y', 'charizard-mega-y']]);
   const url = 'https://docs.google.com/spreadsheets/d/' + OLD_ID + '/edit#gid=0';
   const p = env.uiCall('takeoverPreview', url);
   t.ok('Vorschau: Karten, Exemplare, Version, eigene Blätter', p.cards === 2 && p.copies === 3 && p.version === '1.0.0' && J(p.own) === J(['Notizen']) &&
@@ -637,6 +645,8 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   t.ok('Zusatzspalte und Ansicht', J(d.map(x => x.extras.Ordner)) === J(['A', 'B']) && env.setting('VIEW_EXTRAS') === '["Ordner"]' &&
     env.values('Sammlung')[4].indexOf('Ordner') >= 0);
   t.ok('Gruppen neu gebaut', env.groups().length === 2);
+  t.ok('Pokédex-Formen: Nummern der alten Tabelle, Formel bleibt (#58)', J(env.values('Pokédex-Formen').slice(1).map(r => r.slice(0, 7))) === J(OLD_FORMS) &&
+    !!env.sheet('Pokédex-Formen').getRange('H2').getFormula(), env.values('Pokédex-Formen').slice(0, 5));
   t.ok('Verlauf, Seltenheiten übernommen', env.values('Verlauf').length === 2 && env.values('Verlauf')[1][1] === 12.5 && env.values('Seltenheiten')[1][1] === 99);
   t.ok('eigenes Blatt mit Formel kopiert, leeres nicht', env.sheet('Notizen') && env.sheet('Notizen').getRange('C2').getFormula() === '=B2*2' && !env.sheet('Leer'));
   t.ok('Suchfelder der Sammlung', env.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && env.sheet('Sammlung').getRange('H4').getValue() === true);

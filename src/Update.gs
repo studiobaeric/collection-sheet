@@ -469,6 +469,22 @@ function updOwnSheets_(old, st) {
   return old.getSheets().filter(function (sh) { return !tool[sh.getName()] && (sh.getLastRow() > 0 || sh.getLastColumn() > 0); });
 }
 
+/**
+ * Nummern der Pokédex-Formen aus der alten Tabelle (#58): nur A:G, in H:I steht die Formel dieser Tabelle. So zeigen
+ * „Form von Hand“ und die Kennungen in Pokédex-Nummern weiter auf dieselbe Form, auch wenn PokeAPI seit dem Laden
+ * der Vorlage eine Form eingefügt hat. Fehlt das Blatt (vor 1.2.2) oder ist es leer, bleibt die Liste der Vorlage.
+ */
+function updCopyDexForms_(src, ss) {
+  const lr = src ? src.getLastRow() : 0;
+  if (lr < 2) return;
+  const dst = ss.getSheetByName(SHEETS.dexForms) || setupDexFormsSheet_(ss);
+  growRows_(dst, lr);
+  const dl = dst.getLastRow();
+  if (dl > lr) dst.getRange(lr + 1, 1, dl - lr, 7).clearContent();
+  const from = src.getRange(1, 1, lr, 7);
+  dst.getRange(1, 1, lr, 7).setNumberFormats(from.getNumberFormats()).setValues(from.getValues());
+}
+
 /** Werte (mit Zahlenformaten, damit Text wie „025“ Text bleibt) von src nach dst. -> Zeilen ohne Kopf */
 function updCopyValues_(src, dst) {
   const lr = src.getLastRow(), lc = src.getLastColumn();
@@ -585,6 +601,7 @@ function updTakeoverRun_(url) {
           const rows = updCopyValues_(src, dst);
           if (n === SHEETS.data) cards = rows; else copied.push(n);
         });
+        if (tool[SHEETS.dexForms]) updCopyDexForms_(old.getSheetByName(SHEETS.dexForms), ss);
         ownSheets.forEach(function (src) {
           step('eigenes Blatt „' + src.getName() + '“');
           let name = src.getName();
