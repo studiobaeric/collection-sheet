@@ -1146,8 +1146,38 @@ function createEnv(opts) {
     assertPlain(res, fn);
     return res === undefined ? undefined : JSON.parse(JSON.stringify(res));
   };
+  /**
+   * Suche in der Sammlung wie der Tab Sammlung im Browser (#36 A4): getCollection, dann collMatch und collCmp aus
+   * Ui.html. opts: {sort, desc, dex} wie collSort. -> {total, groups, sort, desc, dex}
+   */
+  env.search = (query, setText, opts) => {
+    opts = opts || {};
+    const sorts = env.run('COLL_SORTS');
+    const sort = Object.prototype.hasOwnProperty.call(sorts, opts.sort) ? String(opts.sort) : 'set';
+    const desc = opts.desc == null || opts.desc === '' ? sorts[sort].desc : opts.desc === true || opts.desc === 'true';
+    const dexNr = Math.max(0, Math.floor(Number(opts.dex) || 0));
+    const B = browserSearch();
+    const words = String(query || '').trim().split(/\s+/).filter(Boolean);
+    const stx = String(setText || '').trim().toLowerCase();
+    const groups = env.uiCall('getCollection').groups.filter(g => B.collMatch(g, words, stx, dexNr, ''));
+    groups.sort((a, b) => B.collCmp(a, b, sort, desc));
+    return { total: groups.length, groups, sort, desc, dex: dexNr || null };
+  };
   env.setFormulaDisplay = fn => { env.formulaDisplay = fn; };
   return env;
+}
+
+/** Such- und Sortierfunktionen des Browsers aus src/Ui.html (für env.search). */
+let browserSearch_ = null;
+function browserSearch() {
+  if (browserSearch_) return browserSearch_;
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'src', 'Ui.html'), 'utf8');
+  const a = ui.indexOf('function normNum('), b = ui.indexOf('/** Suche, Set, Pokédex-Filter und Sortierung');
+  if (a < 0 || b < a) throw new Error('Suchfunktionen in Ui.html nicht gefunden');
+  const box = vm.createContext({ dexKeyOf: t => String(t) });
+  vm.runInContext(ui.slice(a, b), box);
+  browserSearch_ = { collMatch: box.collMatch, collCmp: box.collCmp };
+  return browserSearch_;
 }
 
 /** Mini-Testlauf: const t = runner('core'); t.ok(label, cond, extra); t.done(); */

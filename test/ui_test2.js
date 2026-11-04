@@ -157,17 +157,6 @@ function makeServer() {
     S.rows.forEach(r => { const k = S.gkey(r); if (keys.indexOf(k) < 0) keys.push(k); });
     return { groups: keys.map(S.uiGroup), total: keys.length };
   };
-  // nur noch für den Tab Pokédex
-  S.searchCollection = (query, setText) => {
-    const words = low(query).split(/\s+/).filter(Boolean);
-    const st = low(setText);
-    const keys = [];
-    S.rows.filter(r => words.every(w => low(r.name).includes(w) || low(r.version).includes(w)) && (!st || low(r.setName).includes(st)))
-      .forEach(r => { const k = S.gkey(r); if (keys.indexOf(k) < 0) keys.push(k); });
-    const groups = keys.map(S.uiGroup);
-    groups.sort((a, b) => (a.count > 0 ? 0 : 1) - (b.count > 0 ? 0 : 1));
-    return { total: groups.length, groups: groups.slice(0, 60) };
-  };
   S.adjustEntry = (eid, delta) => {
     const row = byEid(eid);
     if (!row) throw new Error('Eintrag nicht gefunden.');

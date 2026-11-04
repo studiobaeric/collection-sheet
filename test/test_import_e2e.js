@@ -485,12 +485,12 @@ t.section('6. Vorschau und Übernehmen (Import 1)');
   t.eq('importList', st.imports.map((i) => [i.nr, i.status, i.mode, i.counts.neu, i.date.length]), [[1, 'aktiv', 'Nur Neues', 19, 16]]);
 
   // Sammlung (Tab „Sammlung“)
-  const sc = env.uiCall('searchCollection', 'Hundemon', '');
+  const sc = env.search('Hundemon', '');
   t.eq('searchCollection: Herkunft', sc.groups.map((g) => [g.name, g.count, g.rows.map((r) => [r.originLabel, r.isImport, r.importNr])]),
     [['Hundemon', 2, [[XLSX_NAME + ', Import 1', true, 1]]]]);
-  const sa = env.uiCall('searchCollection', 'Arktos', '');
+  const sa = env.search('Arktos', '');
   t.eq('searchCollection: Arktos von Hand', sa.groups[0].rows.map((r) => r.originLabel), ['von Hand']);
-  const sf = env.uiCall('searchCollection', 'Fantasiemon', '');
+  const sf = env.search('Fantasiemon', '');
   t.eq('searchCollection: freie Karte', [sf.groups[0].isFree, sf.groups[0].price, sf.groups[0].priceManual], [true, 5, true]);
   D.value1 = after;
 }
@@ -570,7 +570,7 @@ t.section('9. Quelle geändert (ein Ditto mehr, Starmie weg), Mit Quelle abgleic
   const imp = importe(env)[2];
   t.eq('Importe 2', [imp.Modus, imp.Status, imp.Neu, imp.Mehr, imp.Weniger], ['Mit Quelle abgleichen', 'aktiv', 0, 1, 1]);
   t.eq('Summe', sum(env.data(), (d) => d.count), 4 + 20 + 1 - 1);
-  const sc = env.uiCall('searchCollection', 'Ditto', '');
+  const sc = env.search('Ditto', '');
   t.eq('Ditto in der Sammlung: zwei Herkünfte', sc.groups.map((g) => [g.count, g.rows.map((x) => x.originLabel)]),
     [[2, [XLSX_NAME + ', Import 1', XLSX_NAME + ', Import 2']]]);
 }
@@ -609,7 +609,7 @@ t.section('10. Zurücknehmen von Import 1 nach Änderungen von Hand');
     /Zurückgenommen am .*18 Einträge gelöscht, 2 behalten/.test(imp.Bericht), imp);
   t.eq('Protokoll bleibt vollständig (21 + handentfernt)', protoOf(env, 1).map((p) => p.Typ).sort().join(','), ['gleich', 'handentfernt'].concat(Array(19).fill('neu'), ['spalte']).join(','));
   t.throws('zweimal zurücknehmen', () => env.uiCall('importUndoPreview', 1), /schon zurückgenommen/);
-  const sc = env.uiCall('searchCollection', 'Despotar', '');
+  const sc = env.search('Despotar', '');
   t.eq('Despotar in der Sammlung von Hand', sc.groups[0].rows.map((r) => r.originLabel), ['von Hand']);
   t.eq('Gruppen = Daten', sum(env.groups(), (g) => g.Anzahl), sum(env.data(), (d) => d.count));
 }
@@ -654,7 +654,7 @@ t.section('12. Älteren Import 2 zurücknehmen, Import 3 bleibt');
   t.eq('Summe', sum(env.data(), (d) => d.count), 4 + 2 + 17);
   t.eq('Liste', env.uiCall('importList').map((i) => [i.nr, i.status]), [[3, 'aktiv'], [2, 'zurückgenommen'], [1, 'zurückgenommen']]);
   t.eq('Gruppen = Daten', sum(env.groups(), (g) => g.Anzahl), sum(env.data(), (d) => d.count));
-  const sc = env.uiCall('searchCollection', 'Ditto', '');
+  const sc = env.search('Ditto', '');
   t.eq('Ditto nur noch aus Import 3', sc.groups.map((g) => [g.count, g.rows.map((x) => x.originLabel)]), [[1, [XLSX_NAME + ', Import 3']]]);
 }
 
@@ -708,7 +708,7 @@ t.section('13. Google Sheet mit Links im Text (Alles addieren), Abbruch und Fort
   t.eq('Summe +4', sum(env.data(), (d) => d.count), sumBefore + 4);
   t.ok('Protokoll: erledigt', protoOf(env, 4).every((p) => p.Status === 'erledigt'));
   t.eq('Fortsetzen ist idempotent', env.uiCall('importResume', 4).message, 'Import 4 ist schon fertig.');
-  t.eq('Herkunft Lisa', env.uiCall('searchCollection', 'Kramurx', '').groups[0].rows.map((x) => x.originLabel),
+  t.eq('Herkunft Lisa', env.search('Kramurx', '').groups[0].rows.map((x) => x.originLabel),
     [XLSX_NAME + ', Import 3', 'Lisas Karten, Import 4']);
   const u = env.uiCall('importUndo', 4, {});
   t.eq('Import 4 zurückgenommen', [u.deleted, sum(env.data(), (d) => d.count)], [3, sumBefore]);

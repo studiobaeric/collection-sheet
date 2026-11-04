@@ -1140,6 +1140,7 @@ function loadCollection(okText) {
   if (queue.length) { coll.reloadWanted = true; setMsg('collMsg', 'Lädt neu, sobald alles gespeichert ist …'); return; }
   var gen = ++coll.gen, seen = coll.opsDone, staleSeq = coll.staleSeq;
   coll.loading = true;
+  coll.error = '';
   drawReload();
   if (!coll.all) spinner('collResults', 'Lade die Sammlung …');
   setMsg('collMsg', '');
@@ -1156,14 +1157,17 @@ function loadCollection(okText) {
       coll.byKey[g.gkey] = g;
     });
     refilter();
+    dexRedrawOpen();
     drawReload();
     if (okText) setMsg('collMsg', esc(okText), 'ok');
   }).catch(function (e) {
     if (gen !== coll.gen) return;
     coll.loading = false;
+    coll.error = errText(e);
     drawReload();
     if (!coll.all) $('collResults').innerHTML = '';
-    setMsg('collMsg', esc(errText(e)), 'err');
+    setMsg('collMsg', esc(coll.error), 'err');
+    dexRedrawOpen();
   });
 }
 
@@ -1188,7 +1192,7 @@ function collInfo() {
   el.textContent = shown === total ? total + ' ' + word(total) : shown + ' von ' + total + ' Einträgen';
 }
 
-// Suche und Sortierung wie searchCollection und collCompare_ in Code.gs, mit den Werten in g.k
+// Suche und Sortierung der Sammlung (auch für den Pokédex-Tab), mit den Werten in g.k
 function normNum(s) { return String(s == null ? '' : s).trim().toUpperCase().replace(/^([A-Z]*)0+(\d)/, '$1$2'); }
 function collMatch(g, words, stx, dexNr, dexRow) {
   var k = g.k || {};
@@ -2026,8 +2030,8 @@ var DEX_FORM_GROUPS = [['mega', 'Mega'], ['regional', 'Regionalformen'], ['gmax'
 // entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]] von getPokedex(); forms: [[Kennung, Nr, Form,
 // Gruppe, Name, Name englisch]]; toks: {Kennung: [Karten, Exemplare, Wert]}; show: eingeblendete Gruppen (pro Gerät);
 // rows: die Zeilen der Liste (dexBuild); open und cards nach dem Schlüssel einer Zeile ('6' Art, '6_2' Form)
-var dex = { entries: null, forms: [], toks: {}, show: {}, rows: [], fby: {}, has: {}, status: 'all', open: {}, cards: {} };
-var dexReq = 0, dexTimer = null, dexCardGen = 0;
+var dex = { entries: null, forms: [], toks: {}, show: {}, rows: [], fby: {}, has: {}, status: 'all', open: {} };
+var dexReq = 0, dexTimer = null;
 
 function initDex() {
   var html = '<option value="">Alle</option>';
@@ -2059,7 +2063,7 @@ function dexFormPick(grp, on) {
   else dex.show[grp] = !!on;
   memSet('pkmDexForms', JSON.stringify(dex.show));
   drawDexForms();
-  dex.open = {}; dex.cards = {};
+  dex.open = {};
   if (dex.entries) { dexBuild(); renderDex(); }
 }
 
@@ -2074,13 +2078,9 @@ function loadDex() {
     dex.forms = (res && res.forms) || [];
     dex.toks = (res && res.toks) || {};
     if (res && res.groups && res.groups.length) { DEX_FORM_GROUPS = res.groups; drawDexForms(); }
-    dex.cards = {};
     dexBuild();
-    Object.keys(dex.open).forEach(function (k) {
-      var e = dexEntry(k);
-      if (!e) delete dex.open[k];
-      else if (e.copies > 0) dexLoadCards(e);
-    });
+    Object.keys(dex.open).forEach(function (k) { if (!dexEntry(k)) delete dex.open[k]; });
+    if (Object.keys(dex.open).length) dexNeedColl();
     renderDex();
   }).catch(function (e) {
     if (gen !== dexReq) return;
@@ -2192,28 +2192,17 @@ function dexToggle(key) {
   var e = dexEntry(key);
   if (!e) return;
   if (dex.open[key]) delete dex.open[key]; else dex.open[key] = true;
-  if (dex.open[key] && e.copies > 0 && !dex.cards[key]) dexLoadCards(e);
+  if (dex.open[key] && e.copies > 0) dexNeedColl();
   renderDex();
 }
 
-function dexLoadCards(e) {
-  var key = e.key, gen = ++dexCardGen;
-  dex.cards[key] = { busy: true, gen: gen };
-  call('searchCollection', '', '', { dex: e.nr, sort: 'set', desc: false }).then(function (res) {
-    var c = dex.cards[key];
-    if (!c || c.gen !== gen) return;
-    var groups = ((res && res.groups) || []).filter(function (g) {
-      return g.count > 0 && (key.indexOf('_') < 0 || (g.dexf || []).some(function (t) { return dexKeyOf(t) === key; }));
-    });
-    dex.cards[key] = { groups: groups, total: res ? res.total : 0 };
-    dexRedraw(key);
-  }).catch(function (err) {
-    var c = dex.cards[key];
-    if (!c || c.gen !== gen) return;
-    dex.cards[key] = { error: errText(err) };
-    dexRedraw(key);
-  });
+/** Die Karten eines Pokémon kommen aus der Sammlung im Browser (#36 A4): fehlt sie oder ist sie veraltet, laden. */
+function dexNeedColl() {
+  if ((!coll.all || coll.stale) && !coll.loading) loadCollection();
 }
+/** Nach dem Laden der Sammlung: aufgeklappte Pokémon neu zeichnen */
+function dexRedrawOpen() { Object.keys(dex.open).forEach(dexRedraw); }
+
 function dexRedraw(key) {
   var box = $('dx' + key), e = dexEntry(key);
   if (box && e && dex.open[key]) box.innerHTML = dexCardsHtml(e);
@@ -2225,10 +2214,10 @@ function dexCardsHtml(e) {
     return '<div class="notes">Noch keine Karte von ' + esc(e.name) + '.</div>' +
       '<div class="actions"><button class="btn" type="button" onclick="dexAdd(' + k + ')">Karte von ' + esc(e.name) + ' suchen</button></div>';
   }
-  var c = dex.cards[e.key];
-  if (!c || c.busy) return '<div class="spin">Lade Karten …</div>';
-  if (c.error) return '<div class="msg err">' + esc(c.error) + '</div>';
-  var html = c.groups.map(function (g) {
+  if (!coll.all) return coll.error ? '<div class="msg err">' + esc(coll.error) + '</div>' : '<div class="spin">Lade Karten …</div>';
+  var groups = coll.all.filter(function (g) { return g.count > 0 && collMatch(g, [], '', e.nr, e.key); });
+  groups.sort(function (a, b) { return collCmp(a, b, 'set', false); });
+  var html = groups.map(function (g) {
     var sub = [];
     if (g.setName) sub.push(esc(g.setName));
     if (g.localId) sub.push(esc(g.localId) + (g.setSize ? '/' + esc(g.setSize) : ''));
@@ -2239,8 +2228,7 @@ function dexCardsHtml(e) {
       '<div class="s">' + sub.join(' · ') + '</div><div class="s">' + esc(g.count) + '× · ' +
       (isNaN(p) ? 'kein Preis' : esc(eur(p)) + (g.priceManual ? ' manuell' : '')) + '</div></div></div>';
   }).join('');
-  if (!c.groups.length) html = '<div class="notes">Keine Karten gefunden.</div>';
-  else if (c.total > c.groups.length && e.key.indexOf('_') < 0) html += '<div class="notes">Weitere Karten in der Sammlung.</div>';
+  if (!groups.length) html = '<div class="notes">Keine Karten gefunden.</div>';
   return html + '<div class="actions"><button class="btn" type="button" onclick="dexOpenColl(' + k + ')">In Sammlung öffnen</button></div>';
 }
 

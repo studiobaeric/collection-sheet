@@ -182,7 +182,7 @@ t.section('addCard / addFreeCard');
 }
 
 // ---------------------------------------------------------------------------
-t.section('searchCollection');
+t.section('Suche in der Sammlung (getCollection + Suche im Browser, #36 A4)');
 {
   const env = setup();
   importeSheet(env, [{ nr: 3, name: 'Pokemon Ordner', id: 'SRC1' }]);
@@ -193,7 +193,7 @@ t.section('searchCollection');
   env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
   ok('Set-Daten gleich beim Hinzufügen, auch neuer Sets (#43)', env.data().every(r => /^\d{4}-\d\d-\d\d$/.test(r.setDate)), env.data().map(r => [r.id, r.setDate]));
-  let res = env.uiCall('searchCollection', '', '');
+  let res = env.search('', '');
   ok('groups total', res.total === 3 && res.groups.length === 3, res.total);
   eq('sort by set date (base1 first)', res.groups.map(g => g.gkey), ['base1-4|holo|', 'swsh3-025|normal|', 'swsh3-025|normal|Snowflake']);
   const g = res.groups[1];
@@ -206,20 +206,20 @@ t.section('searchCollection');
   ok('row shape', g.rows.every(r => ['eid', 'key', 'cond', 'lang', 'count', 'origin', 'originLabel', 'isImport', 'importNr', 'extras'].every(k => k in r)) &&
     g.rows[2].isImport === true && g.rows[2].importNr === 3 && g.rows[0].isImport === false && g.rows[0].importNr === null, g.rows);
   ok('row eid matches addCard', g.rows[1].eid === a.eid);
-  res = env.uiCall('searchCollection', 'snow', '');
+  res = env.search('snow', '');
   ok('text matches version', res.total === 1 && res.groups[0].version === 'Snowflake', res.groups.map(x => x.gkey));
-  res = env.uiCall('searchCollection', '25/189', '');
+  res = env.search('25/189', '');
   ok('number with set size', res.total === 2, res.total);
-  res = env.uiCall('searchCollection', 'glurak 4', '');
+  res = env.search('glurak 4', '');
   ok('name + number', res.total === 1 && res.groups[0].gkey === 'base1-4|holo|', res.groups.map(x => x.gkey));
-  res = env.uiCall('searchCollection', '', 'Darkness Ablaze');
+  res = env.search('', 'Darkness Ablaze');
   ok('set filter via English set name', res.total === 2, res.total);
   // count-0-Gruppen ans Ende
-  const b = env.uiCall('searchCollection', 'glurak 4', '').groups[0].rows[0];
+  const b = env.search('glurak 4', '').groups[0].rows[0];
   env.uiCall('adjustEntry', b.eid, -1);
-  res = env.uiCall('searchCollection', '', '');
+  res = env.search('', '');
   ok('count 0 group last', res.groups[res.groups.length - 1].gkey === 'base1-4|holo|' && res.groups[res.groups.length - 1].count === 0, res.groups.map(x => [x.gkey, x.count]));
-  // höchstens 60 Gruppen
+  // ohne Grenze (früher höchstens 60 Gruppen)
   const c = env.ctx;
   c.withLock_(() => {
     const rows = [];
@@ -227,9 +227,9 @@ t.section('searchCollection');
     c.appendDataRows_(rows);
     c.afterDataChange_();
   });
-  res = env.uiCall('searchCollection', '', '');
-  ok('60-group cap', res.total === 68 && res.groups.length === 60, [res.total, res.groups.length]);
-  const fg = env.uiCall('searchCollection', 'Karte', 'Ordner').groups.find(x => x.name === 'Karte 7');
+  res = env.search('', '');
+  ok('alle Gruppen, keine Grenze', res.total === 68 && res.groups.length === 68, [res.total, res.groups.length]);
+  const fg = env.search('Karte', 'Ordner').groups.find(x => x.name === 'Karte 7');
   ok('free group flags', fg && fg.isFree && fg.image === '' && fg.price === null && fg.source === 'frei', fg);
 }
 
@@ -367,7 +367,7 @@ t.section('setGroupOwnPrice / Gruppen');
   ok('own price on all rows', env.data().every(x => x.ownPrice === 4.2 && x.ownPriceDate === TODAY));
   g = groupBy(env, a.gkey);
   ok('Gruppen effective price + manuell date', g['Preis (EUR)'] === 4.2 && g['Preisstand'] === 'manuell ' + TODAY_DMY, g['Preisstand']);
-  const s = env.uiCall('searchCollection', '', '').groups[0];
+  const s = env.search('', '').groups[0];
   ok('search shows manual price', s.price === 4.2 && s.priceManual && s.ownPrice === 4.2);
   r = env.uiCall('setGroupOwnPrice', a.gkey, null);
   ok('clear own price', r.price === 1.5 && r.priceManual === false && env.data().every(x => x.ownPrice === '' && x.ownPriceDate === ''), r);
@@ -458,7 +458,7 @@ t.section('linkFreeGroup');
   const free = env.uiCall('addFreeCard', { name: 'Glurak alt', setName: 'Flammende', number: '25', condition: 'NM', qty: 1, ownPrice: 9 });
   const c = env.ctx;
   const imp = addImportRow(env, { free: true, name: 'Glurak alt', setName: 'Flammende', localId: '25' }, { nr: 3, fp: 'fz', cond: 'LP', count: 1, ownPrice: 9 });
-  ok('free group has hand + import row', env.uiCall('searchCollection', 'Glurak alt', '').groups[0].rows.length === 2);
+  ok('free group has hand + import row', env.search('Glurak alt', '').groups[0].rows.length === 2);
   const r = env.uiCall('linkFreeGroup', free.gkey, 'swsh3-025', 'de', 'base');
   ok('link returns new gkey', r.gkey === 'swsh3-025|normal|', r);
   const d = env.data();
@@ -717,7 +717,7 @@ t.section('Code-Regeln');
   ok('no require/import in Code.gs', !/\brequire\(|^\s*import\s/m.test(src));
   const env = fresh();
   const pub = Object.keys(env.ctx).filter(k => typeof env.ctx[k] === 'function' && !/_$/.test(k));
-  const want = ['getUiConfig', 'addCard', 'addFreeCard', 'searchCollection', 'adjustEntry', 'revertAdjust', 'editEntry',
+  const want = ['getUiConfig', 'addCard', 'addFreeCard', 'getCollection', 'adjustEntry', 'revertAdjust', 'editEntry',
     'setGroupOwnPrice', 'linkFreeGroup', 'getSetSuggestions', 'setViewExtras', 'include', 'doGet', 'kartenErfassen', 'searchCards', 'getCardDetail', 'getCardBySetNumber'];
   ok('public API present', want.every(n => pub.indexOf(n) >= 0), want.filter(n => pub.indexOf(n) < 0));
 }

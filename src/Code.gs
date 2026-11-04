@@ -114,7 +114,6 @@ const SIGNED_EUR_FORMAT = '+#,##0.00 "€";-#,##0.00 "€";#,##0.00 "€"';
 const SIGNED_PCT_FORMAT = '+0 %;-0 %;0 %';
 
 const MAX_CANDIDATES = 24;
-const MAX_GROUPS = 60;
 const CARD_CACHE_SECS = 1800; // Karten von tcgdex zwischenspeichern (fetchCard_)
 // TCG Pocket (digital, kein Cardmarket-Preis): A1, A1a, A2b, B1, P-A, P-B …
 const POCKET_SET_RE = /^(?:[AB]\d+[a-z]?|P-[A-Z])$/;
@@ -4015,19 +4014,6 @@ function getUiConfig() {
   };
 }
 
-/** Passt ein Suchwort zur Karte? Zahlen: Nummer (025/165), sonst Teil von Name, Name englisch, Sonderversion oder Künstler. */
-function matchWord_(r, w) {
-  if (/\d/.test(w)) {
-    const p = parseNumberInput_(w);
-    if (normalizeNumber_(r[COL.localId]) !== p.norm) return false;
-    if (p.size && Number(r[COL.setSize]) !== p.size) return false;
-    return true;
-  }
-  const lw = w.toLowerCase();
-  return String(r[COL.name]).toLowerCase().indexOf(lw) >= 0 || String(r[COL.nameEn]).toLowerCase().indexOf(lw) >= 0 ||
-    String(r[COL.version]).toLowerCase().indexOf(lw) >= 0 || String(r[COL.illustrator]).toLowerCase().indexOf(lw) >= 0;
-}
-
 /** Eine Exemplar-Zeile fürs UI. */
 function rowForUi_(r, headers, info) {
   const extras = {};
@@ -4041,7 +4027,7 @@ function rowForUi_(r, headers, info) {
 }
 
 /**
- * Eine Gruppe fürs UI (Form wie searchCollection().groups[i]). refs (optional): Vergleichspreise aus dem Kartenverlauf.
+ * Eine Gruppe fürs UI (Grundlage von collGroup_). refs (optional): Vergleichspreise aus dem Kartenverlauf.
  * chg: Veränderung des Trendpreises {7|30|90: {eur, pct, since} oder null}, auch bei eigenem Preis (das UI zeigt sie dann nicht).
  */
 function groupForUi_(gkey, rows, headers, info, refs) {
@@ -4072,69 +4058,7 @@ function groupForUi_(gkey, rows, headers, info, refs) {
 }
 
 /**
- * Suche im Datenblatt für den Tab Sammlung. -> {total, groups: [...], sort, desc, dex} (höchstens 60 Gruppen).
- * Gruppe = Karte + Variante + Sonderversion, mit allen Exemplar-Zeilen (rows).
- * opts (optional): {sort: Schlüssel aus COLL_SORTS (Standard 'set'), desc: true/false (Standard je Sortierung),
- *   dex: nur Karten dieses Pokémon (Pokédex-Nummer)}. Karten mit 0 Exemplaren stehen immer am Ende.
- */
-function searchCollection(query, setText, opts) {
-  ensureSchema_();
-  opts = opts || {};
-  const sort = COLL_SORTS.hasOwnProperty(opts.sort) ? String(opts.sort) : 'set';
-  const desc = opts.desc == null || opts.desc === '' ? COLL_SORTS[sort].desc : opts.desc === true || opts.desc === 'true';
-  const dexNr = Math.max(0, Math.floor(Number(opts.dex) || 0));
-  let st = dataStore_();
-  // Zeilen ohne Eintrag-ID oder mit altem Schlüssel (z. B. von einer alten Web-App-Bereitstellung): erst
-  // reparieren, sonst zeigt die Liste Exemplare, die sich nicht ändern lassen
-  if (needsRepair_(st.rows)) {
-    withLock_(afterDataChange_);
-    st = dataStore_();
-  }
-  const rows = st.rows;
-  const look = lookups_();
-  const words = String(query || '').trim().split(/\s+/).filter(Boolean);
-  const stx = String(setText || '').trim().toLowerCase();
-  const stIds = stx ? matchSets_(look.sets, stx) : [];
-  let groups = groupRows_(rows).map(function (g) {
-    return { gkey: g.gkey, rows: g.idx.map(function (i) { return rows[i]; }) };
-  }).filter(function (g) {
-    const r = orderGroupRows_(g.rows)[0];
-    if (stx && String(r[COL.setName]).toLowerCase().indexOf(stx) < 0 &&
-        String(r[COL.setId]).toLowerCase() !== stx &&
-        stIds.indexOf(String(r[COL.setId])) < 0) return false;
-    return words.every(function (w) { return matchWord_(r, w); });
-  });
-  const needDex = dexNr > 0 || sort === 'dex';
-  const cache = look.dexIds;
-  groups.forEach(function (g) {
-    g.p = orderGroupRows_(g.rows)[0];
-    g.count = g.rows.reduce(function (s, r) { return s + (Number(r[COL.count]) || 0); }, 0);
-    g.setDate = groupSetDate_(g.rows);
-    if (needDex) g.dex = dexOfRow_(g.p, cache);
-  });
-  if (dexNr) groups = groups.filter(function (g) { return g.dex.indexOf(dexNr) >= 0; });
-  groups.forEach(function (g) { g.sortVal = collSortValue_(g, sort, look.ranks); });
-  groups.sort(function (a, b) { return collCompare_(a, b, sort, desc); });
-  const info = look.info;
-  const refs = look.refs;
-  return {
-    total: groups.length,
-    sort: sort,
-    desc: desc,
-    dex: dexNr || null,
-    groups: groups.slice(0, MAX_GROUPS).map(function (g) {
-      const o = groupForUi_(g.gkey, g.rows, st.headers, info, refs);
-      if (needDex) {
-        o.dex = g.dex;
-        o.dexf = look.dexForms ? dexTokensOfRow_(g.p, cache, dexFormCtx_(look)) : g.dex.map(String); // Formen (#55)
-      }
-      return o;
-    })
-  };
-}
-
-/**
- * Die ganze Sammlung für den Tab Sammlung (#30): alle Gruppen wie in searchCollection, ohne Grenze und unsortiert
+ * Die ganze Sammlung für Sammlung- und Pokédex-Tab (#30, #36 A4): alle Gruppen, ohne Grenze und unsortiert
  * (Reihenfolge wie im Blatt Daten). Suchen, Filtern und Sortieren macht der Browser mit den Werten in k, ohne weitere
  * Aufrufe. -> {groups: [collGroup_], total}
  */
@@ -4142,7 +4066,7 @@ function getCollection() {
   tmrStart_('getCollection');
   ensureSchema_();
   let st = dataStore_();
-  if (needsRepair_(st.rows)) { // wie searchCollection: erst reparieren, sonst lassen sich Exemplare nicht ändern
+  if (needsRepair_(st.rows)) { // erst reparieren, sonst lassen sich Exemplare nicht ändern
     withLock_(afterDataChange_);
     st = dataStore_();
   }
@@ -4211,8 +4135,8 @@ function putLookups_(look) {
 
 /**
  * Eine Gruppe fürs UI (groupForUi_) mit dex (Pokédex-Nummern) und k: Werte zum Suchen (words, num, size), für den
- * Set-Filter (setId, sets: Setnamen deutsch und englisch) und zum Sortieren (wie setOrder_ und collSortValue_).
- * Der Browser vergleicht damit genau wie searchCollection.
+ * Set-Filter (setId, sets: Setnamen deutsch und englisch) und zum Sortieren. Suchen und Sortieren macht nur der
+ * Browser (collMatch, collCmp in Ui.html, #36 A4).
  */
 function collGroup_(gkey, rows, headers, ctx) {
   const o = groupForUi_(gkey, rows, headers, ctx.info, ctx.refs);
@@ -5836,18 +5760,6 @@ function groupSetDate_(rows) {
   return '';
 }
 
-/** Reihenfolge „Set“: Erscheinungsdatum, Set, Nummer, Variante, Sonderversion, Name. a, b = {p: Daten-Zeile, setDate} */
-function setOrder_(a, b) {
-  const x = a.p, y = b.p;
-  return cmp_(a.setDate, b.setDate) ||
-    cmp_(String(x[COL.setId]), String(y[COL.setId])) ||
-    cmp_(Number(x[COL.numSort]) || 0, Number(y[COL.numSort]) || 0) ||
-    cmp_(String(x[COL.localId]), String(y[COL.localId])) ||
-    cmp_(String(x[COL.variant]), String(y[COL.variant])) ||
-    cmp_(versionText_(x[COL.version]), versionText_(y[COL.version])) ||
-    cmp_(String(x[COL.name]), String(y[COL.name]));
-}
-
 /** Feste Zeilen von Pokédex-Daten je Pokémon: [Nr., Name, Name englisch, Generation, Auswahl „#25 Pikachu“]. */
 function dexStaticRows_(max) {
   const names = dexNames_();
@@ -6575,42 +6487,6 @@ function syncRarities_(rows) {
   sh.getRange(last + 1, 1, add.length, 1).setNumberFormat('@');
   sh.getRange(last + 1, 1, add.length, 2).setValues(add);
   return add.length;
-}
-
-// ---------- Sortierung der Sammlung (Seitenleiste und Web-App) ----------
-
-/** Sortierwert einer Gruppe g = {p, rows, count, dex} für COLL_SORTS-Schlüssel sort; null = ans Ende. */
-function collSortValue_(g, sort, ranks) {
-  if (sort === 'dex') return g.dex && g.dex.length ? g.dex[0] : null;
-  if (sort === 'rarity') {
-    const k = rarityKey_(g.p[COL.rarity]);
-    return k && ranks[k] != null ? ranks[k] : null;
-  }
-  if (sort === 'name') return String(g.p[COL.name] || '').toLowerCase() || null;
-  if (sort === 'price') return groupPrice_(g.rows).price;
-  if (sort === 'added') {
-    let t = null;
-    g.rows.forEach(function (r) { const x = timeOf_(r[COL.added]); if (isFinite(x) && (t == null || x > t)) t = x; });
-    return t;
-  }
-  return null;
-}
-
-/**
- * Vergleich zweier Gruppen: Karten mit 0 Exemplaren immer am Ende, dann Gruppen ohne Sortierwert, dann der Wert
- * in der gewählten Richtung, bei Gleichstand nach Set und Nummer. Für „Set“ dreht desc die Set-Reihenfolge.
- */
-function collCompare_(a, b, sort, desc) {
-  const dir = desc ? -1 : 1;
-  const z = (a.count > 0 ? 0 : 1) - (b.count > 0 ? 0 : 1);
-  if (z) return z;
-  if (sort === 'set') return dir * setOrder_(a, b);
-  const x = a.sortVal, y = b.sortVal;
-  if (x == null || y == null) {
-    if (x != null || y != null) return x == null ? 1 : -1;
-    return setOrder_(a, b);
-  }
-  return dir * cmp_(x, y) || setOrder_(a, b);
 }
 
 // ---------------------------------------------------------------------------

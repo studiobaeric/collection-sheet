@@ -355,7 +355,7 @@ function seedImport(env) {
     t.ok('Ui.html ruft Serverfunktionen auf', names.length >= 12, names);
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
     const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCardForms', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
-      'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'searchCollection', 'setGroupOwnPrice',
+      'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'setGroupOwnPrice',
       'setPrereleases', 'takeoverPreview', 'takeoverRun', 'translateCardName', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
     // Argumentreihenfolge wie in Code.gs
@@ -367,7 +367,6 @@ function seedImport(env) {
     t.eq('linkFreeGroup(gkey, cardId, dataLang, variant, cards)', sig('linkFreeGroup'), ['gkey', 'cardId', 'dataLang', 'variant', 'cards']);
     t.eq('getCardDetail(id, lang)', sig('getCardDetail'), ['id', 'lang']);
     t.eq('getCardBySetNumber(setId, number)', sig('getCardBySetNumber'), ['setId', 'number']);
-    t.eq('searchCollection(query, setText, opts)', sig('searchCollection'), ['query', 'setText', 'opts']);
     t.eq('revertAdjust(token)', sig('revertAdjust'), ['token']);
   }
 
