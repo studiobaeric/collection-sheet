@@ -11,6 +11,9 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 
 - Set-Symbole erscheinen jetzt wirklich statt des Set-Namens
 - Übernahme zeigt Schritt für Schritt, wie weit sie ist
+- Übernahme behält die Nummern der Pokédex-Formen
+- Alte Tabelle heißt nach der Übernahme z. B. „Sammlung (alt 1.2.2)“
+- Pokédex: alle Nummern rechtsbündig, auch Formen wie 3.1
 - Pokédex-Tab zeigt die Karten eines Pokémon sofort, ohne Laden
 - Preislauf schneller: Preise werden seltener ins Blatt geschrieben
 - Tabellen vor Version 1.0 lassen sich nur noch über den Import einlesen
