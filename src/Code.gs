@@ -1583,7 +1583,6 @@ function onOpen() {
     .addItem('Aus alter Tabelle übernehmen', 'uebernahmeAnzeigen'));
   menu
     .addItem('Ansicht neu aufbauen', 'ansichtNeuAufbauen')
-    .addItem('API prüfen', 'apiPruefen')
     .addItem('Web-App-Link anzeigen', 'webAppLinkAnzeigen')
     .addToUi();
   // Startseite ist das Dashboard (Google öffnet sonst das zuletzt offene Blatt); ein verstecktes bleibt versteckt
@@ -5241,6 +5240,7 @@ function groupChanges_(rows, refs) {
 // 9. API-Prüfung: beantwortet die Punkte aus „Beim Bau zu prüfen"
 // ---------------------------------------------------------------------------
 
+// Nur noch im Apps-Script-Editor aufrufbar, nicht im Menü (#36 B4)
 function apiPruefen() {
   const ss = ss_();
   const sh = getOrCreateSheet_(ss, SHEETS.check);

@@ -385,7 +385,7 @@ function seedImport(env) {
   t.ok('Sammlung-Formel liest Gruppen', /FILTER\(VSTACK\('Gruppen'!A2:AG, ""\)/.test(env.sheet('Sammlung').getRange('A6').getFormula()));
   t.ok('nächtlicher Preislauf-Trigger', env.triggers.filter(x => x.fn === 'naechtlicherPreislauf').length === 1);
   t.ok('Menü mit allen Einträgen', env.ui.menus.length === 1 && env.ui.menus[0].items.map(x => x[1]).join(',') ===
-    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,apiPruefen,webAppLinkAnzeigen', env.ui.menus);
+    'kartenErfassen,zumDashboard,preiseJetztAktualisieren,uebersetzungUndSetsAktualisieren,ansichtNeuAufbauen,webAppLinkAnzeigen', env.ui.menus);
   const E = boot(env, 'sidebar');
   const { $ } = E;
   await E.settle();

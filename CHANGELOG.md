@@ -9,7 +9,7 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 
 ## [1.2.2] – 2026-10-29
 
-- Set-Symbole erscheinen wieder, auch wenn tcgdex sie als .webp liefert
+- Set-Symbole: neuer Ladeversuch als .png (wirkt erst ab 1.2.3)
 - Bearbeiten: Variante änderbar, z. B. Reverse Holo, mit passendem Preis
 - Pokédex auf Wunsch mit Formen: Mega, Regional, Gigadynamax und mehr
 - Formen je Gruppe per Haken an, im Blatt Pokédex und im Pokédex-Tab
