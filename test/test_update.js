@@ -1084,5 +1084,69 @@ t.section('Release-Werkzeug und Kanal im Repo');
   fs.rmSync(tmp2, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+t.section('Code in die Vorlage: tools/vorlage.sh und Job „Vorlage“ (#67)');
+{
+  const cp = require('child_process');
+  const wf = read('.github/workflows/test.yml');
+  const mode = "(github.event_name == 'pull_request' || inputs.vorlage) && 'einspielen' || 'pruefen'";
+  t.ok('Job Vorlage: nach den Tests, mit Secret CLASPRC_JSON; einspielen nur bei PR oder Haken, sonst nachsehen', /\n {4}needs: test\n/.test(wf) &&
+    wf.indexOf('CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}') > 0 && wf.indexOf('sh tools/vorlage.sh ${{ ' + mode + ' }}') > 0 &&
+    wf.indexOf("startsWith(github.head_ref, 'version/')") > 0 && /vorlage:\n\s+description: .+\n\s+type: boolean\n\s+default: false/.test(wf));
+  t.eq('.clasp.json: Code aus src/', JSON.parse(read('.clasp.json')).rootDir, 'src');
+  t.ok('Anmeldung (.clasprc.json) kommt nie ins Repo', /^\.clasprc\.json$/m.test(read('.gitignore')));
+
+  // in einer Kopie, clasp ist eine Attrappe (npx im PATH), die ihre Aufrufe aufschreibt
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vorlage-'));
+  const bin = path.join(tmp, 'bin'), home = path.join(tmp, 'home'), log = path.join(tmp, 'aufrufe.txt');
+  [bin, home, path.join(tmp, 'tools'), path.join(tmp, 'src')].forEach(d => fs.mkdirSync(d, { recursive: true }));
+  fs.copyFileSync(path.join(SRC, '..', 'tools', 'vorlage.sh'), path.join(tmp, 'tools', 'vorlage.sh'));
+  fs.writeFileSync(path.join(bin, 'npx'), ['#!/bin/sh', 'echo "$*" >> "$FAKE_LOG"', 'case "$*" in',
+    '  *" pull") [ -n "$FAKE_PULL" ] || { echo "kein Zugriff" >&2; exit 1; }; printf "/*\\n *  Pokémon-Sammlung · Version %s\\n */\\n" "$FAKE_PULL" > Code.js ;;',
+    '  *" push --force") [ -z "$FAKE_PUSH_FAIL" ] || exit 1 ;;', 'esac', ''].join('\n'), { mode: 0o755 });
+  const V = /const TOOL_VERSION = '([^']*)'/.exec(read('src/Code.gs'))[1];
+  const rc = path.join(home, '.clasprc.json');
+  const prep = (version, scriptId) => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Code.gs'), withVersion(read('src/Code.gs'), version));
+    fs.writeFileSync(path.join(tmp, '.clasp.json'), J({ scriptId: scriptId, rootDir: 'src' }));
+    fs.rmSync(rc, { force: true });
+  };
+  const run = (args, env) => {
+    fs.writeFileSync(log, '');
+    const r = cp.spawnSync('sh', [path.join(tmp, 'tools', 'vorlage.sh')].concat(args), { encoding: 'utf8',
+      env: Object.assign({ PATH: bin + path.delimiter + process.env.PATH, HOME: home, FAKE_LOG: log, FAKE_PULL: '', FAKE_PUSH_FAIL: '' }, env) });
+    return { status: r.status, out: r.stdout + r.stderr, calls: fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  };
+  const SECRET = { CLASPRC_JSON: '{"tokens":{"default":{}}}' };
+  prep(V, 'SKRIPT-ID');
+  let r = run([]);
+  t.ok('ohne Modus: Exit 2 mit Aufruf', r.status === 2 && /pruefen\|einspielen/.test(r.out), r);
+  prep(V, '');
+  r = run(['einspielen'], SECRET);
+  t.ok('ohne Script-ID: Hinweis, Exit 0, kein clasp', r.status === 0 && /::notice .*Script-ID der Vorlage fehlt/.test(r.out) && !r.calls.length, r);
+  prep(V, 'SKRIPT-ID');
+  r = run(['einspielen']);
+  t.ok('ohne Anmeldung: Hinweis, Exit 0, kein clasp', r.status === 0 && /::notice .*Keine clasp-Anmeldung/.test(r.out) && !r.calls.length, r);
+  prep(V + '-beta.1', 'SKRIPT-ID');
+  r = run(['einspielen'], SECRET);
+  t.ok('Vorabversion: Hauptvorlage bleibt, kein clasp', r.status === 0 && /::notice .*Vorabversion/.test(r.out) && !r.calls.length, r);
+  prep(V, 'SKRIPT-ID');
+  r = run(['einspielen'], Object.assign({ FAKE_PULL: V }, SECRET));
+  t.ok('einspielen: push --force, dann nachsehen, Version passt', r.status === 0 && r.calls.length === 2 &&
+    /^--yes @google\/clasp@\d+\.\d+\.\d+ push --force$/.test(r.calls[0]) && / pull$/.test(r.calls[1]) && r.out.indexOf('Vorlage hat Version ' + V + '.') >= 0, r);
+  t.eq('Anmeldung aus dem Secret, nur für den Besitzer lesbar', [fs.readFileSync(rc, 'utf8'), (fs.statSync(rc).mode & 0o777).toString(8)], [SECRET.CLASPRC_JSON, '600']);
+  r = run(['einspielen'], { FAKE_PULL: '1.0.0' });
+  t.ok('einspielen, Vorlage danach auf anderer Version: Fehler, Exit 1', r.status === 1 && /::error .*Version 1\.0\.0 statt/.test(r.out), r);
+  r = run(['einspielen'], { FAKE_PULL: V, FAKE_PUSH_FAIL: '1' });
+  t.ok('einspielen, push scheitert: Exit 1, kein Nachsehen', r.status === 1 && r.calls.length === 1, r);
+  r = run(['pruefen'], { FAKE_PULL: '1.2.2' });
+  t.ok('pruefen: kein push, Version der Vorlage als Hinweis', r.status === 0 && r.calls.length === 1 && / pull$/.test(r.calls[0]) &&
+    /::notice .*Vorlage hat Version 1\.2\.2, src\/ hat/.test(r.out), r);
+  r = run(['pruefen']);
+  t.ok('pruefen, Vorlage nicht lesbar: Warnung, Exit 0', r.status === 0 && /::warning .*nicht lesen/.test(r.out), r);
+  t.ok('Nachsehen holt in einen leeren Ordner, die Kopie bleibt sauber', !fs.existsSync(path.join(tmp, 'Code.js')) && !fs.existsSync(path.join(tmp, 'src', 'Code.js')));
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 fs.rmSync(BASE_DIR, { recursive: true, force: true });
 t.done();

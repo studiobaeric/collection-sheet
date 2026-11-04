@@ -93,9 +93,9 @@ Tabellen vor Version 1.0 lassen sich nicht übernehmen, ihre Karten liest du üb
 | --- | --- |
 | `src/` | Die Dateien, die ins Apps-Script-Projekt gehören: `Code.gs`, `Ui.html`, `Import.gs`, `ImportUi.html`, `Update.gs`, `appsscript.json` |
 | `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen (die Neuerungen kommen aus `CHANGELOG.md`) |
-| `.github/` | `workflows/release.yml` legt beim Tag `v…` den GitHub-Release mit den Neuerungen aus `CHANGELOG.md` an |
+| `.github/` | `workflows/release.yml` legt beim Tag `v…` den GitHub-Release mit den Neuerungen aus `CHANGELOG.md` an, `workflows/test.yml` prüft jeden Push und schreibt bei einem Release-PR den Code in die Vorlage |
 | `assets/` | `dashboard/`: die Bilder der Dashboard-Knöpfe, die Tabellen laden sie von hier |
-| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look |
+| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look, `vorlage.sh` schreibt `src/` mit clasp in die Vorlage (Script-ID in `.clasp.json`) |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |
 | `test/` | Tests mit Apps-Script-Attrappen in Node (`npm install`, dann `npm test`) |
 | `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen, in `dashboard/` die Looks des Dashboards |
