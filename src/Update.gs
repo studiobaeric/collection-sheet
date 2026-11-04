@@ -519,8 +519,27 @@ function updSharingText_(sh) {
   return sh.added ? ' Wer die alte Tabelle sehen oder bearbeiten durfte, darf das jetzt auch hier.' : '';
 }
 
+// Fortschritt der Übernahme für die Seitenleiste (#61): takeoverRun schreibt jeden Schritt in den Zwischenspeicher,
+// die Seitenleiste fragt ihn währenddessen mit takeoverProgress ab (ohne Sperre, die hält takeoverRun).
+const TAKE_STEP_KEY = 'TAKE_STEP';
+
+function updTakeStep_(n, total, text) {
+  try { CacheService.getScriptCache().put(TAKE_STEP_KEY, JSON.stringify({ n: n, total: total, text: text }), 600); } catch (e) { /* nur Anzeige */ }
+}
+
+/** Stand der laufenden Übernahme (nur Seitenleiste). -> {n, total, text} oder null */
+function takeoverProgress() {
+  try { const v = CacheService.getScriptCache().get(TAKE_STEP_KEY); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+
 /** Übernahme ausführen (nur Seitenleiste). -> {message, cards, sheets, own, noteSheet, oldName, newName, shared} */
 function takeoverRun(url) {
+  try { return updTakeoverRun_(url); } finally {
+    try { CacheService.getScriptCache().remove(TAKE_STEP_KEY); } catch (e) { /* läuft von selbst ab */ }
+  }
+}
+
+function updTakeoverRun_(url) {
   const o = updOpenOld_(url);
   if (o.busy) throw new Error(UPD_TAKE_BUSY);
   const old = o.old, st = o.settings, id = old.getId();
@@ -531,6 +550,12 @@ function takeoverRun(url) {
   }
   const when = Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm');
   const tool = updOldToolSheets_(old, st);
+  const toCopy = updTakeoverSheets_().filter(function (n) { return tool[n] && old.getSheetByName(n); });
+  const ownSheets = updOwnSheets_(old, st);
+  // Schritte: Blätter, eigene Blätter, Datenformat, 4 aus setupSheets_, Auslöser, Freigaben, Stilllegen
+  const total = toCopy.length + ownSheets.length + 8;
+  let stepNr = 0;
+  const step = function (text) { updTakeStep_(++stepNr, total, text); };
   let started = false;
   const res = (function () {
     try {
@@ -553,14 +578,15 @@ function takeoverRun(url) {
         });
         let cards = 0;
         const copied = [];
-        updTakeoverSheets_().forEach(function (n) {
+        toCopy.forEach(function (n) {
+          step('Blatt „' + n + '“');
           const src = old.getSheetByName(n);
-          if (!src || !tool[n]) return;
           const dst = getOrCreateSheet_(ss, n);
           const rows = updCopyValues_(src, dst);
           if (n === SHEETS.data) cards = rows; else copied.push(n);
         });
-        updOwnSheets_(old, st).forEach(function (src) {
+        ownSheets.forEach(function (src) {
+          step('eigenes Blatt „' + src.getName() + '“');
           let name = src.getName();
           if (ss.getSheetByName(name)) name += ' (alt)';
           let i = 2;
@@ -587,6 +613,7 @@ function takeoverRun(url) {
   let note, shared;
   try {
     // Daten auf das Format dieses Codes bringen, dann alles neu aufbauen (ohne Sperre: die Funktionen sperren selbst)
+    step('Datenformat prüfen');
     settingSet_('SCHEMA_VERSION', '');
     migrateSchema_();
     const extras = (function () { try { return JSON.parse(st.map.VIEW_EXTRAS || '[]'); } catch (e) { return []; } })();
@@ -595,11 +622,14 @@ function takeoverRun(url) {
       VIEW_EXTRAS: JSON.stringify((Array.isArray(extras) ? extras : []).map(String).filter(function (n) { return have.indexOf(n) >= 0; })),
       PRERELEASES: st.map.PRERELEASES === '1' ? '1' : ''
     });
-    setupSheets_(ss, true);
+    setupSheets_(ss, true, step);
     showDashboard_(); // die übernommene Tabelle startet im Dashboard (#28)
+    step('Auslöser einrichten');
     setupTriggers_();
     settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: settingGet_('SETUP_AT') || when });
+    step('Freigaben übertragen');
     shared = updCopySharing_(old, ss);
+    step('Alte Tabelle stilllegen');
     note = updMarkOld_(old, st, ss.getUrl(), when);
   } catch (e) {
     updTakeFailed_(id);

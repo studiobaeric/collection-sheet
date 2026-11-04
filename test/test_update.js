@@ -618,7 +618,15 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   t.ok('Vorschau: Karten, Exemplare, Version, eigene Blätter', p.cards === 2 && p.copies === 3 && p.version === '1.0.0' && J(p.own) === J(['Notizen']) &&
     p.sheets.some(s => s.name === 'Verlauf' && s.rows === 1), p);
   t.ok('Vorschau ändert nichts', env.data().length === 0 && !settingOf(ob, 'TAKEN_OVER_BY'));
+  const steps = [];
+  env.ctx.__steps = steps;
+  env.ctx.__put = env.ctx.updTakeStep_;
+  env.run('updTakeStep_ = function (n, total, text) { __steps.push([n, total, text]); __put(n, total, text); }');
   const r = env.uiCall('takeoverRun', url);
+  t.ok('Fortschritt (#61): Schritte 1 bis total, Blätter mit Namen, zuletzt Stilllegen', steps.length > 10 && steps.every((x, i) => x[0] === i + 1 && x[1] === steps[0][1]) &&
+    steps[steps.length - 1][0] === steps[0][1] && steps[0][2] === 'Blatt „Daten“' && steps.some(x => x[2] === 'eigenes Blatt „Notizen“') &&
+    steps[steps.length - 1][2] === 'Alte Tabelle stilllegen', steps);
+  t.ok('Fortschritt danach leer', env.uiCall('takeoverProgress') === null);
   t.ok('Übernahme: Meldung', r.cards === 2 && /2 Einträge/.test(r.message) && J(r.own) === J(['Notizen']), r);
   t.ok('ab 1.0: legt sich selbst still', /jetzt stillgelegt/.test(r.message) && r.noteSheet === 'Übernommen' &&
     settingOf(ob, 'TAKEN_OVER_SHEET') === 'Übernommen');

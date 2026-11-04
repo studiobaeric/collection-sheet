@@ -1698,7 +1698,17 @@ function boot(mode, opts) {
     E.click(E.btn($('takeBox'), 'Prüfen'));
     await E.respond('takeoverPreview');
     E.click(E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    // #61: Fortschritt während der Übernahme
+    E.win.takeProgPoll();
+    await E.respond('takeoverProgress', { value: { n: 3, total: 12, text: 'Blatt „Verlauf“' } });
+    const bar = $('takeMsg').querySelector('.take-bar');
+    ok('Fortschritt: Schritt, Blatt und Balken (#61)', /Schritt 3 von 12: Blatt „Verlauf“/.test($('takeMsg').textContent) && !!bar && bar.getAttribute('aria-valuenow') === '25',
+      $('takeMsg').innerHTML);
     await E.respond('takeoverRun', { error: 'Die Übernahme ist nicht fertig geworden (Zeit). Bitte versuch es noch einmal.' });
+    ok('abgebrochen: letzter Schritt in der Meldung (#61)', /Zuletzt: Schritt 3 von 12: Blatt „Verlauf“/.test($('takeMsg').textContent), $('takeMsg').textContent);
+    E.win.takeProgPoll();
+    await E.respond('takeoverProgress', { value: { n: 4, total: 12, text: 'spät' } });
+    ok('späte Antwort nach dem Ende überschreibt nichts', !/spät/.test($('takeMsg').textContent));
     ok('abgebrochen: Meldung, Noch einmal versuchen, Feld frei, Info neu', /nicht fertig geworden/.test($('takeMsg').textContent) && !!E.btn($('takeMsg'), 'Noch einmal versuchen') &&
       !$('takeUrl').disabled && !$('takeCheck').disabled && E.calls('getUpdateInfo').length === 1);
     await E.respond('getUpdateInfo');

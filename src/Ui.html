@@ -58,6 +58,8 @@
   .chev { font-size: 10px; color: var(--muted); }
   .undo { display: inline-block; font-size: 14px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 12px 16px 12px 0; margin: -8px 0; min-height: 44px; text-decoration: underline; }
   .spin { color: var(--muted); font-size: 14px; margin-top: 10px; }
+  .take-bar { height: 10px; background: var(--soft); border-radius: 5px; overflow: hidden; margin: 8px 0 6px; }
+  .take-bar div { height: 100%; background: var(--accent); transition: width .3s; }
   .gx { border-left: 3px solid var(--soft); margin: 2px 0 10px; padding: 0 0 4px 10px; }
   .erow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
   .erow .einfo { flex: 1 1 140px; min-width: 0; font-size: 14px; }
@@ -2549,6 +2551,20 @@ function takeLock(on) {
   updBar();
 }
 
+// Fortschritt (#61): während takeoverRun alle 1,5 s den Schritt vom Server holen und als Balken zeigen
+var takePoll = null, takeProg = null;
+function takeProgText(p) { return 'Schritt ' + p.n + ' von ' + p.total + ': ' + p.text; }
+function takeProgPoll() {
+  call('takeoverProgress').then(function (p) {
+    if (!takeBusy || !p || !p.total) return;
+    takeProg = p;
+    var pct = Math.round(Math.min(p.n, p.total) * 100 / p.total);
+    $('takeMsg').innerHTML = '<div class="spin">' + esc(takeProgText(p)) + ' …</div>' +
+      '<div class="take-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><div style="width:' + pct + '%"></div></div>';
+  }).catch(function () { /* nur Anzeige, der Spinner bleibt */ });
+}
+function takeProgStop() { clearInterval(takePoll); takePoll = null; }
+
 function takeRun() {
   if (!takeUrlChecked || takeBusy) return;
   if ($('takeUrl').value.trim() !== takeUrlChecked) { takePreview(); return; } // Link wurde geändert: neu prüfen
@@ -2557,7 +2573,11 @@ function takeRun() {
   takeGen++;
   takeLock(true);
   spinner('takeMsg', 'Übernehme die Daten … das kann eine Minute dauern.');
+  takeProg = null;
+  takeProgStop();
+  takePoll = setInterval(takeProgPoll, 1500);
   call('takeoverRun', url).then(function (r) {
+    takeProgStop();
     // bis die neue Info da ist: nichts mehr zum Übernehmen anbieten
     if (UPD) { UPD.pendingTake = ''; UPD.collectionEmpty = false; UPD.takenFrom = url; }
     markStale(); // ganz neue Sammlung
@@ -2567,8 +2587,9 @@ function takeRun() {
     loadUiConfig();
     updLoad(false);
   }).catch(function (e) {
+    takeProgStop();
     takeLock(false);
-    var msg = errText(e);
+    var msg = errText(e) + (takeProg ? ' Zuletzt: ' + takeProgText(takeProg) + '.' : '');
     // nur ein angefangener Lauf lässt sich wiederholen (z. B. Zeitlimit); andere Fehler ändert ein neuer Versuch nicht
     setMsg('takeMsg', esc(msg) + (/nicht fertig geworden/.test(msg)
       ? '<div class="actions"><button class="btn" type="button" onclick="takePreview()">Noch einmal versuchen</button></div>' : ''), 'err');

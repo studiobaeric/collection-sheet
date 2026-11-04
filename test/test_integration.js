@@ -356,7 +356,7 @@ function seedImport(env) {
     names.forEach(n => t.ok('öffentlich vorhanden: ' + n, typeof env.ctx[n] === 'function' && !/_$/.test(n)));
     const want = ['addCard', 'addFreeCard', 'adjustEntry', 'editEntry', 'getCardBySetNumber', 'getCardDetail', 'getCardForms', 'getCollection', 'getFileVersions', 'getPokedex', 'getSetSuggestions',
       'getUiConfig', 'getUpdateInfo', 'linkFreeGroup', 'revertAdjust', 'searchCards', 'setGroupOwnPrice',
-      'setPrereleases', 'takeoverPreview', 'takeoverRun', 'translateCardName', 'updateCopy'];
+      'setPrereleases', 'takeoverPreview', 'takeoverProgress', 'takeoverRun', 'translateCardName', 'updateCopy'];
     t.eq('genau die erwarteten Aufrufe', names, want);
     // Argumentreihenfolge wie in Code.gs
     const code = fs.readFileSync(path.join(SRC, 'Code.gs'), 'utf8');
