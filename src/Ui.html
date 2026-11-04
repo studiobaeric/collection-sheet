@@ -2031,7 +2031,8 @@ var DEX_GEN_ENDS = [151, 251, 386, 493, 649, 721, 809, 905, 1025];
 var DEX_FORM_GROUPS = [['mega', 'Mega'], ['regional', 'Regionalformen'], ['gmax', 'Gigadynamax'], ['gender', 'Geschlechter'], ['other', 'Weitere Formen']];
 // entries: [[Nr, Name, Name englisch, Generation, Karten, Exemplare, Wert]] von getPokedex(); forms: [[Kennung, Nr, Form,
 // Gruppe, Name, Name englisch]]; toks: {Kennung: [Karten, Exemplare, Wert]}; show: eingeblendete Gruppen (pro Gerät);
-// rows: die Zeilen der Liste (dexBuild); open und cards nach dem Schlüssel einer Zeile ('6' Art, '6_2' Form)
+// rows: die Zeilen der Liste (dexBuild); open nach dem Schlüssel einer Zeile ('6' Art, '6_2' Form). Die Karten eines
+// aufgeklappten Pokémon kommen aus coll.all (Tab Sammlung, #36 A4)
 var dex = { entries: null, forms: [], toks: {}, show: {}, rows: [], fby: {}, has: {}, status: 'all', open: {} };
 var dexReq = 0, dexTimer = null;
 
