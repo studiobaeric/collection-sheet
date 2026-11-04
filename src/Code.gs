@@ -2502,8 +2502,9 @@ function dexListFormula_(names) {
     ['hit', '(qry="")+(TO_TEXT(CHOOSECOLS(dat, 1))=nqq)+(TO_TEXT(CHOOSECOLS(dat, 12))=nqq)+ISNUMBER(SEARCH(qry, CHOOSECOLS(dat, 2)))+' +
       'ISNUMBER(SEARCH(qry, CHOOSECOLS(dat, 3)))']
   ];
+  // ohne Treffer steht die Meldung in B, Spalte A ist schmal und rechtsbündig (#63); so breit wie die Liste (6 Spalten)
   return '=IFERROR(ARRAYFORMULA(' + letFormula_(pairs, 'CHOOSECOLS(FILTER(dat, sts*gen*hit>0), 12, 2, 4, 5, 6, 7)') + '), ' +
-    '"Keine Pokémon gefunden")';
+    'HSTACK("", "Keine Pokémon gefunden", "", "", "", ""))';
 }
 
 /**
@@ -5972,6 +5973,7 @@ function setupPokedexSheet_(ss, keepControls) {
   sh.getRange('F6:F').setNumberFormat(EUR_FORMAT);
   sh.getRange('O6:P').setNumberFormat(EUR_FORMAT);
   sh.getRange('A6:P').setVerticalAlignment('middle');
+  sh.getRange('A6:A').setHorizontalAlignment('right'); // Arten sind Zahlen, Formen Text („6.2“), beide rechts (#63)
   sh.setFrozenRows(5);
   [60, 160, 90, 70, 90, 100, 24, 70, 210, 170, 80, 110, 170, 70, 100, 100]
     .forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
