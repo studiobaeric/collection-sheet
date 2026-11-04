@@ -33,4 +33,8 @@ have=$(head -n 5 "$tmp"/Code.* 2>/dev/null | sed -n 's/.* Version \([0-9][0-9A-Z
 rm -rf "$tmp"
 if [ "$have" = "$version" ]; then echo "Vorlage hat Version $have."; exit 0; fi
 if [ "$mode" = einspielen ]; then say error "Nach dem Einspielen hat die Vorlage Version ${have:-?} statt $version."; exit 1; fi
-say notice "Vorlage hat Version ${have:-?}, src/ hat $version. Vor dem Release-PR ist das normal."
+if [ "${GITHUB_REF:-}" = refs/heads/main ]; then
+  say warning "Vorlage hat Version ${have:-?}, main hat $version: Vorlage einspielen (Run workflow mit Haken) und dort Karten erfassen öffnen."
+else
+  say notice "Vorlage hat Version ${have:-?}, src/ hat $version. Vor dem Einspielen ist das normal."
+fi

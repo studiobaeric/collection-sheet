@@ -1,8 +1,8 @@
 # Test-Lauf (#36 D4): bei jedem Push auf einen Versions-Branch oder main und bei jedem PR nach main.
 # Prüft, dass alle Test-Suiten grün sind (npm test), dass src/Import.gs zu parts/*.gs passt (build_import.sh) und dass
 # Kanal, CHANGELOG.md und die Köpfe der Dateien zur Version passen (tools/release.js --check).
-# Danach der Job „Vorlage“ (#67): Bei einem PR von version/… nach main schreibt er den Code aus src/ in die Vorlage,
-# sonst sieht er nur nach, welche Version sie hat. Von Hand: „Run workflow“ mit Haken bei „vorlage“.
+# Danach der Job „Vorlage“ (#67): Er sieht nach, welche Version die Vorlage hat. Den Code aus src/ schreibt er nur auf
+# Knopfdruck hinein: „Run workflow“ auf dem Versions-Branch mit Haken bei „vorlage“, vor dem Mergen eines Releases.
 name: Tests
 
 on:
@@ -57,7 +57,7 @@ jobs:
     timeout-minutes: 10
     concurrency:
       # nie zweimal gleichzeitig einspielen; Nachsehen läuft frei
-      group: vorlage-${{ (github.event_name == 'pull_request' || inputs.vorlage) && 'einspielen' || github.run_id }}
+      group: vorlage-${{ inputs.vorlage && 'einspielen' || github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,4 +66,4 @@ jobs:
       - name: Code in die Vorlage (tools/vorlage.sh)
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-        run: sh tools/vorlage.sh ${{ (github.event_name == 'pull_request' || inputs.vorlage) && 'einspielen' || 'pruefen' }}
+        run: sh tools/vorlage.sh ${{ inputs.vorlage && 'einspielen' || 'pruefen' }}

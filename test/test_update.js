@@ -1089,8 +1089,8 @@ t.section('Code in die Vorlage: tools/vorlage.sh und Job „Vorlage“ (#67)');
 {
   const cp = require('child_process');
   const wf = read('.github/workflows/test.yml');
-  const mode = "(github.event_name == 'pull_request' || inputs.vorlage) && 'einspielen' || 'pruefen'";
-  t.ok('Job Vorlage: nach den Tests, mit Secret CLASPRC_JSON; einspielen nur bei PR oder Haken, sonst nachsehen', /\n {4}needs: test\n/.test(wf) &&
+  const mode = "inputs.vorlage && 'einspielen' || 'pruefen'";
+  t.ok('Job Vorlage: nach den Tests, mit Secret CLASPRC_JSON; einspielen nur per „Run workflow“ mit Haken, sonst nachsehen', /\n {4}needs: test\n/.test(wf) &&
     wf.indexOf('CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}') > 0 && wf.indexOf('sh tools/vorlage.sh ${{ ' + mode + ' }}') > 0 &&
     wf.indexOf("startsWith(github.head_ref, 'version/')") > 0 && /vorlage:\n\s+description: .+\n\s+type: boolean\n\s+default: false/.test(wf));
   t.eq('.clasp.json: Code aus src/', JSON.parse(read('.clasp.json')).rootDir, 'src');
@@ -1142,6 +1142,8 @@ t.section('Code in die Vorlage: tools/vorlage.sh und Job „Vorlage“ (#67)');
   r = run(['pruefen'], { FAKE_PULL: '1.2.2' });
   t.ok('pruefen: kein push, Version der Vorlage als Hinweis', r.status === 0 && r.calls.length === 1 && / pull$/.test(r.calls[0]) &&
     /::notice .*Vorlage hat Version 1\.2\.2, src\/ hat/.test(r.out), r);
+  r = run(['pruefen'], { FAKE_PULL: '1.2.2', GITHUB_REF: 'refs/heads/main' });
+  t.ok('pruefen auf main, Vorlage alt: Warnung, Exit 0', r.status === 0 && /::warning .*Vorlage hat Version 1\.2\.2, main hat/.test(r.out), r);
   r = run(['pruefen']);
   t.ok('pruefen, Vorlage nicht lesbar: Warnung, Exit 0', r.status === 0 && /::warning .*nicht lesen/.test(r.out), r);
   t.ok('Nachsehen holt in einen leeren Ordner, die Kopie bleibt sauber', !fs.existsSync(path.join(tmp, 'Code.js')) && !fs.existsSync(path.join(tmp, 'src', 'Code.js')));
