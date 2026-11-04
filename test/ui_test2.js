@@ -1527,6 +1527,18 @@ function boot(mode, opts) {
     await E.respond('adjustEntry', { error: 'Sperre belegt' });
     ok('adjust-Fehler: Meldung oben und an der Karte, Knöpfe frei, Anzahl unverändert', /Sperre belegt/.test($('collMsg').textContent) &&
       /Nicht geändert: Sperre belegt/.test($('gh' + gi).textContent) && !E.btn(E.erow(gi, 0), '−1').disabled && E.cnt(gi) === '3');
+    // #66: danach lädt die Liste neu, die Meldung bleibt stehen
+    ok('adjust-Fehler: lädt neu und sagt es', E.calls('getCollection').length === 1 && /Sperre belegt\. Die Liste lädt neu/.test($('collMsg').textContent), $('collMsg').textContent);
+    await E.respond('getCollection');
+    ok('nach dem Neuladen: Meldung bleibt, Karte offen, Anzahl vom Server', /Sperre belegt/.test($('collMsg').textContent) &&
+      !$('gx' + gi).classList.contains('hidden') && E.cnt(gi) === '3', [$('collMsg').textContent, E.cnt(gi)]);
+    // Antwort verloren, der Server hat aber gespeichert: nach dem Neuladen zeigt die Karte den echten Stand
+    E.click(E.btn(E.erow(gi, 0), '−1'));
+    S.adjustEntry(...E.calls('adjustEntry')[0].args);
+    await E.respond('adjustEntry', { error: 'NetworkError: Connection failure due to HTTP 0' });
+    ok('Antwort verloren: erst der alte Stand', E.cnt(gi) === '3' && E.calls('getCollection').length === 1);
+    await E.respond('getCollection');
+    ok('Antwort verloren: nach dem Neuladen der echte Stand', E.cnt(gi) === '2' && !/Nicht geändert/.test($('gh' + gi).textContent), [E.cnt(gi), $('gh' + gi).textContent]);
     E.click(E.btn(E.erow(gi, 0), '−1'));
     await E.respond('adjustEntry');
     const ub = E.btn($('gh' + gi), 'Rückgängig');

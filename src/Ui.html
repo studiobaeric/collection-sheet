@@ -1095,7 +1095,7 @@ function saveFree(ev) {
 // vom Server; was angezeigt wird, ist base plus die noch laufenden Änderungen (predict). Alle Änderungen laufen
 // nacheinander über eine Warteschlange, Bearbeiten zeigt das Ergebnis sofort mit „speichert …“.
 
-var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, opsDone: 0, focus: null };
+var coll = { all: null, byKey: {}, loading: false, stale: false, staleSeq: 0, resort: false, gen: 0, reloadWanted: false, keepMsg: false, opsDone: 0, focus: null };
 var queue = [], queueBusy = false;
 var collTimer = null;
 var CHG_DAYS = 30; // Preisveränderung über 30 Tage, wie im Blatt Sammlung
@@ -1145,7 +1145,7 @@ function loadCollection(okText) {
   coll.error = '';
   drawReload();
   if (!coll.all) spinner('collResults', 'Lade die Sammlung …');
-  setMsg('collMsg', '');
+  if (coll.keepMsg) coll.keepMsg = false; else setMsg('collMsg', '');
   drawCollDex();
   call('getCollection').then(function (res) {
     if (gen !== coll.gen) return;
@@ -1507,12 +1507,16 @@ function rowAdjust(i, j, delta) {
   adjust(g, r, delta);
 }
 
-/** Fehler einer Änderung: Karte zurück auf den Stand vom Server, Fehler an der Karte und oben. */
+/**
+ * Fehler einer Änderung: Karte zurück auf den Stand vom Server, Fehler an der Karte und oben. Ging nur die Antwort
+ * verloren (Handy ohne Netz), hat der Server vielleicht doch gespeichert: darum danach neu laden, die Meldung bleibt (#66).
+ */
 function opFail(g, e, text) {
   showBase(g);
   g.err = (text || 'Nicht gespeichert') + ': ' + errText(e);
   redraw(g, 'all', true);
-  setMsg('collMsg', esc(errText(e)), 'err');
+  setMsg('collMsg', esc(errText(e).replace(/\.\s*$/, '')) + '. Die Liste lädt neu und zeigt den echten Stand.', 'err');
+  coll.reloadWanted = coll.keepMsg = true;
 }
 
 function adjust(g, row, delta) {
