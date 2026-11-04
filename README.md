@@ -73,7 +73,7 @@ Bricht die Übernahme ab (zum Beispiel weil Google eine Ausführung nach sechs M
 
 Die alte Tabelle wird danach stillgelegt. Ab Version 1.0 geschieht das von selbst: Sie zeigt nur noch einen Hinweis auf die neue und ruft keine Preise mehr ab. Ihre Daten bleiben zum Nachsehen. Willst du doch dort weitermachen, wähle in ihr **Pokémon > Diese Tabelle wieder benutzen**. Was du inzwischen in der neuen Tabelle geändert hast, fehlt dann dort.
 
-Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis, läuft aber sonst weiter, bis du dort die Trigger löschst und die Web-App archivierst. Die Schritte stehen in diesem Blatt.
+Tabellen vor Version 1.0 lassen sich nicht übernehmen, ihre Karten liest du über den Tab Import ein.
 
 ## Von Hand aktualisieren
 
@@ -98,7 +98,6 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 | `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |
 | `test/` | Tests mit Apps-Script-Attrappen in Node (`npm install`, dann `npm test`) |
-| `backup/` | Version 1 des Codes, gegen die `test/test_integration.js` und `test/test_update.js` die Umstellung prüfen |
 | `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen, in `dashboard/` die Looks des Dashboards |
 
 ## Lizenz

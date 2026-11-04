@@ -18,6 +18,9 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Preislauf schneller: Preise werden seltener ins Blatt geschrieben
 - Tabellen vor Version 1.0 lassen sich nur noch über den Import einlesen
 - Menüpunkt „API prüfen“ entfernt
+- Hinzufügen verliert bei einem Speicherfehler keine Karte mehr
+- Nach einem Fehler bei −1 oder Bearbeiten lädt die Sammlung neu
+- Suche mit englischem Namen oder Tippfehler schneller
 
 ## [1.2.2] – 2026-10-29
 
