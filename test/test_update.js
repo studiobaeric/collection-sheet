@@ -337,8 +337,11 @@ t.section('Neue Version holen: Kopie der Vorlage, Übernahme, alte Tabelle');
   const p = neu.uiCall('takeoverPreview', ni.pendingTake);
   t.ok('neu: Vorschau', p.cards === 2 && p.copies === 3 && p.version === '1.0.0', p);
   const tr = neu.uiCall('takeoverRun', ni.pendingTake);
-  t.ok('neu: übernommen, Namen getauscht', tr.cards === 2 && tr.oldName === 'Meine Karten (alt)' && tr.newName === 'Meine Karten' &&
-    neu.ss.getName() === 'Meine Karten' && old.ss.getName() === 'Meine Karten (alt)' && /heißt jetzt „Meine Karten \(alt\)“/.test(tr.message), tr);
+  t.ok('neu: übernommen, Namen getauscht, alte mit Version (#62)', tr.cards === 2 && tr.oldName === 'Meine Karten (alt 1.0.0)' && tr.newName === 'Meine Karten' &&
+    neu.ss.getName() === 'Meine Karten' && old.ss.getName() === 'Meine Karten (alt 1.0.0)' && /heißt jetzt „Meine Karten \(alt 1\.0\.0\)“/.test(tr.message), tr);
+  const re = neu.run('UPD_OLD_RE');
+  t.eq('Endung „(alt …)“ erkannt, andere Klammern bleiben (#62)', ['X (alt)', 'X (alt 1.2.2)', 'X (alt 1.3.0-beta.1)', 'X (alt 2)', 'X (alt) (neu)', 'X (Alt 1.2.2)'].map(n => n.replace(re, '')),
+    ['X', 'X', 'X', 'X (alt 2)', 'X (alt) (neu)', 'X (Alt 1.2.2)']);
   t.ok('neu: Daten, Suchfeld, keine ausstehende Übernahme mehr', neu.data().length === 2 && neu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' &&
     neu.uiCall('getUpdateInfo', false).pendingTake === '' && neu.setting('TAKEN_FROM') === old.ss.getUrl() && neu.setting('TAKE_RUN') === '');
   t.ok('neu: Vorabversionen wie in der alten Tabelle (aus)', neu.setting('PRERELEASES') === '');

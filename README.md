@@ -58,7 +58,7 @@ Google erlaubt einem Skript in einer Tabelle nicht, seinen eigenen Code zu erset
 
 1. **Neue Version holen** (nur in der Seitenleiste am Computer) legt eine Kopie der Vorlage mit der neuen Version im selben Ordner an (geht das nicht, in „Meine Ablage“; die Seitenleiste sagt, wo). Hier ändert sich dabei nichts.
 2. Öffne die neue Tabelle und dort **Pokémon > Karten erfassen**. Google fragt bei jeder neuen Tabelle einmal nach den Berechtigungen. Die gelbe Leiste zu „Daten externer Nutzer“ meint die Kartenbilder (siehe „Einrichten“): **Zugriff erlauben**.
-3. Die Seitenleiste bietet dir sofort die Übernahme an: **Jetzt übernehmen**. Die neue Tabelle bekommt den Namen der alten, die alte heißt danach „… (alt)“. Wer die alte Tabelle sehen oder bearbeiten durfte, darf das auch in der neuen (ohne E-Mail an diese Personen).
+3. Die Seitenleiste bietet dir sofort die Übernahme an: **Jetzt übernehmen**. Die neue Tabelle bekommt den Namen der alten, die alte heißt danach „… (alt 1.2.2)“ mit ihrer Version. Wer die alte Tabelle sehen oder bearbeiten durfte, darf das auch in der neuen (ohne E-Mail an diese Personen).
 4. Nutzt du die Handy-Seite: In der neuen Tabelle neu bereitstellen und den Link unter **Pokémon > Web-App-Link anzeigen** einfügen. Die alte Handy-Seite verweist dann auf die neue.
 
 Mit **Vorabversionen bekommen** probierst du neue Versionen aus, bevor alle sie bekommen. Sie können noch Fehler haben.

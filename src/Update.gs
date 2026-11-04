@@ -30,6 +30,8 @@ const UPD_CACHE_SEC = 6 * 3600;
 /** Name der neuen Tabelle bis zur Übernahme; danach bekommt sie den Namen der alten. */
 const UPD_NEW_SUFFIX = ' (neu, Version ';
 const UPD_OLD_SUFFIX = ' (alt)';
+/** Endung einer alten Tabelle: „ (alt)“ oder mit ihrer Version „ (alt 1.2.2)“ (#62) */
+const UPD_OLD_RE = / \(alt(?: \d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)?\)$/;
 /** So lange gilt eine Übernahme als laufend (Apps Script bricht jede Ausführung nach 6 Minuten ab). */
 const UPD_TAKE_MAX_MS = 7 * 60 * 1000;
 const UPD_TAKE_BUSY = 'Die Übernahme läuft gerade oder ist eben erst abgebrochen. Bitte warte zwei Minuten und öffne dann die Seitenleiste neu (Pokémon > Karten erfassen).';
@@ -245,7 +247,7 @@ function updMakeCopy_(ch, rel) {
   try { file = DriveApp.getFileById(updSheetId_(templateUrl)); } catch (e) {
     return fail('Die Vorlage von Version ' + rel.version + ' ließ sich nicht öffnen.');
   }
-  const base = ss.getName().replace(/ \(alt\)$/, '');
+  const base = ss.getName().replace(UPD_OLD_RE, '');
   let name = base + UPD_NEW_SUFFIX + rel.version + ')';
   let copy = null, where = 'im selben Ordner wie diese';
   try {
@@ -653,7 +655,7 @@ function updTakeoverRun_(url) {
     throw updTakeError_(e);
   }
   settingsSetMany_({ TAKEN_FROM: old.getUrl(), TAKEN_AT: when, TAKE_RUN: '' });
-  const names = updRenameAfterTakeover_(old, ss);
+  const names = updRenameAfterTakeover_(old, ss, st.map.CODE_VERSION);
   const done = res.cards + ' Einträge und ' + (res.copied.length + res.own.length) + ' weitere Blätter übernommen. ';
   const renamed = names.old ? ' Sie heißt jetzt „' + names.old + '“.' : '';
   return {
@@ -672,14 +674,15 @@ function updTakeError_(e) {
 }
 
 /**
- * Namen nach der Übernahme: die alte Tabelle bekommt „ (alt)“, eine von updateCopy angelegte neue den Namen der alten.
- * -> {old: neuer Name der alten oder '', now: Name dieser Tabelle}
+ * Namen nach der Übernahme: die alte Tabelle bekommt „ (alt 1.2.2)“ mit ihrer Version (#62, ohne Version „ (alt)“),
+ * eine von updateCopy angelegte neue den Namen der alten. -> {old: neuer Name der alten oder '', now: Name dieser Tabelle}
  */
-function updRenameAfterTakeover_(old, ss) {
+function updRenameAfterTakeover_(old, ss, version) {
   const out = { old: '', now: ss.getName() };
   try {
-    const base = old.getName().replace(/ \(alt\)$/, '');
-    if (old.getName() !== base + UPD_OLD_SUFFIX) { old.rename(base + UPD_OLD_SUFFIX); out.old = base + UPD_OLD_SUFFIX; }
+    const base = old.getName().replace(UPD_OLD_RE, '');
+    const oldName = base + (version ? ' (alt ' + version + ')' : UPD_OLD_SUFFIX);
+    if (old.getName() !== oldName) { old.rename(oldName); out.old = oldName; }
     const mine = updSheetId_(settingGet_('TAKE_FROM')) === old.getId() || ss.getName().indexOf(UPD_NEW_SUFFIX) >= 0;
     if (mine && ss.getName() !== base) { ss.rename(base); out.now = base; }
   } catch (e) { /* Namen sind nur Komfort */ }
@@ -758,7 +761,7 @@ function wiederBenutzen() {
   if (sh && ss.getSheets().length > 1) ss.deleteSheet(sh);
   try {
     const n = ss.getName();
-    if (/ \(alt\)$/.test(n)) ss.rename(n.replace(/ \(alt\)$/, ''));
+    if (UPD_OLD_RE.test(n)) ss.rename(n.replace(UPD_OLD_RE, '')); // auch „ (alt 1.2.2)“ (#62); bis 1.2.2 nur „ (alt)“
   } catch (e) { /* Name ist nur Komfort */ }
   setupTriggers_();
   alert_('Diese Tabelle ist wieder aktiv. Bitte lade sie einmal neu, damit das ganze Menü erscheint.');

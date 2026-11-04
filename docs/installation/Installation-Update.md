@@ -43,6 +43,6 @@ Ab dieser Version zeigt das Tool selbst an, wenn es eine neue Version gibt, und 
 ## Gut zu wissen
 
 - **Neue Version holen** legt die neue Tabelle im selben Ordner an (geht das nicht, in „Meine Ablage“; die Seitenleiste sagt, wo). Bis du dort auf **Jetzt übernehmen** klickst, ändert sich an deiner Tabelle nichts.
-- Nach der Übernahme heißt deine alte Tabelle „… (alt)“ und ist stillgelegt. Über **Pokémon > Diese Tabelle wieder benutzen** kannst du jederzeit zu ihr zurück.
+- Nach der Übernahme heißt deine alte Tabelle „… (alt 1.2.2)“ (mit ihrer Version) und ist stillgelegt. Über **Pokémon > Diese Tabelle wieder benutzen** kannst du jederzeit zu ihr zurück.
 - Die Übernahme gibt die neue Tabelle auch für alle frei, mit denen die alte geteilt war, zum Beispiel für dein zweites Google-Konto. Google schickt dabei keine E-Mail.
 - Die Version davor liegt im Ordner `vorher-1.0.0`, falls du zurückwechseln willst. Dann bitte auch die Datei `Update` löschen, `appsscript.json` kann so bleiben.
