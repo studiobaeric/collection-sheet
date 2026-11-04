@@ -929,8 +929,8 @@ function orderGroupRows_(rows) {
  * Preis einer Gruppe: eigener Preis (erste Zahl, „von Hand“ zuerst, dann nach Hinzufügedatum),
  * sonst Trendpreis. -> {price, manual, ownPrice, ownDate, date}
  */
-function groupPrice_(rows) {
-  const ordered = orderGroupRows_(rows);
+function groupPrice_(rows, ordered) {
+  ordered = ordered || orderGroupRows_(rows);
   for (let i = 0; i < ordered.length; i++) {
     const own = ordered[i][COL.ownPrice];
     if (typeof own === 'number' && isFinite(own)) {
@@ -4030,10 +4030,10 @@ function rowForUi_(r, headers, info) {
  * Eine Gruppe fürs UI (Grundlage von collGroup_). refs (optional): Vergleichspreise aus dem Kartenverlauf.
  * chg: Veränderung des Trendpreises {7|30|90: {eur, pct, since} oder null}, auch bei eigenem Preis (das UI zeigt sie dann nicht).
  */
-function groupForUi_(gkey, rows, headers, info, refs) {
-  const ordered = orderGroupRows_(rows);
+function groupForUi_(gkey, rows, headers, info, refs, ordered) {
+  ordered = ordered || orderGroupRows_(rows); // einmal sortieren, die Helfer bekommen die Liste mit (#36 A5)
   const p = ordered[0];
-  const gp = groupPrice_(rows);
+  const gp = groupPrice_(rows, ordered);
   let image = '';
   for (let i = 0; i < ordered.length && !image; i++) image = String(ordered[i][COL.img] || '');
   const variant = String(p[COL.variant] || '');
@@ -4052,7 +4052,7 @@ function groupForUi_(gkey, rows, headers, info, refs) {
     count: rows.reduce(function (s, r) { return s + (Number(r[COL.count]) || 0); }, 0),
     image: image, price: gp.price, priceManual: gp.manual, ownPrice: gp.ownPrice,
     priceDate: gp.manual ? gp.ownDate : gp.date, exemplare: exemplareText_(rows), rarity: String(p[COL.rarity] || ''),
-    illustrator: String(p[COL.illustrator] || ''), chg: groupChanges_(rows, refs),
+    illustrator: String(p[COL.illustrator] || ''), chg: groupChanges_(rows, refs, ordered),
     rows: uiRows
   };
 }
@@ -4139,8 +4139,9 @@ function putLookups_(look) {
  * Browser (collMatch, collCmp in Ui.html, #36 A4).
  */
 function collGroup_(gkey, rows, headers, ctx) {
-  const o = groupForUi_(gkey, rows, headers, ctx.info, ctx.refs);
-  const p = orderGroupRows_(rows)[0];
+  const ordered = orderGroupRows_(rows);
+  const o = groupForUi_(gkey, rows, headers, ctx.info, ctx.refs, ordered);
+  const p = ordered[0];
   const low = function (x) { return String(x == null ? '' : x).toLowerCase(); };
   const setId = String(p[COL.setId] || '');
   const sets = [low(p[COL.setName])];
@@ -5069,8 +5070,8 @@ function loadCardHistRefs_() {
 }
 
 /** Trendpreis einer Gruppe (der eigene Preis zählt hier nicht): die erste Zahl, „von Hand“ zuerst. */
-function groupTrend_(rows) {
-  const ordered = orderGroupRows_(rows);
+function groupTrend_(rows, ordered) {
+  ordered = ordered || orderGroupRows_(rows);
   for (let i = 0; i < ordered.length; i++) {
     const pr = ordered[i][COL.price];
     if (typeof pr === 'number' && isFinite(pr)) return pr;
@@ -5083,12 +5084,13 @@ function groupTrend_(rows) {
  * oder Vergleichspreis. eur auf Cent, pct in ganzen Prozent (null bei Vergleichspreis 0), since 'yyyy-MM-dd' oder ''
  * (ganzer Zeitraum). refs aus loadCardHistRefs_.
  */
-function groupChanges_(rows, refs) {
+function groupChanges_(rows, refs, ordered) {
   if (!refs || !rows || !rows.length) return null;
-  const p = orderGroupRows_(rows)[0];
+  ordered = ordered || orderGroupRows_(rows);
+  const p = ordered[0];
   const id = String(p[COL.id] || '').trim();
   const e = id ? refs[histKey_(id, p[COL.variant])] : null;
-  const cur = e ? groupTrend_(rows) : null;
+  const cur = e ? groupTrend_(rows, ordered) : null;
   if (cur == null) return null;
   const out = {};
   let any = false;
@@ -5785,10 +5787,11 @@ function pokedexIndex_(rows, fx) {
     const rs = g.idx.map(function (i) { return rows[i]; });
     const count = rs.reduce(function (s, r) { return s + (Number(r[COL.count]) || 0); }, 0);
     if (count <= 0) return;
-    const p = orderGroupRows_(rs)[0];
+    const ordered = orderGroupRows_(rs);
+    const p = ordered[0];
     const nums = dexOfRow_(p, cache);
     if (!nums.length) return;
-    const gp = groupPrice_(rs);
+    const gp = groupPrice_(rs, ordered);
     if (fx) { // je Kennung (#55): [Karten, Exemplare, Wert]
       dexTokensOfRow_(p, cache, fx).forEach(function (t) {
         const e = toks[t] || (toks[t] = [0, 0, 0]);
