@@ -588,6 +588,36 @@ t.section('Seitenleiste legt Fehlendes wieder an (statt Menüpunkt Einrichtung)'
 }
 
 // ---------------------------------------------------------------------------
+t.section('Vorlage: keine Auslöser, keine SPREADSHEET_ID (#67)');
+{
+  const tplId = /const TEMPLATE_SHEET_ID = '([^']+)'/.exec(read('src/Code.gs'))[1];
+  t.eq('ID der Vorlage im Code passt zum Kanal', tplId, updSheetIdOf(JSON.parse(read('releases/channel.json')).templateUrl));
+  const W = makeWorld();
+  const env = H.createEnv({ srcDir: BASE_DIR });
+  env.ss.id = tplId;
+  env.http = W.handler;
+  env.props.SPREADSHEET_ID = tplId; // so ließ Karten erfassen bis 1.2.2 die Vorlage zurück
+  env.ctx.setupAll_();
+  const state = e => ({ triggers: e.triggers.map(x => x.fn).sort(), id: e.props.SPREADSHEET_ID });
+  t.ok('Einrichtung in der Vorlage: fertig, ohne Auslöser und ohne SPREADSHEET_ID', env.ss.toasts.some(x => /^Einrichtung fertig\./.test(x)) &&
+    J(state(env)) === J({ triggers: [] }), state(env));
+  ['naechtlicherPreislauf', 'continuePriceRun', 'beiStrukturAenderung'].forEach(fn => env.ctx.ScriptApp.newTrigger(fn).create()); // von einer älteren Version
+  env.props.SPREADSHEET_ID = tplId;
+  const toasts = env.ss.toasts.length, sidebars = env.ui.sidebars.length;
+  env.ctx.kartenErfassen();
+  t.ok('Karten erfassen in der Vorlage: alte Auslöser und SPREADSHEET_ID weg, Seitenleiste offen', J(state(env)) === J({ triggers: [] }) &&
+    env.ui.sidebars.length === sidebars + 1, state(env));
+  t.ok('ohne Hinweis zu Auslösern', !env.ss.toasts.slice(toasts).some(x => /Auslöser/.test(x)), env.ss.toasts.slice(toasts));
+
+  // Kopie der Vorlage (Neue Version holen oder ein neuer Nutzer): richtet sich wie bisher ganz ein
+  const copyId = '1CopyOfTemplateCopyOfTemplateCopy01234567';
+  const copy = openWith({ id: copyId, name: 'Pokémon-Sammlung', list: env.ss.list }, BASE_DIR, W);
+  copy.ctx.kartenErfassen();
+  t.ok('Kopie der Vorlage: beide Auslöser und ihre eigene SPREADSHEET_ID', J(state(copy)) ===
+    J({ triggers: ['beiStrukturAenderung', 'naechtlicherPreislauf'], id: copyId }), state(copy));
+}
+
+// ---------------------------------------------------------------------------
 t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 {
   const W = makeWorld();

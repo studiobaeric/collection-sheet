@@ -1311,6 +1311,24 @@ const SETTINGS_LOCAL = ['WEBAPP_URL', 'NEW_COPY_URL', 'NEW_COPY_VERSION', 'TAKE_
   'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT', 'NIGHTLY_AT', 'FILE_VERSIONS'];
 /** Auslöser des Tools. Die Namen bleiben über alle Versionen gleich, sonst laufen alte Auslöser ins Leere. */
 const TRIGGER_HANDLERS = ['naechtlicherPreislauf', 'continuePriceRun', 'beiStrukturAenderung'];
+/**
+ * Die Vorlage (templateUrl in releases/channel.json) hat keine Auslöser und keine SPREADSHEET_ID: Sie holt nachts keine
+ * Preise, und Kopien bringen nichts davon mit. Das macht der Code dort selbst, statt dass es jemand von Hand löscht (#67).
+ */
+// shortcut: nur die Hauptvorlage; bekommt eine Vorabversion ihre eigene Vorlage, deren ID hier ergänzen
+const TEMPLATE_SHEET_ID = '18B0oYylWj5QgsYu8RRCrBktAn40TbvTGKPTDci6JTyE';
+
+function isTemplate_() {
+  return ss_().getId() === TEMPLATE_SHEET_ID;
+}
+
+/** SPREADSHEET_ID für Web-App und Auslöser merken, in der Vorlage löschen. */
+function rememberSheetId_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = ss_().getId();
+  if (id === TEMPLATE_SHEET_ID) props.deleteProperty('SPREADSHEET_ID');
+  else if (props.getProperty('SPREADSHEET_ID') !== id) props.setProperty('SPREADSHEET_ID', id);
+}
 
 let settingsCache_ = null;
 
@@ -1349,7 +1367,7 @@ function settingSet_(key, value) {
 function settingsSetMany_(obj) {
   const ss = ss_();
   const wasCopy = writeSettings_(ss, obj || {});
-  if (wasCopy) PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+  if (wasCopy) rememberSheetId_();
   settingsCache_ = null;
 }
 
@@ -1840,7 +1858,7 @@ function setupAll_() {
   let dashMissing;
   try {
     step('Tabelle vorbereiten');
-    PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+    rememberSheetId_();
     if (settingsAll_().copy) adoptCopy_();
     try {
       migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
@@ -1925,8 +1943,7 @@ function setupFormulaSheets_(ss, keepControls, step) {
 function repairSetup_() {
   try {
     const ss = ss_();
-    const props = PropertiesService.getScriptProperties();
-    if (props.getProperty('SPREADSHEET_ID') !== ss.getId()) props.setProperty('SPREADSHEET_ID', ss.getId());
+    rememberSheetId_();
     const missing = missingToolSheets_();
     if (missing.length) {
       notifyBusy_('Lege fehlende Blätter wieder an: ' + missing.join(', ') + ' …');
@@ -1934,7 +1951,9 @@ function repairSetup_() {
       setupSheets_(ss, true, busySteps_('Reparatur', 4));
       notifyDone_('Fehlende Blätter wieder angelegt: ' + missing.join(', ') + '.');
     }
-    if (triggersMissing_()) {
+    if (isTemplate_()) {
+      setupTriggers_(); // löscht in der Vorlage nur Auslöser, die eine ältere Version dort angelegt hat
+    } else if (triggersMissing_()) {
       setupTriggers_();
       notify_('Die Auslöser für den nächtlichen Preislauf und für Änderungen im Blatt Daten sind wieder eingerichtet.');
     }
@@ -3001,6 +3020,7 @@ function deleteTriggersFor_(fnName) {
 }
 
 function setupTriggers_() {
+  if (isTemplate_()) { TRIGGER_HANDLERS.forEach(deleteTriggersFor_); return; } // die Vorlage holt keine Preise (#67)
   deleteTriggersFor_('naechtlicherPreislauf');
   ScriptApp.newTrigger('naechtlicherPreislauf').timeBased().everyDays(1).atHour(3)
     .inTimezone(tz_()).create();
