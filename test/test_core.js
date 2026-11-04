@@ -55,69 +55,28 @@ function importeSheet(env, rows) {
 function groupBy(env, gkey) { return env.groups().find(g => g['Gruppenschlüssel'] === gkey); }
 
 // ---------------------------------------------------------------------------
-t.section('Migration v1 -> v2');
+t.section('Datenblatt prüfen (Format vor 1.0 wird seit 1.2.3 nicht mehr umgestellt, #36 B3)');
 {
+  // Daten im alten Format: Fehler, nichts wird geändert
   const env = fresh();
   const sh = env.ss.insertSheet('Daten');
-  const V1 = ['Schlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer', 'Nummer normalisiert', 'Setgröße',
-    'Name', 'Name englisch', 'Quelle', 'Variante', 'Zustand', 'Anzahl', 'Trendpreis (EUR)', 'Preisstand', 'Bild-URL', 'Seltenheit',
-    'Kartentyp', 'Illustrator', 'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar'];
-  const d1 = new Date(2026, 8, 1), d2 = new Date(2026, 8, 2);
-  const rows = [
-    V1,
-    ['swsh3-025|normal|NM', 'swsh3-025', 'swsh3', 'Flammende Finsternis', '2020-08-14', '025', '25', 189, 'Glurak', '', 'de', 'normal', 'NM', 2, 1.5, '2026-10-13', 'https://img/a', 'Rare', 'Pokemon', 'X', d1, d1, 25],
-    [],
-    ['base1-4|holo|', 'base1-4', 'base1', 'Grundset', '1999-01-09', '4', '4', 102, 'Glurak', '', 'de', 'holo', '', 1, 300, '2026-10-13', '', 'Rare Holo', 'Pokemon', 'Mitsuhiro Arita', d2, d2, 4],
-    ['old9-007|normal|LP', 'old9-007', 'old9', 'Old Set', '', '007', '7', 50, 'Mewtu', 'Mewtwo', 'en-Ersatz', 'normal', 'LP', 0, '', '', 'https://img/m', 'Rare', 'Pokemon', 'Y', d2, d2, 7]
-  ];
-  rows.forEach((r, i) => r.forEach((v, j) => sh.setCell(i + 1, j + 1, v))); // Rohdaten wie im echten Blatt
-  env.ctx.ensureSchema_();
-  const v = env.values('Daten');
-  eq('v2 headers (30)', v[0].slice(0, 30), env.run('DATA_HEADERS'));
-  const data = env.data();
-  ok('3 rows, blank row dropped', data.length === 3, data.length);
-  ok('eids E + 10 hex, unique', data.every(r => /^E[0-9a-f]{10}$/.test(r.eid)) && new Set(data.map(r => r.eid)).size === 3, data.map(r => r.eid));
-  ok('lang DE, origin Hand, fp/version/ownPrice empty', data.every(r => r.lang === 'DE' && r.origin === 'Hand' && r.fp === '' && r.version === '' && r.ownPrice === '' && r.ownPriceDate === ''));
-  eq('new keys', data.map(r => r.key), ['swsh3-025|normal||NM|DE', 'base1-4|holo|||DE', 'old9-007|normal||LP|DE']);
-  ok('number text kept', data[0].localId === '025' && data[2].localId === '007', data.map(r => r.localId));
-  ok('dates kept', data[0].added instanceof Date && data[0].added.getTime() === d1.getTime());
-  ok('SCHEMA_VERSION = 2', env.setting('SCHEMA_VERSION') === '2');
-  ok('Gruppen built (3)', env.groups().length === 3, env.groups().length);
-  const before = JSON.stringify(env.data().map(r => [r.eid, r.key, r.count]));
-  env.ctx.settingSet_('SCHEMA_VERSION', '');
-  env.ctx.migrateSchema_();
-  ok('second run idempotent', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
-  // Zusatzspalte überlebt setupAll_
-  env.ctx.withLock_(() => env.ctx.ensureExtraColumn_('Notiz'));
-  env.sheet('Daten').getRange(2, 31).setValue('Lieblingskarte');
-  env.ctx.setupAll_();
-  const v2 = env.values('Daten');
-  ok('setupAll_ keeps extra header + value', v2[0][30] === 'Notiz' && v2[1][30] === 'Lieblingskarte', v2[0].slice(28));
-  ok('setupAll_ keeps data', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
-  ok('no nested locks', env.lock.nested === 0, env.lock);
-}
-{
-  // leeres v1-Blatt, fehlendes Blatt, alte Zusatzspalte hinter Spalte W
-  const env = fresh();
-  const sh = env.ss.insertSheet('Daten');
-  sh.getRange(1, 1, 1, 3).setValues([['Schlüssel', 'Karten-ID', 'Set-ID']]);
-  env.ctx.ensureSchema_();
-  ok('empty v1 sheet migrated', env.values('Daten')[0][23] === 'Eintrag-ID' && env.data().length === 0 && env.setting('SCHEMA_VERSION') === '2');
+  const r = ['base1-4|holo|', 'base1-4', 'base1', 'Grundset', '', '4', '4', 102, 'Glurak', '', 'de', 'holo', '', 1, '', '', '', '', '', '', '', '', 4];
+  [['Schlüssel', 'Karten-ID', 'Set-ID'], r].forEach((row, i) => row.forEach((v, j) => sh.setCell(i + 1, j + 1, v)));
+  let err = null;
+  try { env.ctx.ensureSchema_(); } catch (e) { err = e; }
+  ok('altes Format mit Karten: Fehler mit Hinweis auf Import', !!err && /vor Version 1\.0/.test(err.message) && /Import/.test(err.message), err && err.message);
+  ok('altes Format: nichts geändert', env.values('Daten')[1][0] === 'base1-4|holo|' && env.values('Daten')[0].length === 23 && !env.setting('SCHEMA_VERSION'));
+
+  // leeres Blatt mit alter Kopfzeile: bekommt die Kopfzeile von heute
+  const env1 = fresh();
+  env1.ss.insertSheet('Daten').getRange(1, 1, 1, 3).setValues([['Schlüssel', 'Karten-ID', 'Set-ID']]);
+  env1.ctx.ensureSchema_();
+  ok('leeres Blatt: Kopfzeile v2', env1.values('Daten')[0][23] === 'Eintrag-ID' && env1.data().length === 0 && env1.setting('SCHEMA_VERSION') === '2');
 
   const env2 = fresh();
   env2.ctx.ensureSchema_();
   ok('missing Daten created with v2 headers', env2.sheet('Daten') && env2.values('Daten')[0][29] === 'Quellzeile' && env2.setting('SCHEMA_VERSION') === '2');
   ok('Gruppen exists after migrate', !!env2.sheet('Gruppen'));
-
-  const env3 = fresh();
-  const s3 = env3.ss.insertSheet('Daten');
-  const head = env3.run('DATA_HEADERS').slice(0, 23).concat(['Meine Notiz']);
-  s3.getRange(1, 1, 1, 24).setValues([head]);
-  const r = ['base1-4|holo|', 'base1-4', 'base1', 'Grundset', '', '4', '4', 102, 'Glurak', '', 'de', 'holo', '', 1, '', '', '', '', '', '', '', '', 4, 'alt'];
-  r.forEach((x, j) => s3.setCell(2, j + 1, x));
-  env3.ctx.ensureSchema_();
-  const d3 = env3.data();
-  ok('old extra column moved to extras', d3[0].extras['Meine Notiz'] === 'alt' && d3[0].eid && d3[0].origin === 'Hand', d3[0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -659,8 +618,8 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
-  ok('menu mit Dashboard, ohne Einsortieren und Einrichtung (#43)', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7 &&
-    env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung' || x[1] === 'einsortieren'), env.ui.menus[0].items);
+  ok('menu mit Dashboard, ohne Einsortieren, Einrichtung (#43) und API prüfen (#36 B4)', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 6 &&
+    env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung' || x[1] === 'einsortieren' || x[1] === 'apiPruefen'), env.ui.menus[0].items);
   // Auswahlliste mit Symbol und Name (#47): neueste Sets zuerst, deutscher Name, englischer nur wenn anders
   const sug = env.uiCall('getSetSuggestions');
   const fl = sug.filter(s => s.id === 'swsh3')[0], gs = sug.filter(s => s.id === 'base1')[0];

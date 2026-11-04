@@ -250,7 +250,7 @@ function makeServer() {
   S.setPrereleases = on => Object.assign(S.updInfo, { prereleases: !!on });
   S.updateCopy = () => ({ state: 'copied', version: '1.1.0', url: 'https://docs.google.com/spreadsheets/d/NEUNEU/edit', name: 'Pokémon-Sammlung (neu, Version 1.1.0)',
     message: 'Die neue Tabelle mit Version 1.1.0 liegt im selben Ordner wie diese.' });
-  S.takeoverPreview = url => ({ name: '<i>Alte Sammlung</i>', url, version: '', cards: 2, copies: 3, sheets: [{ name: 'Verlauf', rows: 1 }], own: ['Notizen'], warnings: ['<b>Achtung</b> Import 3'] });
+  S.takeoverPreview = url => ({ name: '<i>Alte Sammlung</i>', url, version: '1.0.3', cards: 2, copies: 3, sheets: [{ name: 'Verlauf', rows: 1 }], own: ['Notizen'], warnings: ['<b>Achtung</b> Import 3'] });
   S.takeoverRun = () => ({ cards: 2, sheets: ['Verlauf'], own: ['Notizen'], message: '2 Einträge und 2 weitere Blätter übernommen. Die alte Tabelle ist jetzt stillgelegt.' });
   S.kartenErfassen = () => null;
   return S;
@@ -1738,8 +1738,8 @@ function boot(mode, opts) {
     ok('Prüfen: takeoverPreview mit Link', J(E.calls('takeoverPreview')[0].args) === J(['https://docs.google.com/spreadsheets/d/ALT/edit']) && /Prüfe/.test($('takeMsg').textContent));
     await E.respond('takeoverPreview');
     const tm = $('takeMsg');
-    ok('Vorschau vor 1.0: Hinweis auf Trigger statt „stillgelegt“', /legt sich nicht selbst still/.test(tm.textContent) && /Trigger/.test(tm.textContent));
-    ok('Vorschau: Name escaped, Version vor 1.0, Zahlen, Blätter, Warnungen', !tm.querySelector('i') && /<i>Alte Sammlung<\/i>/.test(tm.textContent) && /Version vor 1\.0/.test(tm.textContent) &&
+    ok('Vorschau: Hinweis „stillgelegt“', /stillgelegt/.test(tm.textContent) && !/vor 1\.0/.test(tm.textContent));
+    ok('Vorschau: Name escaped, Version, Zahlen, Blätter, Warnungen', !tm.querySelector('i') && /<i>Alte Sammlung<\/i>/.test(tm.textContent) && /Version 1\.0\.3/.test(tm.textContent) &&
       /2 Einträge mit 3 Karten/.test(tm.textContent) && /Verlauf \(1\)/.test(tm.textContent) && /Eigene Blätter: Notizen/.test(tm.textContent) && tm.querySelectorAll('.warn').length === 1 && !tm.querySelector('.warn b'));
     E.type($('takeUrl'), 'https://docs.google.com/spreadsheets/d/ANDERS/edit');
     E.click(E.btn(tm, 'Jetzt übernehmen'));

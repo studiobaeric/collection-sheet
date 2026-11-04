@@ -303,39 +303,15 @@ function updTakeoverSheets_() {
     'Import-Antworten', SHEETS.rarity, SHEETS.dexIds, SHEETS.sets, SHEETS.tr];
 }
 
-/** Kopfzeilen der übernommenen Blätter (für alte Tabellen ohne TOOL_SHEETS). */
-function updTakeoverHeads_() {
-  const m = {};
-  m[SHEETS.hist] = HIST_HEADERS; m[SHEETS.cardHist] = CARD_HIST_HEADERS; m[SHEETS.proto] = PROTO_HEADERS; m[SHEETS.rarity] = RARITY_HEADERS;
-  m[SHEETS.dexIds] = DEX_IDS_HEADERS; m[SHEETS.sets] = SET_HEADERS; m[SHEETS.tr] = TR_HEADERS;
-  m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
-  m['Import-Vorlagen'] = TEMPLATE_HEADERS; m['Import-Antworten'] = ANSWER_HEADERS;
-  return m;
-}
-
 /**
- * Blätter der alten Tabelle, die ihr Tool angelegt hat: {Name: true}. Ab 1.0 steht die Liste in ihren Einstellungen
- * (TOOL_SHEETS), sonst gilt die Liste dieses Codes, wobei ein Blatt zum Übernehmen mit fremder Kopfzeile dem Nutzer
- * gehört. Das Hinweisblatt einer früheren Übernahme gehört dazu, wenn die Tabelle schon einmal übernommen wurde.
+ * Blätter der alten Tabelle, die ihr Tool angelegt hat: {Name: true}, aus ihren Einstellungen (TOOL_SHEETS, seit 1.0).
+ * Das Hinweisblatt einer früheren Übernahme gehört dazu, wenn die Tabelle schon einmal übernommen wurde.
  */
 function updOldToolSheets_(old, st) {
   const out = {};
-  let names = null;
-  try { const a = JSON.parse(st.map.TOOL_SHEETS || ''); if (Array.isArray(a)) names = a.map(String); } catch (e) { /* vor 1.0 */ }
-  if (names) {
-    names.forEach(function (n) { out[n] = true; });
-  } else {
-    toolSheetNames_().forEach(function (n) { out[n] = true; });
-    delete out[SHEETS.dash]; // das Dashboard gibt es erst seit 1.1.0, ein Blatt mit dem Namen gehört dem Nutzer
-    const heads = updTakeoverHeads_();
-    Object.keys(heads).forEach(function (n) {
-      const sh = old.getSheetByName(n);
-      if (!sh || sh.getLastRow() < 1) return;
-      const want = heads[n].slice(0, 2);
-      const got = sh.getRange(1, 1, 1, want.length).getValues()[0].map(function (v) { return String(v == null ? '' : v).trim(); });
-      if (want.some(function (h, i) { return got[i] !== h; })) delete out[n];
-    });
-  }
+  let names = [];
+  try { const a = JSON.parse(st.map.TOOL_SHEETS || ''); if (Array.isArray(a)) names = a.map(String); } catch (e) { /* leer */ }
+  names.forEach(function (n) { out[n] = true; });
   out[SHEETS.data] = true; // ohne Daten keine Übernahme (updOpenOld_ prüft, dass es das Blatt gibt)
   if (st.map.TAKEN_OVER_BY) out[st.map.TAKEN_OVER_SHEET || SHEETS.takenOver] = true;
   return out;
@@ -421,6 +397,11 @@ function updOpenOld_(url) {
     throw new Error('Die alte Tabelle hat schon Version ' + (st.map.CODE_VERSION || '?') + ' mit einem neueren Datenformat. ' +
       'Bitte bring zuerst diese Tabelle unter Updates auf den neuesten Stand.');
   }
+  // Tabellen vor 1.0 (ohne CODE_VERSION) übernimmt das Tool seit 1.2.3 nicht mehr (#36 B3)
+  if (!st.map.CODE_VERSION) {
+    throw new Error('Die alte Tabelle hat eine Version vor 1.0. Die lässt sich nicht mehr übernehmen. ' +
+      'Lies ihre Karten stattdessen über den Tab Import als Liste ein.');
+  }
   const run = updTakeRun_();
   const resume = !!run && run.from === id && !settingGet_('TAKEN_FROM');
   if (!resume && updCardRows_(ss) > 0) {
@@ -503,18 +484,6 @@ function updCopyValues_(src, dst) {
 }
 
 /**
- * Zusatzspalten der Sammlung einer Tabelle vor 1.0: Kopfzeile 5 hinter den festen Spalten. Die enden in jeder Version
- * mit „Preisstand“ (vor 1.1.0 waren es 13, seitdem 16 feste Spalten).
- */
-function updOldViewExtras_(old) {
-  const sh = old.getSheetByName(SHEETS.view);
-  if (!sh || sh.getLastColumn() < 1) return [];
-  const head = sh.getRange(5, 1, 1, sh.getLastColumn()).getValues()[0].map(function (v) { return String(v == null ? '' : v).trim(); });
-  const end = head.indexOf(VIEW_HEADERS[VIEW_HEADERS.length - 1]);
-  return head.slice(end >= 0 ? end + 1 : VIEW_HEADERS.length).filter(Boolean);
-}
-
-/**
  * Freigaben der alten Tabelle auf diese übertragen, ohne E-Mails (Drive-Dienst). Der Besitzer der alten wird hier
  * Bearbeiter, falls es nicht derselbe ist. -> {added, failed}; failed -1: Freigaben ließen sich nicht lesen
  */
@@ -550,7 +519,7 @@ function updSharingText_(sh) {
   return sh.added ? ' Wer die alte Tabelle sehen oder bearbeiten durfte, darf das jetzt auch hier.' : '';
 }
 
-/** Übernahme ausführen (nur Seitenleiste). -> {message, cards, sheets, own, manualStop, noteSheet, oldName, newName, shared} */
+/** Übernahme ausführen (nur Seitenleiste). -> {message, cards, sheets, own, noteSheet, oldName, newName, shared} */
 function takeoverRun(url) {
   const o = updOpenOld_(url);
   if (o.busy) throw new Error(UPD_TAKE_BUSY);
@@ -620,8 +589,7 @@ function takeoverRun(url) {
     // Daten auf das Format dieses Codes bringen, dann alles neu aufbauen (ohne Sperre: die Funktionen sperren selbst)
     settingSet_('SCHEMA_VERSION', '');
     migrateSchema_();
-    const extras = st.exists && st.map.VIEW_EXTRAS ? (function () { try { return JSON.parse(st.map.VIEW_EXTRAS); } catch (e) { return []; } })()
-      : updOldViewExtras_(old);
+    const extras = (function () { try { return JSON.parse(st.map.VIEW_EXTRAS || '[]'); } catch (e) { return []; } })();
     const have = extraNames_();
     settingsSetMany_({
       VIEW_EXTRAS: JSON.stringify((Array.isArray(extras) ? extras : []).map(String).filter(function (n) { return have.indexOf(n) >= 0; })),
@@ -639,18 +607,13 @@ function takeoverRun(url) {
   }
   settingsSetMany_({ TAKEN_FROM: old.getUrl(), TAKEN_AT: when, TAKE_RUN: '' });
   const names = updRenameAfterTakeover_(old, ss);
-  // Code vor 1.0 kennt das Stilllegen nicht: dort läuft alles weiter, bis der Nutzer die Auslöser löscht
-  const manualStop = !st.map.CODE_VERSION;
   const done = res.cards + ' Einträge und ' + (res.copied.length + res.own.length) + ' weitere Blätter übernommen. ';
   const renamed = names.old ? ' Sie heißt jetzt „' + names.old + '“.' : '';
   return {
-    cards: res.cards, sheets: res.copied, own: res.own, manualStop: manualStop, noteSheet: note, oldName: names.old, newName: names.now,
+    cards: res.cards, sheets: res.copied, own: res.own, noteSheet: note, oldName: names.old, newName: names.now,
     shared: shared,
-    message: done + (manualStop
-      ? 'Die alte Tabelle hat eine Version vor 1.0 und legt sich nicht selbst still.' + renamed + ' Sie zeigt jetzt vorne das Blatt „' + note +
-        '“ mit einem Hinweis auf diese Tabelle. Bitte lösch dort die Trigger, damit sie nachts keine Preise mehr abruft. Die Schritte stehen in dem Blatt.'
-      : 'Die alte Tabelle ist jetzt stillgelegt.' + renamed + ' Läuft dort doch noch eine ältere Version (das Menü Pokémon zeigt nach dem Neuladen alle Punkte), stehen im Blatt „' +
-        note + '“ die Schritte zum Abschalten.') + updSharingText_(shared)
+    message: done + 'Die alte Tabelle ist jetzt stillgelegt.' + renamed + ' Läuft dort doch noch eine ältere Version (das Menü Pokémon zeigt nach dem Neuladen alle Punkte), stehen im Blatt „' +
+      note + '“ die Schritte zum Abschalten.' + updSharingText_(shared)
   };
 }
 
@@ -712,16 +675,11 @@ function updWriteNotice_(old, sh, st, newUrl, when) {
     [newUrl],
     ['Die Daten hier bleiben zum Nachsehen. Du kannst diese Tabelle auch löschen, wenn du sie nicht mehr brauchst.']
   ];
-  // Code vor 1.0 kennt das Stilllegen nicht: Auslöser von Hand löschen, sonst läuft nachts der Preisabruf weiter
+  // läuft in der alten Tabelle doch noch älterer Code, der das Stilllegen nicht kennt: Auslöser von Hand löschen
   const manual = [['Damit hier nachts keine Preise mehr abgerufen werden: Erweiterungen > Apps Script öffnen, links auf „Trigger“ (Wecker) klicken und jeden Trigger über ⋮ > „Trigger löschen“ entfernen.'],
     [''], ['Hast du die Handy-Seite (Web-App) dieser Tabelle benutzt: In Apps Script auf Bereitstellen > Bereitstellungen verwalten klicken, die Web-App auswählen und „Archivieren“ wählen. Speichere am Handy danach den Link der neuen Tabelle (dort Pokémon > Web-App-Link anzeigen).']];
-  if (st.map.CODE_VERSION) {
-    // ab 1.0 legt sich die Tabelle selbst still; läuft hier doch wieder älterer Code, hilft nur der Weg von Hand
-    lines.push([''], ['Willst du doch hier weitermachen: Pokémon > Diese Tabelle wieder benutzen.'],
-      [''], ['Zeigt das Menü Pokémon hier nach dem Neuladen noch alle Punkte, läuft in dieser Tabelle eine ältere Version. Dann bitte so:'], ['']);
-  } else {
-    lines.push(['']);
-  }
+  lines.push([''], ['Willst du doch hier weitermachen: Pokémon > Diese Tabelle wieder benutzen.'],
+    [''], ['Zeigt das Menü Pokémon hier nach dem Neuladen noch alle Punkte, läuft in dieser Tabelle eine ältere Version. Dann bitte so:'], ['']);
   manual.forEach(function (l) { lines.push(l); });
   sh.getRange(1, 1, lines.length, 1).setValues(lines);
   sh.getRange('A1').setFontSize(16).setFontWeight('bold');

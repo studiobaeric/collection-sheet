@@ -76,7 +76,6 @@ const COL = {
   ownPriceDate: 27, origin: 28, fp: 29
 };
 const NCOL = DATA_HEADERS.length; // 30 feste Spalten
-const V1_NCOL = 23; // Breite des alten Datenblatts (Version 1)
 const TEXT_COLS = [COL.key, COL.id, COL.setId, COL.setName, COL.setDate, COL.localId, COL.normNum,
   COL.name, COL.nameEn, COL.source, COL.variant, COL.cond, COL.priceDate, COL.img, COL.rarity,
   COL.category, COL.illustrator, COL.eid, COL.lang, COL.version, COL.ownPriceDate, COL.origin, COL.fp];
@@ -1161,58 +1160,29 @@ function ensureSchema_() {
 }
 
 /**
- * Stellt das Blatt Daten auf Version 2 um (idempotent). Alte Zeilen bekommen Eintrag-ID, Sprache DE,
- * Herkunft 'Hand' und den neuen Schlüssel id|variant||cond|DE. Danach zieht afterDataChange_ nach.
+ * Prüft das Blatt Daten auf Version 2 (idempotent): legt es an oder ergänzt fehlende feste Kopfzeilen, Zusatzspalten
+ * bleiben. Das alte Format vor 1.0 stellt das Tool seit 1.2.3 nicht mehr um (#36 B3). Danach zieht afterDataChange_ nach.
  */
 function migrateSchema_() {
   const ss = ss_();
   withLock_(function () {
-    let sh = ss.getSheetByName(SHEETS.data);
-    let migrated = false;
+    const sh = ss.getSheetByName(SHEETS.data);
     if (!sh) {
       setupDataSheet_(ss);
     } else {
       const lastCol = Math.min(sh.getLastColumn(), sh.getMaxColumns());
       const head = lastCol ? sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h == null ? '' : h).trim(); }) : [];
-      if (head[COL.eid] === DATA_HEADERS[COL.eid]) {
-        // schon Version 2: nur fehlende feste Kopfzeilen ergänzen, Zusatzspalten bleiben
-        if (DATA_HEADERS.some(function (h, i) { return head[i] !== h; })) {
-          ensureCols_(sh, NCOL);
-          writeHeaders_(sh, DATA_HEADERS);
-        }
-      } else {
-        // alte Spalten hinter den 23 festen (falls jemand welche angelegt hat) werden zu Zusatzspalten
-        const oldExtras = [];
-        for (let c = V1_NCOL; c < head.length; c++) if (head[c]) oldExtras.push({ c: c, name: head[c] });
-        const last = sh.getLastRow();
-        const readW = Math.min(Math.max(lastCol, V1_NCOL), sh.getMaxColumns());
-        const old = last >= 2 ? sh.getRange(2, 1, last - 1, readW).getValues() : [];
-        const headers = DATA_HEADERS.concat(oldExtras.map(function (x) { return x.name; }));
-        const rows = [];
-        old.forEach(function (r) {
-          const fixed = r.slice(0, V1_NCOL);
-          while (fixed.length < V1_NCOL) fixed.push('');
-          if (!fixed.some(function (v) { return v !== '' && v != null; })) return; // leere Zeile
-          const row = fixed.concat([newEid_(), 'DE', '', '', '', ORIGIN_HAND, '']);
-          oldExtras.forEach(function (x) { row.push(r[x.c] === undefined ? '' : r[x.c]); });
-          row[COL.key] = entryKey_(row);
-          rows.push(row);
-        });
-        ensureCols_(sh, Math.max(headers.length, lastCol));
-        // erst die Zeilen, dann die Kopfzeile: bricht es dazwischen ab, gilt das Blatt weiter als Version 1
-        // und die Umstellung läuft beim nächsten Aufruf noch einmal
-        rewriteData_(rows);
-        sh.getRange(1, 1, 1, Math.max(headers.length, lastCol)).clearContent();
-        writeHeaders_(sh, headers);
-        applyDataFormats_(sh);
-        migrated = true;
+      if (head[COL.eid] !== DATA_HEADERS[COL.eid] && sh.getLastRow() >= 2) {
+        throw new Error('Das Blatt Daten hat noch das Format vor Version 1.0. Das stellt diese Version nicht mehr um. ' +
+          'Lies die Karten bitte über den Tab Import als Liste ein.');
+      }
+      if (DATA_HEADERS.some(function (h, i) { return head[i] !== h; })) {
+        ensureCols_(sh, NCOL);
+        writeHeaders_(sh, DATA_HEADERS);
       }
     }
     settingSet_('SCHEMA_VERSION', SCHEMA_VERSION);
     afterDataChange_();
-    // Die alte Ansichtsformel las Daten!A2:W. Wird zum ersten Mal umgestellt (beim ersten Öffnen nach dem Einfügen
-    // neuen Codes), gleich auf die neue Formel mit Gruppen wechseln. Suchfelder bleiben.
-    if (migrated && ss.getSheetByName(SHEETS.view)) setupViewSheet_(ss, true);
   });
 }
 
@@ -1338,8 +1308,6 @@ const SETTING_SHEET_ID = 'Tabellen-ID';
 /** Gelten nur für genau diese Tabelle. In einer Kopie lesen sie sich leer und werden beim ersten Schreiben gelöscht. */
 const SETTINGS_LOCAL = ['WEBAPP_URL', 'NEW_COPY_URL', 'NEW_COPY_VERSION', 'TAKE_FROM', 'TAKE_RUN',
   'TAKEN_OVER_BY', 'TAKEN_OVER_AT', 'TAKEN_OVER_SHEET', 'TAKEN_FROM', 'TAKEN_AT', 'SETUP_AT', 'NIGHTLY_AT', 'FILE_VERSIONS'];
-/** Standen früher in den Skript-Eigenschaften; settingGet_ liest dort weiter, bis sie im Blatt stehen. */
-const SETTINGS_FROM_PROPS = ['SCHEMA_VERSION', 'WEBAPP_URL', 'VIEW_EXTRAS'];
 /** Auslöser des Tools. Die Namen bleiben über alle Versionen gleich, sonst laufen alte Auslöser ins Leere. */
 const TRIGGER_HANDLERS = ['naechtlicherPreislauf', 'continuePriceRun', 'beiStrukturAenderung'];
 
@@ -1367,11 +1335,7 @@ function settingsAll_() {
 function settingGet_(key) {
   const all = settingsAll_();
   if (all.copy && SETTINGS_LOCAL.indexOf(key) >= 0) return '';
-  if (key in all.map) return all.map[key];
-  if (!all.copy && SETTINGS_FROM_PROPS.indexOf(key) >= 0) {
-    return PropertiesService.getScriptProperties().getProperty(key) || '';
-  }
-  return '';
+  return key in all.map ? all.map[key] : '';
 }
 
 function settingSet_(key, value) {
@@ -1433,30 +1397,11 @@ function writeSettings_(ss, obj) {
   return isCopy;
 }
 
-/**
- * Werte aus den alten Skript-Eigenschaften ins Blatt übernehmen (Einrichtung, Update). Legt das Blatt an.
- * prevId: SPREADSHEET_ID, bevor setupAll_ sie überschrieben hat (sonst die gespeicherte).
- */
-function migrateSettingsFromProps_(prevId) {
+/** Blatt Tool-Einstellungen anlegen bzw. eine Kopie übernehmen (Einrichtung, Update). */
+function ensureSettings_() {
   const all = settingsAll_();
-  if (all.copy) { adoptCopy_(); return; }
-  const props = PropertiesService.getScriptProperties();
-  const pid = prevId != null ? String(prevId) : (props.getProperty('SPREADSHEET_ID') || '');
-  // „Kopie erstellen“ einer Tabelle vor 1.0: Die Skript-Eigenschaften kommen mit und nennen die andere Tabelle.
-  // Deren lokale Werte (Web-App-Link) gelten hier nicht, und eingerichtet ist die Kopie auch nicht (keine Auslöser).
-  const foreign = !!pid && pid !== ss_().getId();
-  const add = {};
-  SETTINGS_FROM_PROPS.forEach(function (k) {
-    const v = props.getProperty(k);
-    if (foreign && SETTINGS_LOCAL.indexOf(k) >= 0) return;
-    if (v && !(k in all.map)) add[k] = v;
-  });
-  if (foreign && !('WEBAPP_URL' in all.map)) add.WEBAPP_URL = ''; // sonst liest settingGet_ weiter den alten Link
-  // Code vor 1.0 kannte CODE_VERSION nicht; hat seine Einrichtung hier SPREADSHEET_ID oder SCHEMA_VERSION
-  // hinterlassen, ist diese Tabelle schon eingerichtet (Auslöser und Sets nicht noch einmal)
-  const legacy = !foreign && !all.map.CODE_VERSION && (props.getProperty('SCHEMA_VERSION') || pid === ss_().getId());
-  if (legacy && !all.map.SETUP_AT) add.SETUP_AT = 'vor 1.0';
-  if (Object.keys(add).length || !all.exists) settingsSetMany_(add);
+  if (all.copy) adoptCopy_();
+  else if (!all.exists) settingsSetMany_({});
 }
 
 /** Link der neuen Tabelle, wenn diese hier übernommen und stillgelegt wurde, sonst ''. */
@@ -1518,7 +1463,7 @@ function upgradeIfNeeded_(onlyUpgrade) {
   try {
     if (step) step('Daten prüfen');
     ensureSchema_();
-    migrateSettingsFromProps_();
+    ensureSettings_();
     setupSheets_(ss_(), true, step);
   } catch (e) {
     if (step) notifyDone_(what + ' abgebrochen: ' + e.message);
@@ -1893,18 +1838,16 @@ function setupAll_() {
   let dashMissing;
   try {
     step('Tabelle vorbereiten');
-    const props = PropertiesService.getScriptProperties();
-    const prevId = props.getProperty('SPREADSHEET_ID') || ''; // nennt sie eine andere Tabelle, ist das hier eine Kopie
-    props.setProperty('SPREADSHEET_ID', ss.getId());
+    PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
     if (settingsAll_().copy) adoptCopy_();
     try {
       migrateSchema_(); // vor setupDataSheet_, das die Kopfzeile neu schreibt
     } catch (e) {
       notifyDone_('Einrichtung abgebrochen.');
-      alert_('Das Datenblatt konnte nicht auf das neue Format umgestellt werden (' + e.message + '). Es wurde nichts geändert.');
+      alert_('Das Datenblatt ließ sich nicht einrichten (' + e.message + '). Es wurde nichts geändert.');
       return '';
     }
-    migrateSettingsFromProps_(prevId);
+    ensureSettings_();
     dashMissing = setupSheets_(ss, false, step);
     showDashboard_(); // eine neue Tabelle startet im Dashboard (#28)
     setupTriggers_();

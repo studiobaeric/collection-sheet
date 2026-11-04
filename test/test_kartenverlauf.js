@@ -215,20 +215,6 @@ t.section('Fremdes Blatt „Kartenverlauf“, Übernahme, alte Sammlung');
   ok('zweite Einrichtung: Tool-Blatt bleibt (steht in TOOL_SHEETS)', !env.sheet('Kartenverlauf (alt 2)') && env.values('Kartenverlauf')[0][0] === 'Karten-ID');
   const c = env.ctx;
   ok('Übernahme kopiert den Kartenverlauf', c.updTakeoverSheets_().indexOf('Kartenverlauf') === 2);
-  eq('Kopfzeile für alte Tabellen bekannt', c.updTakeoverHeads_()['Kartenverlauf'], env.run('CARD_HIST_HEADERS'));
-
-  // Zusatzspalten einer alten Sammlung (13 feste Spalten) und einer neuen (16)
-  const mk = (name, head) => {
-    const e = H.createEnv();
-    const sh = e.ss.insertSheet('Sammlung');
-    sh.getRange(5, 1, 1, head.length).setValues([head]);
-    return e;
-  };
-  const old13 = ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand', 'Ordner'];
-  const e1 = mk('alt', old13);
-  eq('alte Sammlung: Zusatzspalte hinter Preisstand', e1.ctx.updOldViewExtras_(e1.ss), ['Ordner']);
-  const e2 = mk('neu', env.run('VIEW_HEADERS').concat(['Fach', 'Box']));
-  eq('neue Sammlung: Zusatzspalten hinter Preisstand', e2.ctx.updOldViewExtras_(e2.ss), ['Fach', 'Box']);
 }
 
 // ---------------------------------------------------------------------------

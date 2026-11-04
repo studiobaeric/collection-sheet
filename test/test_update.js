@@ -337,7 +337,7 @@ t.section('Neue Version holen: Kopie der Vorlage, Übernahme, alte Tabelle');
   const p = neu.uiCall('takeoverPreview', ni.pendingTake);
   t.ok('neu: Vorschau', p.cards === 2 && p.copies === 3 && p.version === '1.0.0', p);
   const tr = neu.uiCall('takeoverRun', ni.pendingTake);
-  t.ok('neu: übernommen, Namen getauscht', tr.cards === 2 && tr.manualStop === false && tr.oldName === 'Meine Karten (alt)' && tr.newName === 'Meine Karten' &&
+  t.ok('neu: übernommen, Namen getauscht', tr.cards === 2 && tr.oldName === 'Meine Karten (alt)' && tr.newName === 'Meine Karten' &&
     neu.ss.getName() === 'Meine Karten' && old.ss.getName() === 'Meine Karten (alt)' && /heißt jetzt „Meine Karten \(alt\)“/.test(tr.message), tr);
   t.ok('neu: Daten, Suchfeld, keine ausstehende Übernahme mehr', neu.data().length === 2 && neu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' &&
     neu.uiCall('getUpdateInfo', false).pendingTake === '' && neu.setting('TAKEN_FROM') === old.ss.getUrl() && neu.setting('TAKE_RUN') === '');
@@ -620,7 +620,7 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   t.ok('Vorschau ändert nichts', env.data().length === 0 && !settingOf(ob, 'TAKEN_OVER_BY'));
   const r = env.uiCall('takeoverRun', url);
   t.ok('Übernahme: Meldung', r.cards === 2 && /2 Einträge/.test(r.message) && J(r.own) === J(['Notizen']), r);
-  t.ok('ab 1.0: legt sich selbst still', r.manualStop === false && /jetzt stillgelegt/.test(r.message) && r.noteSheet === 'Übernommen' &&
+  t.ok('ab 1.0: legt sich selbst still', /jetzt stillgelegt/.test(r.message) && r.noteSheet === 'Übernommen' &&
     settingOf(ob, 'TAKEN_OVER_SHEET') === 'Übernommen');
   t.ok('neue Tabelle: CODE_VERSION und SETUP_AT', env.setting('CODE_VERSION') === env.run('TOOL_VERSION') && !!env.setting('SETUP_AT'));
   const d = env.data();
@@ -647,30 +647,13 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 }
 
 // ---------------------------------------------------------------------------
-t.section('Übernahme aus einer Tabelle vor 1.0 (Version 1, ohne Einstellungen)');
+t.section('Übernahme aus einer Tabelle vor 1.0: abgelehnt (#36 B3)');
 {
-  const backupDir = path.join(__dirname, '..', 'backup');
-  const old = H.createEnv({ srcDir: backupDir, files: ['Code.gs'] });
-  old.ss.id = OLD_ID;
-  old.ctx.einrichtung();
-  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
-  old.ctx.addCard({ id: 'base1-4', lang: 'de', variant: 'base', condition: 'LP', qty: 1 });
-  old.sheet('Sammlung').getRange('B4').setValue('Glurak');
-  t.ok('alte Tabelle hat 23 Spalten, kein Einstellungsblatt', old.values('Daten')[0].length === 23 && !old.sheet('Tool-Einstellungen'));
-  const W = makeWorld();
-  const env = setupEnv(W);
-  env.sources[OLD_ID] = old.ss;
-  const p = env.uiCall('takeoverPreview', OLD_ID);
-  t.ok('Vorschau: Version leer, 2 Karten', p.version === '' && p.cards === 2 && p.copies === 3, p);
-  const r = env.uiCall('takeoverRun', OLD_ID);
-  t.ok('vor 1.0: manualStop, Meldung nennt Trigger und Hinweisblatt', r.manualStop === true && /legt sich nicht selbst still/.test(r.message) &&
-    /Trigger/.test(r.message) && /„Übernommen“/.test(r.message), r);
-  const d = env.data();
-  t.ok('umgestellt auf Version 2', env.values('Daten')[0][23] === 'Eintrag-ID' && d.length === 2 && d.every(x => /^E[0-9a-f]{10}$/.test(x.eid) && x.origin === 'Hand') &&
-    J(d.map(x => x.key)) === J(['swsh3-025|normal||NM|DE', 'base1-4|holo||LP|DE']), d.map(x => x.key));
-  t.ok('Suchfeld übernommen', env.sheet('Sammlung').getRange('B4').getValue() === 'Glurak');
-  t.ok('alte Tabelle: Anleitung zum Löschen der Trigger', /Trigger/.test(J(old.values('Übernommen'))) && settingOf(old.ss, 'TAKEN_OVER_BY') === env.ss.getUrl());
-  t.ok('alte Tabelle: Anleitung zum Archivieren der Web-App', /Archivieren/.test(J(old.values('Übernommen'))) && /Web-App-Link anzeigen/.test(J(old.values('Übernommen'))));
+  const env = setupEnv(makeWorld());
+  env.addSource({ id: OLD_ID, name: 'Uralt', tabs: { Daten: [['Schlüssel', 'Karten-ID'], ['swsh3-025|normal|NM', 'swsh3-025']] } });
+  t.throws('ohne CODE_VERSION: Vorschau verweist auf den Import', () => env.uiCall('takeoverPreview', OLD_ID), /vor 1\.0[^]*Import/);
+  t.throws('ohne CODE_VERSION: Übernahme ebenso', () => env.uiCall('takeoverRun', OLD_ID), /vor 1\.0/);
+  t.ok('nichts übernommen', env.data().length === 0 && !env.setting('TAKE_RUN'));
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +670,7 @@ t.section('Übernahme: Fehler');
   t.throws('ohne Blatt Daten', () => env.uiCall('takeoverPreview', OLD_ID), /kein Blatt „Daten“/);
   const W2 = makeWorld();
   const env2 = setupEnv(W2);
-  env2.addSource({ id: OLD_ID, name: 'Alt', tabs: { Daten: [['Schlüssel'], ['x']], Importe: [['Nr', 'Datum', 'Quelle', 'Quelle-ID', 'Tab', 'Vorlage', 'Modus', 'Status'], [3, '', '', '', '', '', '', 'läuft']] } });
+  env2.addSource({ id: OLD_ID, name: 'Alt', tabs: { 'Tool-Einstellungen': [['Schlüssel', 'Wert'], ['CODE_VERSION', '1.0.0'], ['TOOL_SHEETS', '["Daten","Importe"]']], Daten: [['Schlüssel'], ['x']], Importe: [['Nr', 'Datum', 'Quelle', 'Quelle-ID', 'Tab', 'Vorlage', 'Modus', 'Status'], [3, '', '', '', '', '', '', 'läuft']] } });
   const p = env2.uiCall('takeoverPreview', OLD_ID);
   t.ok('Vorschau warnt vor unfertigem Import', p.warnings.some(w => /Import 3 ist nicht fertig/.test(w)), p.warnings);
 }
@@ -768,26 +751,6 @@ t.section('Übernahme: eigenes Blatt „Übernommen“, neueres Datenformat');
 // ---------------------------------------------------------------------------
 t.section('Übernahme: eigene Blätter mit Namen des Tools');
 {
-  // Tabelle vor 1.0 (Version 1 kannte weder Seltenheiten noch Import-Blätter): gleichnamige Blätter mit fremder
-  // Kopfzeile gehören dem Nutzer. (Generierte Blätter wie Pokédex erkennt das erst ab 1.0, über TOOL_SHEETS.)
-  const backupDir = path.join(__dirname, '..', 'backup');
-  const old = H.createEnv({ srcDir: backupDir, files: ['Code.gs'] });
-  old.ss.id = OLD_ID;
-  old.ctx.einrichtung();
-  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
-  old.ss.insertSheet('Import-Sets').getRange('A1:B2').setValues([['Set', 'Gefangen'], ['Basis', 'ja']]);
-  old.ss.insertSheet('Seltenheiten').getRange('A1:B2').setValues([['Mein Ziel', 'Budget'], ['Glurak', 300]]);
-  const env = setupEnv(makeWorld());
-  env.sources[OLD_ID] = old.ss;
-  const p = env.uiCall('takeoverPreview', OLD_ID);
-  t.ok('vor 1.0: Vorschau zählt sie als eigene Blätter', J(p.own.slice().sort()) === J(['Import-Sets', 'Seltenheiten']) &&
-    !p.sheets.some(s => s.name === 'Seltenheiten' || s.name === 'Import-Sets'), p);
-  env.uiCall('takeoverRun', OLD_ID);
-  t.ok('vor 1.0: als „(alt)“ kopiert, Seltenheiten des Tools unberührt', env.sheet('Import-Sets (alt)').getRange('B2').getValue() === 'ja' &&
-    env.sheet('Seltenheiten (alt)').getRange('A2').getValue() === 'Glurak' && env.values('Seltenheiten').length > 2 &&
-    !env.values('Seltenheiten').some(r => r[0] === 'Glurak'), env.values('Seltenheiten').slice(0, 3));
-  t.ok('neue Tabelle: Liste ihrer Blätter gespeichert', JSON.parse(env.setting('TOOL_SHEETS')).indexOf('Pokédex') >= 0);
-
   // ab 1.0: die Liste der alten Tabelle zählt (ein Blatt, das erst eine spätere Version anlegt)
   const o2 = baseEnv();
   o2.ss.id = OLD_ID;
@@ -807,17 +770,6 @@ t.section('Übernahme: eigene Blätter mit Namen des Tools');
 t.section('Übernahme: eigenes Blatt „Dashboard“ aus Versionen vor 1.1.0');
 {
   const dashOk = env => env.sheet('Dashboard').getRange('C2').getValue() === 'Pokémon-Sammlung' && env.sheet('Dashboard').getImages().length === env.run('DASH_BUTTONS').length;
-  // vor 1.0 (ohne TOOL_SHEETS)
-  const old = H.createEnv({ srcDir: path.join(__dirname, '..', 'backup'), files: ['Code.gs'] });
-  old.ss.id = OLD_ID;
-  old.ctx.einrichtung();
-  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
-  old.ss.insertSheet('Dashboard').getRange('A1:B2').setValues([['Ziel', 'Budget'], ['Glurak', 300]]);
-  const env = setupEnv(makeWorld());
-  env.sources[OLD_ID] = old.ss;
-  t.ok('vor 1.0: eigenes Dashboard zählt als eigenes Blatt', env.uiCall('takeoverPreview', OLD_ID).own.indexOf('Dashboard') >= 0);
-  env.uiCall('takeoverRun', OLD_ID);
-  t.ok('vor 1.0: als „Dashboard (alt)“ kopiert, Dashboard des Tools mit Knöpfen', env.sheet('Dashboard (alt)').getRange('B2').getValue() === 300 && dashOk(env));
   // 1.0.x: TOOL_SHEETS ohne Dashboard
   const o2 = baseEnv();
   o2.ss.id = OLD_ID;
@@ -905,7 +857,7 @@ t.section('Übernahme: abgebrochen, wiederholt, doppelt, ohne Schreibrecht');
 }
 
 // ---------------------------------------------------------------------------
-t.section('Älterer Code als die Daten, Kopie einer Tabelle vor 1.0');
+t.section('Älterer Code als die Daten');
 {
   const W = makeWorld();
   const env = setupEnv(W);
@@ -921,29 +873,6 @@ t.section('Älterer Code als die Daten, Kopie einer Tabelle vor 1.0');
   env.ctx.kartenErfassen();
   t.ok('frische Kopie mit neuerem Format: keine Seitenleiste', env.ui.sidebars.length === n && env.setting('SCHEMA_VERSION') === '3');
 
-  // „Kopie erstellen“ einer Tabelle vor 1.0: Skript-Eigenschaften der anderen Tabelle, keine Auslöser
-  const c = setupEnv(W);
-  c.ss.deleteSheet(c.sheet('Tool-Einstellungen'));
-  Object.assign(c.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: 'ORIGINALORIGINALORIGINAL', WEBAPP_URL: 'https://script.google.com/macros/s/ALT/exec' });
-  c.triggers = [];
-  c.run('settingsCache_ = null');
-  c.ctx.kartenErfassen();
-  t.ok('Kopie vor 1.0: wird eingerichtet (Auslöser, eigene ID), alter Web-App-Link gilt nicht', c.triggers.length === 2 && c.props.SPREADSHEET_ID === c.ss.getId() &&
-    c.ctx.settingGet_('WEBAPP_URL') === '' && c.setting('SETUP_AT') !== 'vor 1.0', [c.triggers.length, c.props.SPREADSHEET_ID, c.setting('SETUP_AT')]);
-  // dasselbe direkt über setupAll_
-  const c2 = setupEnv(W);
-  c2.ss.deleteSheet(c2.sheet('Tool-Einstellungen'));
-  Object.assign(c2.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: 'ORIGINALORIGINALORIGINAL', WEBAPP_URL: 'https://script.google.com/macros/s/ALT/exec' });
-  c2.run('settingsCache_ = null');
-  c2.ctx.setupAll_();
-  t.ok('Kopie vor 1.0 über setupAll_: alter Web-App-Link gilt nicht', c2.ctx.settingGet_('WEBAPP_URL') === '' && c2.props.SPREADSHEET_ID === c2.ss.getId() && c2.triggers.length === 2);
-  // eigene Tabelle vor 1.0 (SPREADSHEET_ID passt): gilt als eingerichtet
-  const own = setupEnv(W);
-  own.ss.deleteSheet(own.sheet('Tool-Einstellungen'));
-  Object.assign(own.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: own.ss.getId(), WEBAPP_URL: 'https://script.google.com/macros/s/MEINS/exec' });
-  own.run('settingsCache_ = null');
-  own.ctx.kartenErfassen();
-  t.ok('eigene Tabelle vor 1.0: SETUP_AT vor 1.0, Web-App-Link bleibt', own.setting('SETUP_AT') === 'vor 1.0' && own.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/MEINS/exec');
 }
 
 // ---------------------------------------------------------------------------

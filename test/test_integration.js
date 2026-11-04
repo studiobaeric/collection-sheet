@@ -1007,55 +1007,6 @@ function seedImport(env) {
     !!W.btn(W.$('gx' + wi2), '+ Exemplar') && !W.btn(W.$('gh' + wi2), '−1') && !W.$('gc' + wi2));
   t.ok('keine Skriptfehler (Web)', W.errors.length === 0, W.errors);
 
-  // ---- 13b. Umstieg: Blatt mit der alten Code.gs gebaut, dann neue Code.gs, Seitenleiste vor „Einrichtung“ ----
-  t.section('Umstieg von der alten Version');
-  {
-    const backupDir = path.join(__dirname, '..', 'backup');
-    const old = H.createEnv({ srcDir: backupDir, files: ['Code.gs'] });
-    old.ctx.einrichtung();
-    old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
-    old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'reverse', condition: '', qty: 1 });
-    old.ctx.addCard({ id: 'base1-4', lang: 'de', variant: 'base', condition: 'LP', qty: 1 });
-    old.sheet('Sammlung').getRange('B4').setValue('Glurak');
-    old.sheet('Sammlung').getRange('H4').setValue(true);
-    t.ok('altes Blatt: Formel liest Daten!A2:W', /Daten!A2:W/.test(old.sheet('Sammlung').getRange('A6').getFormula()));
-    const nu = makeEnv();
-    // Blätter, Formate, Formeln und Eigenschaften übernehmen (wie: Code ersetzt, Tabelle bleibt)
-    nu.ss.list.slice().forEach(s => nu.ss.deleteSheet(s));
-    const clone = v => (v instanceof Date ? new Date(v.getTime()) : v);
-    old.ss.list.forEach(s => {
-      const n = nu.ss.insertSheet(s.name, { maxRows: s.maxRows, maxCols: s.maxCols });
-      n.d = s.d.map(r => (r ? r.map(clone) : r));
-      n.f = s.f.map(r => (r ? r.slice() : r));
-      n.formulas = Object.assign({}, s.formulas);
-      n.checkboxes = Object.assign({}, s.checkboxes);
-      n.hidden = s.hidden; n.frozen = s.frozen;
-    });
-    Object.assign(nu.props, old.props);
-    nu.triggers = old.triggers.slice();
-    t.ok('vor dem Öffnen: Schema noch alt', !nu.props.SCHEMA_VERSION && nu.values('Daten')[0].length === 23);
-    const U = boot(nu, 'sidebar');
-    await U.settle();
-    t.ok('Seitenleiste: getUiConfig stellt Daten um', nu.setting('SCHEMA_VERSION') === '2' && nu.values('Daten')[0][23] === 'Eintrag-ID', nu.values('Daten')[0]);
-    const nd = nu.data();
-    t.ok('alte Einträge: Schlüssel v2, Herkunft Hand', nd.length === 3 && nd.every(r => r.origin === 'Hand' && r.lang === 'DE' && /^E[0-9a-f]{10}$/.test(r.eid)) &&
-      nd.map(r => r.key).join(',') === 'swsh3-025|normal||NM|DE,swsh3-025|reverse|||DE,base1-4|holo||LP|DE', nd.map(r => r.key));
-    const vf = nu.sheet('Sammlung').getRange('A6').getFormula();
-    t.ok('Sammlung: Formel gleich auf Gruppen umgestellt', /'Gruppen'!A2:AG,/.test(vf) && !/Daten'?!/.test(vf), vf);
-    t.ok('Sammlung: Suchfeld und Bilder-Schalter bleiben', nu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && nu.sheet('Sammlung').getRange('H4').getValue() === true);
-    t.ok('Sammlung: Spalte Exemplare statt Zustand', nu.sheet('Sammlung').getRange(5, 6).getValue() === 'Exemplare');
-    t.ok('Gruppen: 3 Gruppen', nu.groups().length === 3);
-    checkSheets(nu, 'nach Umstieg');
-    await U.clickSettle(U.$('tabColl'));
-    t.ok('Sammlung im UI: 3 Gruppen', U.win.state.groups.length === 3, U.win.state.groups.map(g => g.gkey));
-    const ui0 = U.gIdx('swsh3-025|normal|');
-    U.expand(ui0);
-    await U.clickSettle(U.btn(U.$('gr' + ui0).querySelector('.erow'), '−1'));
-    t.ok('−1 auf alte Zeile geht', nu.data().find(r => r.key === 'swsh3-025|normal||NM|DE').count === 1);
-    checkUiMatchesServer(U, 'nach Umstieg');
-    t.ok('keine Skriptfehler (Umstieg)', U.errors.length === 0, U.errors);
-  }
-
   // ---- 14b. Suche direkt im Browser (#43): echter Suchablauf aus searchJs_, die tcgdex-Attrappe antwortet auf fetch ----
   t.section('Suche direkt im Browser');
   {

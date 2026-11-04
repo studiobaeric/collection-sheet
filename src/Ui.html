@@ -2544,14 +2544,12 @@ function takePreview(ev) {
   call('takeoverPreview', url).then(function (p) {
     if (gen !== takeGen || takeBusy) return;
     takeUrlChecked = url;
-    var h = '<b>' + esc(p.name) + '</b> (' + (p.version ? 'Version ' + esc(p.version) : 'Version vor 1.0') + ')<br>' +
+    var h = '<b>' + esc(p.name) + '</b> (' + 'Version ' + esc(p.version) + ')<br>' +
       esc(p.cards) + ' Einträge mit ' + esc(p.copies) + ' Karten.';
     if (p.sheets && p.sheets.length) h += '<br>Dazu: ' + p.sheets.map(function (s) { return esc(s.name) + ' (' + esc(s.rows) + ')'; }).join(', ') + '.';
     if (p.own && p.own.length) h += '<br>Eigene Blätter: ' + esc(p.own.join(', ')) + '.';
     h += (p.warnings || []).map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('');
-    h += '<div class="hint">' + (p.version
-      ? 'Danach ist die alte Tabelle stillgelegt: Sie zeigt nur noch einen Hinweis auf diese Tabelle und ruft keine Preise mehr ab. Über ihr Menü kannst du sie wieder benutzen.'
-      : 'Die alte Tabelle hat eine Version vor 1.0 und legt sich nicht selbst still. Sie bekommt vorne ein Blatt mit einem Hinweis auf diese Tabelle. Damit sie nachts keine Preise mehr abruft, löschst du danach dort die Trigger (die Schritte stehen im Hinweisblatt).') + '</div>' +
+    h += '<div class="hint">Danach ist die alte Tabelle stillgelegt: Sie zeigt nur noch einen Hinweis auf diese Tabelle und ruft keine Preise mehr ab. Über ihr Menü kannst du sie wieder benutzen.</div>' +
       '<div class="actions"><button class="btn primary" type="button" id="takeGo" onclick="takeRun()">Jetzt übernehmen</button></div>';
     setMsg('takeMsg', h);
   }).catch(function (e) { if (gen === takeGen && !takeBusy) setMsg('takeMsg', esc(errText(e)), 'err'); });
