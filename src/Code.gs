@@ -1763,6 +1763,7 @@ function onEdit(e) {
     const name = sh.getName();
     if (name === SHEETS.data) { afterEdit_(); return; }
     if (name === SHEETS.sets) { dropSetsCache_(); return; }
+    if (name === SHEETS.tr) { cacheDrop_(TR_CACHE_KEY); return; }
     if (LOOKUP_SHEETS.indexOf(name) >= 0) { dropLookups_(); return; }
     if (name === SHEETS.dex) {
       if (e.range.getRow() === 4) { syncDexFormBoxes_(sh, e.range); applyDexRowHeights_(sh); }
@@ -4690,10 +4691,18 @@ function rebuildTranslation_() {
   if (rows.length + 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), rows.length + 1 - sh.getMaxRows());
   sh.getRange(2, 1, rows.length, 4).setNumberFormats(rows.map(function () { return ['@', '@', '0', '@']; }));
   sh.getRange(2, 1, rows.length, 4).setValues(rows);
+  cacheDrop_(TR_CACHE_KEY);
   return rows.length;
 }
 
+// Übersetzung im Zwischenspeicher wie die Sets (#66): Wer das Blatt schreibt, vergisst ihn (rebuildTranslation_,
+// Übernahme), eine Änderung von Hand ebenso (onEdit).
+const TR_CACHE_KEY = 'tr';
+
+/** Deutscher Name (klein) -> englischer Name; eigene Übersetzung (Spalte D) vor der von tcgdex. */
 function loadTranslation_() {
+  const hit = cacheGetJson_(TR_CACHE_KEY);
+  if (hit) return hit;
   const map = {};
   const sh = ss_().getSheetByName(SHEETS.tr);
   if (!sh || sh.getLastRow() < 2) return map;
@@ -4705,6 +4714,7 @@ function loadTranslation_() {
     if (c) { map[k] = c; own[k] = true; } // eigene Übersetzung hat Vorrang
     else if (g && !own[k]) map[k] = g;
   });
+  if (Object.keys(map).length) cachePutJson_(TR_CACHE_KEY, map, SETS_CACHE_SECS);
   return map;
 }
 

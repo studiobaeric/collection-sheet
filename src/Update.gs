@@ -628,6 +628,7 @@ function updTakeoverRun_(url) {
     }
   })();
   dropSetsCache_(); // das Blatt Sets kommt jetzt aus der alten Tabelle
+  cacheDrop_(TR_CACHE_KEY); // ebenso die Übersetzung (#66)
 
   let note, shared;
   try {
