@@ -1139,7 +1139,7 @@ function runQueue() {
 
 /** Ganze Sammlung vom Server holen (beim ersten Öffnen, „Neu laden“, nach Hinzufügen oder Import). */
 function loadCollection(okText) {
-  if (queue.length) { coll.reloadWanted = true; setMsg('collMsg', 'Lädt neu, sobald alles gespeichert ist …'); return; }
+  if (queue.length) { coll.reloadWanted = true; coll.keepMsg = false; setMsg('collMsg', 'Lädt neu, sobald alles gespeichert ist …'); return; }
   var gen = ++coll.gen, seen = coll.opsDone, staleSeq = coll.staleSeq;
   coll.loading = true;
   coll.error = '';
