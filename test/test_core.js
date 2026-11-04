@@ -499,6 +499,36 @@ t.section('Preislauf und Verlauf');
   ok('history uses effective price (2*2 + 10 + 2*1.5)', last[1] === 17 && last[2] === 6 && last[3] === 1, last);
   ok('PRICE_RUN cleared', !env.props.PRICE_RUN);
   ok('own price untouched by price run', env.data().find(x => x.eid === b.eid).ownPrice === 10);
+  {
+    // #36 A2: drei Pakete, aber nur einmal schreiben; mit Pause einmal vor der Pause und einmal am Ende
+    const c = env.ctx;
+    const J = JSON.stringify;
+    const real = { targets: c.priceTargets_, write: c.writePrices_ };
+    const base = real.targets();
+    env.run('priceTargets_ = function () { return __t; }');
+    env.ctx.__t = Array.from({ length: 45 }, (x, i) => Object.assign({}, base[i % 2], i > 1 ? { key: base[i % 2].key + '#' + i } : {}));
+    const calls = [];
+    env.ctx.__w = real.write;
+    env.ctx.__calls = calls;
+    env.run('writePrices_ = function (cm, last, dex) { __calls.push([Object.keys(cm).length, last]); return __w(cm, last, dex); }');
+    env.props.PRICE_RUN = JSON.stringify({ pos: 0, failed: 0 });
+    c.continuePriceRun();
+    eq('drei Pakete: einmal geschrieben, mit allen 45 Karten', calls, [[45, true]]);
+    calls.length = 0;
+    const now = env.run('Date.now');
+    let tick = 0;
+    env.run('Date.now = function () { return __now(); }');
+    env.ctx.__now = () => (tick++ < 3 ? 0 : 10 * 60 * 1000); // erst unter, dann über der Zeitgrenze
+    env.props.PRICE_RUN = JSON.stringify({ pos: 0, failed: 0 });
+    const msg = c.continuePriceRun();
+    ok('Pause: vorher geschrieben, Stand gespeichert', /pausiert/.test(msg) && calls.length === 1 && calls[0][1] === false && calls[0][0] > 0 && calls[0][0] < 45 &&
+      JSON.parse(env.props.PRICE_RUN).pos === calls[0][0], [msg, calls, env.props.PRICE_RUN]);
+    env.ctx.__now = now;
+    c.continuePriceRun();
+    ok('Fortsetzung: Rest am Ende geschrieben', calls.length === 2 && J(calls[1]) === J([45 - calls[0][0], true]) && !env.props.PRICE_RUN, calls);
+    env.ctx.__rt = real.targets;
+    env.run('priceTargets_ = __rt; writePrices_ = __w');
+  }
   // Verlauf wächst über die letzte Zeile hinaus (alter Test)
   const hs = env.sheet('Verlauf');
   hs.clearContents();

@@ -4776,40 +4776,43 @@ function continuePriceRun() {
   const state = JSON.parse(raw);
   const t0 = Date.now();
   const targets = priceTargets_();
+  // Preise erst im Speicher sammeln und nur vor einer Pause und am Ende schreiben, nicht nach jedem Paket (#36 A2).
+  // PRICE_RUN rückt nur beim Schreiben vor: Bricht der Lauf dazwischen ab, holt die Fortsetzung diese Karten noch einmal.
+  const cmAll = {}, dexAll = {};
+  const save = function (last) {
+    writePrices_(cmAll, last, dexAll);
+    props.setProperty('PRICE_RUN', JSON.stringify(state));
+  };
 
   while (state.pos < targets.length) {
     if (Date.now() - t0 > PRICE_TIME_LIMIT_MS) {
-      props.setProperty('PRICE_RUN', JSON.stringify(state));
+      save(false);
       ScriptApp.newTrigger('continuePriceRun').timeBased().after(60 * 1000).create();
       return 'Preislauf bei ' + state.pos + ' von ' + targets.length + ' Karten pausiert, geht in einer Minute weiter.';
     }
     const batch = targets.slice(state.pos, state.pos + PRICE_BATCH);
     const res = fetchAllJson_(batch.map(function (t) { return apiUrl_(t.lang, 'cards/' + encodeURIComponent(t.id)); }));
-    const cmByKey = {};
-    const dexById = {};
     const needEn = [];
     batch.forEach(function (t, i) {
       if (!res[i].ok) { state.failed++; return; }
-      dexById[t.id] = dexIdsOf_(res[i].data);
+      dexAll[t.id] = dexIdsOf_(res[i].data);
       const cm = cardmarket_(res[i].data);
-      if (cm) cmByKey[t.key] = cm;
+      if (cm) cmAll[t.key] = cm;
       else if (t.lang === 'de') needEn.push(t);
-      else cmByKey[t.key] = null;
+      else cmAll[t.key] = null;
     });
     if (needEn.length) {
       const enRes = fetchAllJson_(needEn.map(function (t) { return apiUrl_('en', 'cards/' + encodeURIComponent(t.id)); }));
       needEn.forEach(function (t, i) {
-        if (enRes[i].ok) cmByKey[t.key] = cardmarket_(enRes[i].data);
-        else if (enRes[i].notFound) cmByKey[t.key] = null;
+        if (enRes[i].ok) cmAll[t.key] = cardmarket_(enRes[i].data);
+        else if (enRes[i].notFound) cmAll[t.key] = null;
         else state.failed++;
       });
     }
-    const isLast = state.pos + batch.length >= targets.length;
-    writePrices_(cmByKey, isLast, dexById);
     state.pos += batch.length;
-    props.setProperty('PRICE_RUN', JSON.stringify(state));
     if (state.pos < targets.length) Utilities.sleep(1000);
   }
+  if (targets.length) save(true);
 
   try { fillSetDates_(); } catch (e) { /* nächste Nacht wieder */ }
   writeHistory_(state.failed);
