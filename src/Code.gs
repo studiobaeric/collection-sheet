@@ -259,8 +259,9 @@ function colLetter_(n) {
 /**
  * fn in der Sperre ausführen und alles festschreiben, solange die Sperre noch gilt. Danach gelten die gemerkten
  * Nachschlagewerte nicht mehr (dropLookups_), außer bei keepLookups: Das Speichern hält sie selbst aktuell (#43).
+ * after(Ergebnis) läuft nach dem Festschreiben, noch in der Sperre (#66).
  */
-function withLock_(fn, keepLookups) {
+function withLock_(fn, keepLookups, after) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error('Das Sheet ist gerade beschäftigt. Bitte gleich noch einmal versuchen.');
   tmrStep_('Sperre');
@@ -269,6 +270,7 @@ function withLock_(fn, keepLookups) {
     const result = fn();
     SpreadsheetApp.flush(); // Schreibvorgänge festschreiben, solange die Sperre noch gilt
     tmrStep_('festschreiben');
+    if (after) after(result);
     done = true;
     return result;
   } finally {
@@ -3860,7 +3862,7 @@ function addRidGet_(rid) {
   } catch (e) { return null; }
 }
 function addRidPut_(rid, res) {
-  if (!rid) return;
+  if (!rid || res.prev) return; // prev: schon gemerkt
   const keep = {};
   Object.keys(res).forEach(function (k) { if (k !== 'delta') keep[k] = res[k]; });
   keep.repeat = true;
@@ -3935,10 +3937,12 @@ function addCard(req) {
     let priceInfo = '';
     if (ownPrice != null) priceInfo = ' Eigener Preis: ' + eurText_(ownPrice) + '.';
     else if (price == null) priceInfo = ' (kein Preis)';
-    const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
-    addRidPut_(rid, out); // noch in der Sperre: eine Wiederholung wartet darauf und bekommt diese Antwort
-    return out;
-  }, true);
+    return addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
+  }, true, function (out) {
+    // erst nach dem Festschreiben merken: scheitert es, speichert die Wiederholung wirklich (#66). Noch in der
+    // Sperre: eine Wiederholung wartet darauf und bekommt diese Antwort.
+    addRidPut_(rid, out);
+  });
   tmrDone_();
   return result.prev || result;
 }
@@ -3984,10 +3988,8 @@ function addFreeCard(req) {
     saveStore_(st, look);
     res.delta = collDelta_(st, look);
     const priceInfo = ownPrice != null ? ' Eigener Preis: ' + eurText_(ownPrice) + '.' : ' (freie Karte, kein Preis)';
-    const out = addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
-    addRidPut_(rid, out);
-    return out;
-  }, true);
+    return addResult_(res, addMessage_(name, variant, cond, cardLang, version, res.count, priceInfo));
+  }, true, function (out) { addRidPut_(rid, out); }); // wie addCard (#66)
   tmrDone_();
   return result.prev || result;
 }
