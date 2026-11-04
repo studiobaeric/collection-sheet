@@ -7,6 +7,15 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.2.3] – 2026-11-04
+
+- Set-Symbole erscheinen jetzt wirklich statt des Set-Namens
+- Übernahme zeigt Schritt für Schritt, wie weit sie ist
+- Pokédex-Tab zeigt die Karten eines Pokémon sofort, ohne Laden
+- Preislauf schneller: Preise werden seltener ins Blatt geschrieben
+- Tabellen vor Version 1.0 lassen sich nur noch über den Import einlesen
+- Menüpunkt „API prüfen“ entfernt
+
 ## [1.2.2] – 2026-10-29
 
 - Set-Symbole: neuer Ladeversuch als .png (wirkt erst ab 1.2.3)

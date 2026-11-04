@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  Pokémon-Sammlung · Version 1.2.2
+ *  Pokémon-Sammlung · Version 1.2.3
  *  https://github.com/studiobaeric/collection-sheet
  * ========================================================================== */
 
@@ -35,7 +35,7 @@
 const API = 'https://api.tcgdex.net/v2/';
 
 // Version dieses Codes (Releases auf GitHub, siehe Update.gs). Vorabversionen z. B. '1.1.0-beta.1'.
-const TOOL_VERSION = '1.2.2';
+const TOOL_VERSION = '1.2.3';
 
 const SHEETS = {
   dash: 'Dashboard',
