@@ -422,7 +422,7 @@ function boot(mode, opts) {
     $('fSet').focus();
     ok('Setfeld anwählen: Liste mit allen Sets', !!drop() && !drop().classList.contains('hidden') && opts().length === 3, drop() && drop().outerHTML.slice(0, 300));
     const sym = opts()[1].querySelector('img.sym');
-    ok('Liste: Symbol und Name', !!sym && sym.getAttribute('src') === 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol.png' && opts()[1].textContent === 'Flammende Finsternis', opts()[1].innerHTML);
+    ok('Liste: Symbol und Name', !!sym && sym.getAttribute('src') === 'https://assets.tcgdex.net/en/swsh/swsh3/symbol.png' && opts()[1].textContent === 'Flammende Finsternis', opts()[1].innerHTML);
     {
       // #57: .png lädt nicht -> .webp, lädt auch das nicht -> der Set-Name an seiner Stelle
       const box = E.doc.createElement('div');
@@ -432,6 +432,14 @@ function boot(mode, opts) {
       const second = img.getAttribute('src');
       E.win.symFail(img);
       ok('Symbol: erst .png, dann .webp, dann der Set-Name (#57)', second === 'https://x/sym.webp' && !box.querySelector('img') && box.textContent === 'Flammende Finsternis', [second, box.innerHTML]);
+      // /univ/ gibt es auf dem Bild-Server nicht: /en/, dann /de/, dann der Name
+      box.innerHTML = E.win.setMark({ setId: 'swsh3', setName: 'Flammende Finsternis', setSymbol: SYM.swsh3 }).html;
+      const u = box.querySelector('img.sym'), first = u.getAttribute('src');
+      E.win.symFail(u);
+      const de = u.getAttribute('src');
+      E.win.symFail(u);
+      ok('Symbol unter /univ/: erst /en/…png, dann /de/…png, dann der Set-Name (#57)', first === 'https://assets.tcgdex.net/en/swsh/swsh3/symbol.png' &&
+        de === 'https://assets.tcgdex.net/de/swsh/swsh3/symbol.png' && !box.querySelector('img') && box.textContent === 'Flammende Finsternis', [first, de, box.innerHTML]);
     }
     ok('Liste: Promo-Set mit Stern, Set ohne Symbol nur mit Namen', !!opts()[0].querySelector('.promo') && opts()[0].textContent === '★SWSH Black Star Promos' &&
       !opts()[2].querySelector('img') && opts()[2].textContent === 'Basis-Set', opts().map(o => o.innerHTML));
