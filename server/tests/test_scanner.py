@@ -169,6 +169,28 @@ def test_find_cards_on_a_real_looking_binder_page():
         assert np.abs(q - want).max() < 15, (q.round(), want.round())
 
 
+def test_find_cards_tilted_cut_off_and_not_notes():
+    """Zweite Fotoreihe: weiße Zettel in leeren Hüllen zählten als Karten, schräg fotografierte und vom Bildrand
+    angeschnittene Karten fehlten"""
+    note = np.full((684, 490, 3), (235, 240, 245), np.uint8)  # so groß wie eine Karte, mit Kugelschreiber beschriftet
+    for y, text in ((280, '0025.1'), (380, 'Mega Raichu')):
+        cv2.putText(note, text, (60, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (150, 90, 60), 2)
+    cards = [card_image(i, NUMBERS[i]) if i % 2 == 0 else note for i in range(9)]
+    for c in cards[::2]:  # Kartentext: am Bildrand zählt nur, was bunt und fein gemustert ist
+        for y in range(390, 600, 24):
+            cv2.putText(c, 'Angriff: 30 Schaden, wirf eine Muenze', (40, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (30, 30, 30), 1)
+    page, corners = binder_page(cards, tilt=0.15)
+    quads = vision.find_cards(page)
+    assert len(quads) == 5
+    assert all(np.abs(q - want).max() < 15 for q, want in zip(quads, corners[::2]))
+    page, corners = binder_page(cards)
+    cut = int(corners[[0, 6]][:, [0, 3], 0].max()) + 49  # beide Karten links um mindestens ein Zehntel angeschnitten
+    quads = vision.find_cards(page[:, cut:])
+    assert len(quads) == 5
+    assert all(cv2.pointPolygonTest(np.float32(want - [cut, 0]), tuple(map(float, q.mean(0))), False) > 0
+               for q, want in zip(quads, corners[::2]))
+
+
 def test_scan_page_finds_every_card_and_number_picks_the_reprint(reader):
     cards = [card_image(i, NUMBERS[i]) for i in range(9)]
     metas = [meta(i, NUMBERS[i]) for i in range(9)]

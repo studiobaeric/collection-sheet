@@ -38,7 +38,8 @@ def _inside(pt, quad):
 
 
 def _shapes(mask):
-    """Kartenförmige Umrisse in einer Schwarz-Weiß-Maske -> [{'area', 'center', 'quad'}]"""
+    """Kartenförmige Umrisse in einer Schwarz-Weiß-Maske -> [{'area', 'center', 'quad', 'edge', 'strict'}]
+    strict: gerade von oben fotografiert (Seitenverhältnis nahe 1,4, nicht am Bildrand)"""
     h, w = mask.shape
     found = []
     for c in cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]:
@@ -46,19 +47,32 @@ def _shapes(mask):
         area = cv2.contourArea(hull)
         if area < 0.02 * h * w:  # eine Karte auf einer Ordnerseite mit 9 Karten hat etwa 5 bis 8 %
             continue
-        x, y, bw, bh = cv2.boundingRect(hull)
-        if x < 2 or y < 2 or x + bw > w - 2 or y + bh > h - 2:  # am Bildrand: Tisch, Ordnerrand, angeschnittene Karte
-            continue
         (cx, cy), (rw, rh), _ = cv2.minAreaRect(hull)
         if min(rw, rh) == 0:
             continue
         ratio = max(rw, rh) / min(rw, rh)
-        if not 1.2 <= ratio <= 1.6 or area / (rw * rh) < 0.85:
+        fill = area / (rw * rh)
+        # gerade von oben 1,4; schräg fotografiert oder auf gewölbter Seite zwischen 1,1 und 1,9
+        if not 1.1 <= ratio <= 1.9 or fill < 0.8:
             continue
         approx = cv2.approxPolyDP(hull, 0.03 * cv2.arcLength(hull, True), True)
         quad = approx if len(approx) == 4 else cv2.boxPoints(cv2.minAreaRect(hull))
-        found.append({'area': area, 'center': (cx, cy), 'quad': _order(quad)})
+        x, y, bw, bh = cv2.boundingRect(hull)
+        edge = x < 2 or y < 2 or x + bw > w - 2 or y + bh > h - 2
+        found.append({'area': area, 'center': (cx, cy), 'quad': _order(quad), 'edge': edge,
+                      'strict': 1.2 <= ratio <= 1.6 and fill >= 0.85 and not edge})
     return found
+
+
+def _card_like(img, quad, at_edge):
+    """Bunt und mit Schrift? Notizzettel (weiß mit etwas Tinte) und Spiegelungen (eine Farbe, glatt) nicht. Am Bildrand
+    sieht auch eine abgeschnittene Spiegelung kartenförmig aus, dort zählt nur eine deutlich bunte Karte mit Schrift.
+    Grenzen gemessen an Erics Ordnerfotos: Zettel Farbstreuung bis 4, Karten ab 6."""
+    card = cv2.resize(warp(img, quad), (250, 349), interpolation=cv2.INTER_AREA)[17:-17, 12:-12]
+    lab = cv2.cvtColor(card, cv2.COLOR_BGR2LAB).astype(np.float32)
+    colors = np.hypot(lab[..., 1].std(), lab[..., 2].std())
+    detail = np.abs(cv2.Laplacian(cv2.cvtColor(card, cv2.COLOR_BGR2GRAY), cv2.CV_32F)).mean()
+    return colors >= 9 and detail >= 9 if at_edge else colors >= 5
 
 
 def _on_dark(gray, quad):
@@ -87,12 +101,14 @@ def find_cards(img):
     local = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 101, -10)
     k5 = np.ones((5, 5), np.uint8)
     found = _shapes(cv2.morphologyEx(otsu, cv2.MORPH_OPEN, k5)) + _shapes(cv2.morphologyEx(local, cv2.MORPH_OPEN, k5))
+    found = [f for f in found if _card_like(img, f['quad'] / scale, f['edge'])]
     if not any(_on_dark(gray, f['quad']) for f in found):
         # heller Grund (weißer Tisch, helle Seite): Kanten je Farbkanal, ein gelber Rand auf Hellgrau zeigt sich im Blaukanal
         edges = np.max([cv2.Canny(blur[:, :, k], 30, 100) for k in range(3)], axis=0)
-        found = _shapes(cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2))
-    # Behälter weg (z. B. die ganze Ordnerseite): enthält 2 oder mehr andere, die nicht ineinander liegen.
-    # Rand, Motivrahmen und Hülle einer Karte liegen ineinander und zählen als einer.
+        found = [f for f in _shapes(cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2))
+                 if _card_like(img, f['quad'] / scale, f['edge'])]
+    # Behälter weg (z. B. die ganze Ordnerseite oder zwei Karten, die im Bild zusammenhängen): enthält 2 oder mehr andere,
+    # die nicht ineinander liegen. Rand, Motivrahmen und Hülle einer Karte liegen ineinander und zählen als einer.
     def inner(f):
         return [g for g in found if g is not f and g['area'] < f['area'] and _inside(g['center'], f['quad'])]
 
@@ -100,6 +116,12 @@ def find_cards(img):
         kids = inner(f)
         return sum(1 for g in kids if not any(d['area'] > g['area'] and _inside(g['center'], d['quad']) for d in kids))
     found = [f for f in found if tops(f) < 2]
+    # Schräge, gewölbte und angeschnittene Karten nur dort, wo keine gerade liegt: sonst gewinnt eine Karte samt Spiegelung
+    # daneben oder ein Stück Tisch mit Karte gegen die Karte selbst. Kleinere gerade Formen darin (Motivrahmen) zählen nicht.
+    strict = [f for f in found if f['strict']]
+    big = 1.6 * max([f['area'] for f in strict], default=np.inf)
+    found = strict + [f for f in found if not f['strict'] and f['area'] <= big and not any(
+        _inside(f['center'], g['quad']) or g['area'] > 0.5 * f['area'] and _inside(g['center'], f['quad']) for g in strict)]
     # Verschachtelte (Motivrahmen in der Karte, doppelte Kanten): die größte bleibt
     keep = []
     for f in sorted(found, key=lambda f: -f['area']):
