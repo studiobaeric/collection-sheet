@@ -117,11 +117,11 @@ def find_cards(img):
         return sum(1 for g in kids if not any(d['area'] > g['area'] and _inside(g['center'], d['quad']) for d in kids))
     found = [f for f in found if tops(f) < 2]
     # Schräge, gewölbte und angeschnittene Karten nur dort, wo keine gerade liegt: sonst gewinnt eine Karte samt Spiegelung
-    # daneben oder ein Stück Tisch mit Karte gegen die Karte selbst. Kleinere gerade Formen darin (Motivrahmen) zählen nicht.
+    # daneben oder ein Stück Tisch mit Karte gegen die Karte selbst. Viel kleinere gerade Formen darin (Motivrahmen) zählen nicht.
     strict = [f for f in found if f['strict']]
     big = 1.6 * max([f['area'] for f in strict], default=np.inf)
     found = strict + [f for f in found if not f['strict'] and f['area'] <= big and not any(
-        _inside(f['center'], g['quad']) or g['area'] > 0.5 * f['area'] and _inside(g['center'], f['quad']) for g in strict)]
+        g['area'] > 0.5 * f['area'] and (_inside(f['center'], g['quad']) or _inside(g['center'], f['quad'])) for g in strict)]
     # Verschachtelte (Motivrahmen in der Karte, doppelte Kanten): die größte bleibt
     keep = []
     for f in sorted(found, key=lambda f: -f['area']):

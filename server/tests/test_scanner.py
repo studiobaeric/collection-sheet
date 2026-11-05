@@ -184,11 +184,13 @@ def test_find_cards_tilted_cut_off_and_not_notes():
     assert len(quads) == 5
     assert all(np.abs(q - want).max() < 15 for q, want in zip(quads, corners[::2]))
     page, corners = binder_page(cards)
-    cut = int(corners[[0, 6]][:, [0, 3], 0].max()) + 49  # beide Karten links um mindestens ein Zehntel angeschnitten
-    quads = vision.find_cards(page[:, cut:])
-    assert len(quads) == 5
-    assert all(cv2.pointPolygonTest(np.float32(want - [cut, 0]), tuple(map(float, q.mean(0))), False) > 0
-               for q, want in zip(quads, corners[::2]))
+    for extra in (10, 49):  # beide Karten links knapp (Motiv ganz zu sehen) und um ein Zehntel angeschnitten
+        cut = int(corners[[0, 6]][:, [0, 3], 0].max()) + extra
+        quads = vision.find_cards(page[:, cut:])
+        assert len(quads) == 5
+        for q, want in zip(quads, np.float32(corners[::2] - [cut, 0])):  # die Karte, nicht nur ihr Motiv
+            assert cv2.pointPolygonTest(want, tuple(map(float, q.mean(0))), False) > 0
+            assert cv2.contourArea(q) > 0.6 * cv2.contourArea(want), (extra, q.round())
 
 
 def test_scan_page_finds_every_card_and_number_picks_the_reprint(reader):
