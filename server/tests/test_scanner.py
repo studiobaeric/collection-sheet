@@ -42,19 +42,23 @@ def card_image(seed, number, w=490, h=684):
     return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
 
 
-def binder_page(cards, gap=26, margin=60, tilt=0.04):
-    """3×3-Ordnerseite auf dunklem Grund, leicht schräg fotografiert, als JPEG"""
+def binder_page(cards, gap=26, margin=60, tilt=0.04, bg=25):
+    """3×3-Ordnerseite, leicht schräg fotografiert -> (JPEG, Ecken jeder Karte im Foto)"""
     ch, cw = cards[0].shape[:2]
     H, W = margin * 2 + 3 * ch + 2 * gap, margin * 2 + 3 * cw + 2 * gap
-    page = np.full((H, W, 3), 25, np.uint8)
+    page = np.full((H, W, 3), bg, np.uint8)
+    corners = []
     for i, c in enumerate(cards):
         r, k = divmod(i, 3)
         y, x = margin + r * (ch + gap), margin + k * (cw + gap)
         page[y:y + ch, x:x + cw] = c
+        corners.append([(x, y), (x + cw, y), (x + cw, y + ch), (x, y + ch)])
     src = np.float32([[0, 0], [W, 0], [W, H], [0, H]])
     dst = np.float32([[W * tilt, H * tilt], [W * (1 - tilt / 2), 0], [W, H], [0, H * (1 - tilt)]])
-    page = cv2.warpPerspective(page, cv2.getPerspectiveTransform(src, dst), (W, H), borderValue=(25, 25, 25))
-    return cv2.imdecode(cv2.imencode('.jpg', page, [cv2.IMWRITE_JPEG_QUALITY, 85])[1], cv2.IMREAD_COLOR)
+    m = cv2.getPerspectiveTransform(src, dst)
+    page = cv2.warpPerspective(page, m, (W, H), borderValue=(bg, bg, bg))
+    page = cv2.imdecode(cv2.imencode('.jpg', page, [cv2.IMWRITE_JPEG_QUALITY, 85])[1], cv2.IMREAD_COLOR)
+    return page, cv2.perspectiveTransform(np.float32(corners), m)
 
 
 NUMBERS = ['136/189', '4/102', '25/165', '58/198', '112/086', '7/64', '160/159', '33/202', '91/195']
@@ -81,6 +85,7 @@ def test_parse_number():
     assert p('PAL DE 136/193 G') == {'num': '136', 'total': 193}
     assert p('TG05/TG30') == {'num': 'TG05', 'total': None}
     assert p('1O5/1I0') == {'num': '105', 'total': 110}
+    assert p('X2 019/1650') == {'num': '019', 'total': 165}  # Seltenheitspunkt hinter der Gesamtzahl
     assert p('Promo SWSH123') == {'num': 'SWSH123', 'total': None}
     assert p('') is None and p('Illus. Ken Sugimori') is None
     assert vision.num_key('025') == vision.num_key('25') == ('', 25)
@@ -91,15 +96,77 @@ def test_parse_number():
 
 def test_find_cards_binder_page_in_reading_order():
     cards = [card_image(i, NUMBERS[i]) for i in range(9)]
-    page = binder_page(cards)
+    page, corners = binder_page(cards, gap=10)
     quads = vision.find_cards(page)
     assert len(quads) == 9
+    assert all(np.abs(q - want).max() < 15 for q, want in zip(quads, corners))  # mit gelbem Rand, nicht nur das Innere
     centers = [q.mean(0) for q in quads]
     for r in range(3):  # Zeile für Zeile, links nach rechts
         row = centers[r * 3:r * 3 + 3]
         assert row[0][0] < row[1][0] < row[2][0]
         if r:
             assert min(c[1] for c in row) > max(c[1] for c in centers[(r - 1) * 3:r * 3])
+
+
+def test_find_cards_on_a_light_background():
+    """Heller Grund: die Karten heben sich nicht hell ab, hier finden die Kanten sie (sonst nur ihr helles Inneres)"""
+    page, corners = binder_page([card_image(i, NUMBERS[i]) for i in range(9)], bg=225)
+    quads = vision.find_cards(page)
+    assert len(quads) == 9
+    assert all(np.abs(q - want).max() < 15 for q, want in zip(quads, corners))
+
+
+TABLE = (80, 140, 190)  # Holztisch (BGR)
+
+
+def binder_photo(cards, tilt=0.03, shadow=0.6):
+    """Wie echte Ordnerfotos: dunkle Seite mit hellen Nähten, Tisch oben und links am Bildrand, Lochrand, leere Hüllen
+    (None) mit Spiegelung, ein Notizzettel in der letzten Hülle, links unten Schatten"""
+    ch, cw = cards[0].shape[:2]
+    pad, seam = 24, 8
+    pw, ph = cw + 2 * pad, ch + 2 * pad
+    left, top = 170, 130
+    W, H = left + 3 * (pw + seam) + 60, top + 3 * (ph + seam) + 40
+    img = np.full((H, W, 3), TABLE, np.uint8)
+    cv2.rectangle(img, (left - 90, top - 40), (W, H), (38, 36, 35), -1)
+    for y in range(top, H - 60, 130):
+        cv2.circle(img, (left - 45, y), 15, TABLE, -1)
+    pockets = []
+    for i, c in enumerate(cards):
+        r, k = divmod(i, 3)
+        x0, y0 = left + seam + k * (pw + seam), top + seam + r * (ph + seam)
+        cv2.rectangle(img, (x0 - seam // 2, y0 - seam // 2), (x0 + pw + seam // 2, y0 + ph + seam // 2), (80, 80, 80), seam)
+        pockets.append((x0, y0))
+        if c is not None:
+            img[y0 + pad:y0 + pad + ch, x0 + pad:x0 + pad + cw] = c
+    for i in [i for i, c in enumerate(cards) if c is None]:
+        x0, y0 = pockets[i]
+        if i == len(cards) - 1:  # Notizzettel, fast quadratisch
+            box = cv2.boxPoints(((x0 + pw / 2, y0 + ph / 2), (300, 290), 12)).astype(np.int32)
+            cv2.fillConvexPoly(img, box, (200, 240, 250))
+        else:  # Spiegelung: heller, unregelmäßiger Fleck
+            pts = np.int32([[x0 + 40, y0 + 60], [x0 + pw - 30, y0 + 150], [x0 + pw - 80, y0 + ph - 200],
+                            [x0 + 200, y0 + ph - 120], [x0 + 90, y0 + 300]])
+            cv2.fillPoly(img, [pts], (245, 235, 225))
+    yy, xx = np.mgrid[0:H, 0:W]
+    img = (img * (1 - shadow * np.clip(1.6 * yy / H - xx / W - 0.3, 0, 1))[..., None]).astype(np.uint8)
+    src = np.float32([[0, 0], [W, 0], [W, H], [0, H]])
+    dst = np.float32([[W * tilt, 0], [W, H * tilt], [W * (1 - tilt), H], [0, H * (1 - tilt)]])
+    img = cv2.warpPerspective(img, cv2.getPerspectiveTransform(src, dst), (W, H), borderValue=TABLE)
+    img = cv2.imdecode(cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 80])[1], cv2.IMREAD_COLOR)
+    corners = [[(x0 + pad, y0 + pad), (x0 + pad + cw, y0 + pad), (x0 + pad + cw, y0 + pad + ch), (x0 + pad, y0 + pad + ch)]
+               for x0, y0 in pockets]
+    return img, cv2.perspectiveTransform(np.float32(corners), cv2.getPerspectiveTransform(src, dst))
+
+
+def test_find_cards_on_a_real_looking_binder_page():
+    """Auf echten Ordnerfotos fanden die Kanten leere Hüllen und die ganze Seite statt der Karten"""
+    cards = [card_image(i, NUMBERS[i]) if i in (0, 1, 3, 4, 6) else None for i in range(9)]
+    photo, corners = binder_photo(cards)
+    quads = vision.find_cards(photo)
+    assert len(quads) == 5
+    for q, want in zip(quads, corners[[0, 1, 3, 4, 6]]):  # die Karte, nicht Hülle, Motiv oder Seite
+        assert np.abs(q - want).max() < 15, (q.round(), want.round())
 
 
 def test_scan_page_finds_every_card_and_number_picks_the_reprint(reader):
@@ -109,7 +176,7 @@ def test_scan_page_finds_every_card_and_number_picks_the_reprint(reader):
     twin0 = card_image(0, '20/30')
     twin4 = card_image(4, '9/99')
     index = make_index(cards + [twin0, twin4], metas + [meta(90, '20/30'), meta(94, '9/99')])
-    page = binder_page(cards)
+    page = binder_page(cards)[0]
     t0 = time.time()
     res = vision.scan(page, index, fake_embed, reader)
     assert time.time() - t0 < 30
@@ -127,7 +194,7 @@ def test_scan_page_reprint_on_the_page_wins_by_number(reader):
     cards[0] = card_image(0, '20/30')  # auf der Seite liegt die Neuauflage
     metas = [meta(i, NUMBERS[i]) for i in range(9)]
     index = make_index([card_image(i, NUMBERS[i]) for i in range(9)] + [cards[0]], metas + [meta(90, '20/30')])
-    res = vision.scan(binder_page(cards), index, fake_embed, reader)
+    res = vision.scan(binder_page(cards)[0], index, fake_embed, reader)
     assert res[0]['candidates'][0]['id'] == 's90-20'
 
 
@@ -156,7 +223,7 @@ def test_dinov2_architecture_with_random_weights(reader):
     cards = [card_image(i, NUMBERS[i]) for i in range(9)]
     v = vision.vectors(dino, [cv2.resize(c, (vision.WARP_W, vision.WARP_H)) for c in cards])
     assert v.shape == (9, 1536) and v.dtype == np.float32 and np.allclose(np.linalg.norm(v, axis=1), 1, atol=1e-5)
-    res = vision.scan(binder_page(cards), {'vectors': v, 'meta': [meta(i, NUMBERS[i]) for i in range(9)]}, dino, reader)
+    res = vision.scan(binder_page(cards)[0], {'vectors': v, 'meta': [meta(i, NUMBERS[i]) for i in range(9)]}, dino, reader)
     assert len(res) == 9
 
 
@@ -231,7 +298,7 @@ def token(keys, email='eric@example.com', verified=True, exp=None, iss='https://
 
 
 def photo_body():
-    page = binder_page([card_image(i, NUMBERS[i]) for i in range(9)])
+    page = binder_page([card_image(i, NUMBERS[i]) for i in range(9)])[0]
     return json.dumps({'image': base64.b64encode(cv2.imencode('.jpg', page)[1]).decode()})
 
 

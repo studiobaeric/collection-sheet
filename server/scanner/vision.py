@@ -37,22 +37,17 @@ def _inside(pt, quad):
     return cv2.pointPolygonTest(quad.reshape(-1, 1, 2), (float(pt[0]), float(pt[1])), False) >= 0
 
 
-def find_cards(img):
-    """Ecken aller Karten im Foto (in Lesereihenfolge) -> [np.array 4x2 float32]; leer, wenn keine gefunden"""
-    h, w = img.shape[:2]
-    scale = 1000.0 / max(h, w)
-    small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
-    # Kanten je Farbkanal: ein gelber Rand auf hellgrauem Grund ist in Graustufen fast unsichtbar, im Blaukanal nicht
-    blur = cv2.GaussianBlur(small, (5, 5), 0)
-    edges = np.max([cv2.Canny(blur[:, :, k], 30, 100) for k in range(3)], axis=0)
-    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
-    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    area_img = small.shape[0] * small.shape[1]
+def _shapes(mask):
+    """Kartenförmige Umrisse in einer Schwarz-Weiß-Maske -> [{'area', 'center', 'quad'}]"""
+    h, w = mask.shape
     found = []
-    for c in contours:
+    for c in cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]:
         hull = cv2.convexHull(c)
         area = cv2.contourArea(hull)
-        if area < 0.02 * area_img:  # eine Karte auf einer Ordnerseite mit 9 Karten hat etwa 8 %
+        if area < 0.02 * h * w:  # eine Karte auf einer Ordnerseite mit 9 Karten hat etwa 5 bis 8 %
+            continue
+        x, y, bw, bh = cv2.boundingRect(hull)
+        if x < 2 or y < 2 or x + bw > w - 2 or y + bh > h - 2:  # am Bildrand: Tisch, Ordnerrand, angeschnittene Karte
             continue
         (cx, cy), (rw, rh), _ = cv2.minAreaRect(hull)
         if min(rw, rh) == 0:
@@ -63,6 +58,39 @@ def find_cards(img):
         approx = cv2.approxPolyDP(hull, 0.03 * cv2.arcLength(hull, True), True)
         quad = approx if len(approx) == 4 else cv2.boxPoints(cv2.minAreaRect(hull))
         found.append({'area': area, 'center': (cx, cy), 'quad': _order(quad)})
+    return found
+
+
+def _on_dark(gray, quad):
+    """Liegt die Karte auf dunklem Grund? Der Streifen außen ist höchstens halb so hell wie der Kartenrand innen."""
+    c = quad.mean(0)
+
+    def band(a, b):
+        m = np.zeros(gray.shape, np.uint8)
+        cv2.fillConvexPoly(m, np.int32(c + (quad - c) * a), 1)
+        cv2.fillConvexPoly(m, np.int32(c + (quad - c) * b), 0)
+        return np.median(gray[m > 0])
+    return band(1.08, 1.0) < 0.5 * band(1.0, 0.94)
+
+
+def find_cards(img):
+    """Ecken aller Karten im Foto (in Lesereihenfolge) -> [np.array 4x2 float32]; leer, wenn keine gefunden"""
+    h, w = img.shape[:2]
+    scale = 1000.0 / max(h, w)
+    small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    blur = cv2.GaussianBlur(small, (5, 5), 0)
+    # Ordnerseite: Karten sind hell auf dunklem Grund. Leere Hüllen, Spiegelungen, Zettel und der Tisch am Rand fallen so
+    # weg (Kanten fanden auf echten Ordnerfotos Hüllen und ganze Seiten). Fester Schwellwert (Otsu) behält den hellen Kartenrand,
+    # der örtliche trennt Karten vom Tisch, von Spiegelungen und findet Karten im Schatten.
+    gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
+    otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    local = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 101, -10)
+    k5 = np.ones((5, 5), np.uint8)
+    found = _shapes(cv2.morphologyEx(otsu, cv2.MORPH_OPEN, k5)) + _shapes(cv2.morphologyEx(local, cv2.MORPH_OPEN, k5))
+    if not any(_on_dark(gray, f['quad']) for f in found):
+        # heller Grund (weißer Tisch, helle Seite): Kanten je Farbkanal, ein gelber Rand auf Hellgrau zeigt sich im Blaukanal
+        edges = np.max([cv2.Canny(blur[:, :, k], 30, 100) for k in range(3)], axis=0)
+        found = _shapes(cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2))
     # Behälter weg (z. B. die ganze Ordnerseite): enthält 2 oder mehr andere, die nicht ineinander liegen.
     # Rand, Motivrahmen und Hülle einer Karte liegen ineinander und zählen als einer.
     def inner(f):
@@ -114,7 +142,7 @@ def crop_box(card, box):
 # ---------------------------------------------------------------------------
 
 _DIGITS = str.maketrans({'O': '0', 'o': '0', 'D': '0', 'I': '1', 'l': '1', '|': '1'})
-_SLASH = re.compile(r'([A-Z]{0,4})([0-9OoDIl|]{1,4})\s*/\s*([A-Z]{0,4})([0-9OoDIl|]{1,4})')
+_SLASH = re.compile(r'([A-Z]{0,4})([0-9OoDIl|]{1,4})\s*/\s*([A-Z]{0,4})([0-9OoDIl|]{1,3})')  # Gesamtzahl höchstens dreistellig: „001/159 ●“ liest die OCR als „001/1590“
 _PROMO = re.compile(r'\b(SWSH|SVP|SM|XY|BW|DP|HGSS|SV|TG|GG)\s?(\d{1,4})\b')
 
 
