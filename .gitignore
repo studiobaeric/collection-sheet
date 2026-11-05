@@ -1,3 +1,4 @@
 node_modules/
 .import_check.js
 *.tmp
+.clasprc.json

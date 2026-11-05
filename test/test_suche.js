@@ -278,6 +278,22 @@ t.section('Nummer im Namensfeld (#51), Set-Symbol (#47)');
   ok('Sammlung: freie Karte aus einem Promo-Set zeigt den Stern (setPromo)', promo.setId === '' && promo.setSymbol === '' && promo.setPromo === true, promo);
 }
 
+t.section('Übersetzung im Zwischenspeicher (#66)');
+{
+  const env = setup();
+  const tr = name => (env.uiCall('translateCardName', name) || {}).en;
+  const sh = env.sheet('Übersetzung');
+  const row = sh.getRange(1, 1, sh.getLastRow(), 1).getValues().findIndex(r => r[0] === 'Mewtu') + 1;
+  eq('Mewtu -> Mewtwo', [row > 1, tr('Mewtu')], [true, 'Mewtwo']);
+  sh.getRange(row, 4).setValue('Mewtwo X'); // ohne onEdit, wie ein Skript
+  eq('zweite Suche liest das Blatt nicht noch einmal', tr('Mewtu'), 'Mewtwo');
+  env.ctx.onEdit({ range: sh.getRange(row, 4) });
+  eq('eigene Übersetzung von Hand gilt sofort (onEdit)', tr('Mewtu'), 'Mewtwo X');
+  sh.getRange(row, 4).setValue('');
+  env.ctx.rebuildTranslation_();
+  eq('Neuladen der Übersetzung vergisst den Zwischenspeicher', tr('Mewtu'), 'Mewtwo');
+}
+
 t.section('Speichern mit den Karten aus der Seite');
 {
   const env = setup();

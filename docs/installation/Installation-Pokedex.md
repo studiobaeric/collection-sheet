@@ -32,7 +32,7 @@ Klicke einmal auf **Pokémon > Preise jetzt aktualisieren**. Dabei merkt sich da
 2. **Tab Sammlung**: Unter der Suche gibt es „Sortieren nach“ (Set, Pokédex-Nr., Seltenheit, Name, Preis, Neueste). Der Pfeil daneben dreht die Richtung um. Jedes Gerät merkt sich deine Wahl.
 3. **Blatt Pokédex**: In Zeile 4 filterst du nach Status, Generation und Name oder Nummer. In Zelle I4 wählst du ein Pokémon (oder tippst Name oder Nummer), dann stehen rechts deine Karten davon mit Bild.
 4. **Blatt Seltenheiten**: Hier steht, wie selten jede Seltenheit zählt (1 = häufig, 9 = Hyperselten). Du kannst die Zahlen ändern. Leere Stufe heißt: kommt beim Sortieren ans Ende. Neue Seltenheiten aus deiner Sammlung trägt das Tool unten ohne Stufe ein.
-5. Wenn du magst, starte **Pokémon > API prüfen**. Die neuen Schritte 15 und 16 zeigen die Pokédex-Nummern einiger Karten und alle Seltenheiten, die tcgdex kennt. Sag mir danach Bescheid, dann lese ich das Ergebnis.
+5. Wenn du magst, führe im Apps-Script-Editor die Funktion `apiPruefen` aus (seit 1.2.3 nicht mehr im Menü). Die neuen Schritte 15 und 16 zeigen die Pokédex-Nummern einiger Karten und alle Seltenheiten, die tcgdex kennt. Sag mir danach Bescheid, dann lese ich das Ergebnis.
 
 ## Gut zu wissen
 

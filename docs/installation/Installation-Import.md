@@ -29,7 +29,7 @@ Dabei wird nichts importiert. Deine Karten, der Verlauf und der nächtliche Prei
 
 1. Öffne **Pokémon > Karten erfassen**. Es gibt jetzt die Tabs Hinzufügen, Sammlung und Import.
 2. Sieh in **Sammlung** nach: Deine Karten sollten wie vorher da sein, jetzt mit Herkunft „von Hand“.
-3. Wenn du magst, starte **Pokémon > API prüfen**. Die neuen Schritte 10 bis 14 prüfen bei tcgdex Snowflake-Karten, Set-Kürzel und Promo-Nummern sowie den Drive-Dienst. Sag mir danach Bescheid, dann lese ich das Ergebnis.
+3. Wenn du magst, führe im Apps-Script-Editor die Funktion `apiPruefen` aus (seit 1.2.3 nicht mehr im Menü). Die neuen Schritte 10 bis 14 prüfen bei tcgdex Snowflake-Karten, Set-Kürzel und Promo-Nummern sowie den Drive-Dienst. Sag mir danach Bescheid, dann lese ich das Ergebnis.
 
 ## Gut zu wissen
 

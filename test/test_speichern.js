@@ -427,4 +427,21 @@ t.section('Hinzufügen im Hintergrund: delta und Anfrage-ID (#33)');
   eq('delta = getCollection', bad, []);
 }
 
+t.section('Anfrage-ID erst nach dem Festschreiben merken (#66)');
+{
+  // Scheitert das Festschreiben, darf die Wiederholung keine gemerkte Antwort „hinzugefügt“ bekommen.
+  const env = setup();
+  const SA = env.ctx.SpreadsheetApp, flush = SA.flush;
+  const errs = [];
+  SA.flush = () => { throw new Error('Dienst „Tabellen“ fehlgeschlagen'); };
+  try { env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, rid: 'x1' }); } catch (e) { errs.push(e.message); }
+  try { env.uiCall('addFreeCard', { name: 'Fantasiemon', qty: 1, rid: 'x2' }); } catch (e) { errs.push(e.message); }
+  SA.flush = flush;
+  eq('Fehler kommt bei der Seite an', errs.length, 2);
+  ok('Anfrage-ID nicht gemerkt', env.run("addRidGet_('x1') === null && addRidGet_('x2') === null"));
+  const a = env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, rid: 'x1' });
+  const f = env.uiCall('addFreeCard', { name: 'Fantasiemon', qty: 1, rid: 'x2' });
+  ok('Wiederholung speichert wirklich', !a.repeat && !f.repeat && a.delta && f.delta, [a, f]);
+}
+
 t.done();

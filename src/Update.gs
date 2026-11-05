@@ -30,6 +30,8 @@ const UPD_CACHE_SEC = 6 * 3600;
 /** Name der neuen Tabelle bis zur Übernahme; danach bekommt sie den Namen der alten. */
 const UPD_NEW_SUFFIX = ' (neu, Version ';
 const UPD_OLD_SUFFIX = ' (alt)';
+/** Endung einer alten Tabelle: „ (alt)“ oder mit ihrer Version „ (alt 1.2.2)“ (#62) */
+const UPD_OLD_RE = / \(alt(?: \d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)?\)$/;
 /** So lange gilt eine Übernahme als laufend (Apps Script bricht jede Ausführung nach 6 Minuten ab). */
 const UPD_TAKE_MAX_MS = 7 * 60 * 1000;
 const UPD_TAKE_BUSY = 'Die Übernahme läuft gerade oder ist eben erst abgebrochen. Bitte warte zwei Minuten und öffne dann die Seitenleiste neu (Pokémon > Karten erfassen).';
@@ -245,7 +247,7 @@ function updMakeCopy_(ch, rel) {
   try { file = DriveApp.getFileById(updSheetId_(templateUrl)); } catch (e) {
     return fail('Die Vorlage von Version ' + rel.version + ' ließ sich nicht öffnen.');
   }
-  const base = ss.getName().replace(/ \(alt\)$/, '');
+  const base = ss.getName().replace(UPD_OLD_RE, '');
   let name = base + UPD_NEW_SUFFIX + rel.version + ')';
   let copy = null, where = 'im selben Ordner wie diese';
   try {
@@ -303,39 +305,15 @@ function updTakeoverSheets_() {
     'Import-Antworten', SHEETS.rarity, SHEETS.dexIds, SHEETS.sets, SHEETS.tr];
 }
 
-/** Kopfzeilen der übernommenen Blätter (für alte Tabellen ohne TOOL_SHEETS). */
-function updTakeoverHeads_() {
-  const m = {};
-  m[SHEETS.hist] = HIST_HEADERS; m[SHEETS.cardHist] = CARD_HIST_HEADERS; m[SHEETS.proto] = PROTO_HEADERS; m[SHEETS.rarity] = RARITY_HEADERS;
-  m[SHEETS.dexIds] = DEX_IDS_HEADERS; m[SHEETS.sets] = SET_HEADERS; m[SHEETS.tr] = TR_HEADERS;
-  m[SHEETS.imports] = IMPORTE_HEADERS; m['Import-Begriffe'] = TERMS_HEADERS; m['Import-Sets'] = CMSETS_HEADERS;
-  m['Import-Vorlagen'] = TEMPLATE_HEADERS; m['Import-Antworten'] = ANSWER_HEADERS;
-  return m;
-}
-
 /**
- * Blätter der alten Tabelle, die ihr Tool angelegt hat: {Name: true}. Ab 1.0 steht die Liste in ihren Einstellungen
- * (TOOL_SHEETS), sonst gilt die Liste dieses Codes, wobei ein Blatt zum Übernehmen mit fremder Kopfzeile dem Nutzer
- * gehört. Das Hinweisblatt einer früheren Übernahme gehört dazu, wenn die Tabelle schon einmal übernommen wurde.
+ * Blätter der alten Tabelle, die ihr Tool angelegt hat: {Name: true}, aus ihren Einstellungen (TOOL_SHEETS, seit 1.0).
+ * Das Hinweisblatt einer früheren Übernahme gehört dazu, wenn die Tabelle schon einmal übernommen wurde.
  */
 function updOldToolSheets_(old, st) {
   const out = {};
-  let names = null;
-  try { const a = JSON.parse(st.map.TOOL_SHEETS || ''); if (Array.isArray(a)) names = a.map(String); } catch (e) { /* vor 1.0 */ }
-  if (names) {
-    names.forEach(function (n) { out[n] = true; });
-  } else {
-    toolSheetNames_().forEach(function (n) { out[n] = true; });
-    delete out[SHEETS.dash]; // das Dashboard gibt es erst seit 1.1.0, ein Blatt mit dem Namen gehört dem Nutzer
-    const heads = updTakeoverHeads_();
-    Object.keys(heads).forEach(function (n) {
-      const sh = old.getSheetByName(n);
-      if (!sh || sh.getLastRow() < 1) return;
-      const want = heads[n].slice(0, 2);
-      const got = sh.getRange(1, 1, 1, want.length).getValues()[0].map(function (v) { return String(v == null ? '' : v).trim(); });
-      if (want.some(function (h, i) { return got[i] !== h; })) delete out[n];
-    });
-  }
+  let names = [];
+  try { const a = JSON.parse(st.map.TOOL_SHEETS || ''); if (Array.isArray(a)) names = a.map(String); } catch (e) { /* leer */ }
+  names.forEach(function (n) { out[n] = true; });
   out[SHEETS.data] = true; // ohne Daten keine Übernahme (updOpenOld_ prüft, dass es das Blatt gibt)
   if (st.map.TAKEN_OVER_BY) out[st.map.TAKEN_OVER_SHEET || SHEETS.takenOver] = true;
   return out;
@@ -421,6 +399,11 @@ function updOpenOld_(url) {
     throw new Error('Die alte Tabelle hat schon Version ' + (st.map.CODE_VERSION || '?') + ' mit einem neueren Datenformat. ' +
       'Bitte bring zuerst diese Tabelle unter Updates auf den neuesten Stand.');
   }
+  // Tabellen vor 1.0 (ohne CODE_VERSION) übernimmt das Tool seit 1.2.3 nicht mehr (#36 B3)
+  if (!st.map.CODE_VERSION) {
+    throw new Error('Die alte Tabelle hat eine Version vor 1.0. Die lässt sich nicht mehr übernehmen. ' +
+      'Lies ihre Karten stattdessen über den Tab Import als Liste ein.');
+  }
   const run = updTakeRun_();
   const resume = !!run && run.from === id && !settingGet_('TAKEN_FROM');
   if (!resume && updCardRows_(ss) > 0) {
@@ -488,6 +471,22 @@ function updOwnSheets_(old, st) {
   return old.getSheets().filter(function (sh) { return !tool[sh.getName()] && (sh.getLastRow() > 0 || sh.getLastColumn() > 0); });
 }
 
+/**
+ * Nummern der Pokédex-Formen aus der alten Tabelle (#58): nur A:G, in H:I steht die Formel dieser Tabelle. So zeigen
+ * „Form von Hand“ und die Kennungen in Pokédex-Nummern weiter auf dieselbe Form, auch wenn PokeAPI seit dem Laden
+ * der Vorlage eine Form eingefügt hat. Fehlt das Blatt (vor 1.2.2) oder ist es leer, bleibt die Liste der Vorlage.
+ */
+function updCopyDexForms_(src, ss) {
+  const lr = src ? src.getLastRow() : 0;
+  if (lr < 2) return;
+  const dst = ss.getSheetByName(SHEETS.dexForms) || setupDexFormsSheet_(ss);
+  growRows_(dst, lr);
+  const dl = dst.getLastRow();
+  if (dl > lr) dst.getRange(lr + 1, 1, dl - lr, 7).clearContent();
+  const from = src.getRange(1, 1, lr, 7);
+  dst.getRange(1, 1, lr, 7).setNumberFormats(from.getNumberFormats()).setValues(from.getValues());
+}
+
 /** Werte (mit Zahlenformaten, damit Text wie „025“ Text bleibt) von src nach dst. -> Zeilen ohne Kopf */
 function updCopyValues_(src, dst) {
   const lr = src.getLastRow(), lc = src.getLastColumn();
@@ -500,18 +499,6 @@ function updCopyValues_(src, dst) {
   to.setNumberFormats(from.getNumberFormats());
   to.setValues(from.getValues());
   return lr - 1;
-}
-
-/**
- * Zusatzspalten der Sammlung einer Tabelle vor 1.0: Kopfzeile 5 hinter den festen Spalten. Die enden in jeder Version
- * mit „Preisstand“ (vor 1.1.0 waren es 13, seitdem 16 feste Spalten).
- */
-function updOldViewExtras_(old) {
-  const sh = old.getSheetByName(SHEETS.view);
-  if (!sh || sh.getLastColumn() < 1) return [];
-  const head = sh.getRange(5, 1, 1, sh.getLastColumn()).getValues()[0].map(function (v) { return String(v == null ? '' : v).trim(); });
-  const end = head.indexOf(VIEW_HEADERS[VIEW_HEADERS.length - 1]);
-  return head.slice(end >= 0 ? end + 1 : VIEW_HEADERS.length).filter(Boolean);
 }
 
 /**
@@ -550,8 +537,27 @@ function updSharingText_(sh) {
   return sh.added ? ' Wer die alte Tabelle sehen oder bearbeiten durfte, darf das jetzt auch hier.' : '';
 }
 
-/** Übernahme ausführen (nur Seitenleiste). -> {message, cards, sheets, own, manualStop, noteSheet, oldName, newName, shared} */
+// Fortschritt der Übernahme für die Seitenleiste (#61): takeoverRun schreibt jeden Schritt in den Zwischenspeicher,
+// die Seitenleiste fragt ihn währenddessen mit takeoverProgress ab (ohne Sperre, die hält takeoverRun).
+const TAKE_STEP_KEY = 'TAKE_STEP';
+
+function updTakeStep_(n, total, text) {
+  try { CacheService.getScriptCache().put(TAKE_STEP_KEY, JSON.stringify({ n: n, total: total, text: text }), 600); } catch (e) { /* nur Anzeige */ }
+}
+
+/** Stand der laufenden Übernahme (nur Seitenleiste). -> {n, total, text} oder null */
+function takeoverProgress() {
+  try { const v = CacheService.getScriptCache().get(TAKE_STEP_KEY); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+
+/** Übernahme ausführen (nur Seitenleiste). -> {message, cards, sheets, own, noteSheet, oldName, newName, shared} */
 function takeoverRun(url) {
+  try { return updTakeoverRun_(url); } finally {
+    try { CacheService.getScriptCache().remove(TAKE_STEP_KEY); } catch (e) { /* läuft von selbst ab */ }
+  }
+}
+
+function updTakeoverRun_(url) {
   const o = updOpenOld_(url);
   if (o.busy) throw new Error(UPD_TAKE_BUSY);
   const old = o.old, st = o.settings, id = old.getId();
@@ -562,6 +568,12 @@ function takeoverRun(url) {
   }
   const when = Utilities.formatDate(new Date(), tz_(), 'dd.MM.yyyy HH:mm');
   const tool = updOldToolSheets_(old, st);
+  const toCopy = updTakeoverSheets_().filter(function (n) { return tool[n] && old.getSheetByName(n); });
+  const ownSheets = updOwnSheets_(old, st);
+  // Schritte: Blätter, eigene Blätter, Datenformat, 4 aus setupSheets_, Auslöser, Freigaben, Stilllegen
+  const total = toCopy.length + ownSheets.length + 8;
+  let stepNr = 0;
+  const step = function (text) { updTakeStep_(++stepNr, total, text); };
   let started = false;
   const res = (function () {
     try {
@@ -584,14 +596,16 @@ function takeoverRun(url) {
         });
         let cards = 0;
         const copied = [];
-        updTakeoverSheets_().forEach(function (n) {
+        toCopy.forEach(function (n) {
+          step('Blatt „' + n + '“');
           const src = old.getSheetByName(n);
-          if (!src || !tool[n]) return;
           const dst = getOrCreateSheet_(ss, n);
           const rows = updCopyValues_(src, dst);
           if (n === SHEETS.data) cards = rows; else copied.push(n);
         });
-        updOwnSheets_(old, st).forEach(function (src) {
+        if (tool[SHEETS.dexForms]) updCopyDexForms_(old.getSheetByName(SHEETS.dexForms), ss);
+        ownSheets.forEach(function (src) {
+          step('eigenes Blatt „' + src.getName() + '“');
           let name = src.getName();
           if (ss.getSheetByName(name)) name += ' (alt)';
           let i = 2;
@@ -614,44 +628,43 @@ function takeoverRun(url) {
     }
   })();
   dropSetsCache_(); // das Blatt Sets kommt jetzt aus der alten Tabelle
+  cacheDrop_(TR_CACHE_KEY); // ebenso die Übersetzung (#66)
 
   let note, shared;
   try {
     // Daten auf das Format dieses Codes bringen, dann alles neu aufbauen (ohne Sperre: die Funktionen sperren selbst)
+    step('Datenformat prüfen');
     settingSet_('SCHEMA_VERSION', '');
     migrateSchema_();
-    const extras = st.exists && st.map.VIEW_EXTRAS ? (function () { try { return JSON.parse(st.map.VIEW_EXTRAS); } catch (e) { return []; } })()
-      : updOldViewExtras_(old);
+    const extras = (function () { try { return JSON.parse(st.map.VIEW_EXTRAS || '[]'); } catch (e) { return []; } })();
     const have = extraNames_();
     settingsSetMany_({
       VIEW_EXTRAS: JSON.stringify((Array.isArray(extras) ? extras : []).map(String).filter(function (n) { return have.indexOf(n) >= 0; })),
       PRERELEASES: st.map.PRERELEASES === '1' ? '1' : '',
       SCAN_URL: st.map.SCAN_URL || settingGet_('SCAN_URL') // Adresse der Kartenerkennung (#19)
     });
-    setupSheets_(ss, true);
+    setupSheets_(ss, true, step);
     showDashboard_(); // die übernommene Tabelle startet im Dashboard (#28)
+    step('Auslöser einrichten');
     setupTriggers_();
     settingsSetMany_({ CODE_VERSION: TOOL_VERSION, TOOL_SHEETS: JSON.stringify(toolSheetNames_()), SETUP_AT: settingGet_('SETUP_AT') || when });
+    step('Freigaben übertragen');
     shared = updCopySharing_(old, ss);
+    step('Alte Tabelle stilllegen');
     note = updMarkOld_(old, st, ss.getUrl(), when);
   } catch (e) {
     updTakeFailed_(id);
     throw updTakeError_(e);
   }
   settingsSetMany_({ TAKEN_FROM: old.getUrl(), TAKEN_AT: when, TAKE_RUN: '' });
-  const names = updRenameAfterTakeover_(old, ss);
-  // Code vor 1.0 kennt das Stilllegen nicht: dort läuft alles weiter, bis der Nutzer die Auslöser löscht
-  const manualStop = !st.map.CODE_VERSION;
+  const names = updRenameAfterTakeover_(old, ss, st.map.CODE_VERSION);
   const done = res.cards + ' Einträge und ' + (res.copied.length + res.own.length) + ' weitere Blätter übernommen. ';
   const renamed = names.old ? ' Sie heißt jetzt „' + names.old + '“.' : '';
   return {
-    cards: res.cards, sheets: res.copied, own: res.own, manualStop: manualStop, noteSheet: note, oldName: names.old, newName: names.now,
+    cards: res.cards, sheets: res.copied, own: res.own, noteSheet: note, oldName: names.old, newName: names.now,
     shared: shared,
-    message: done + (manualStop
-      ? 'Die alte Tabelle hat eine Version vor 1.0 und legt sich nicht selbst still.' + renamed + ' Sie zeigt jetzt vorne das Blatt „' + note +
-        '“ mit einem Hinweis auf diese Tabelle. Bitte lösch dort die Trigger, damit sie nachts keine Preise mehr abruft. Die Schritte stehen in dem Blatt.'
-      : 'Die alte Tabelle ist jetzt stillgelegt.' + renamed + ' Läuft dort doch noch eine ältere Version (das Menü Pokémon zeigt nach dem Neuladen alle Punkte), stehen im Blatt „' +
-        note + '“ die Schritte zum Abschalten.') + updSharingText_(shared)
+    message: done + 'Die alte Tabelle ist jetzt stillgelegt.' + renamed + ' Läuft dort doch noch eine ältere Version (das Menü Pokémon zeigt nach dem Neuladen alle Punkte), stehen im Blatt „' +
+      note + '“ die Schritte zum Abschalten.' + updSharingText_(shared)
   };
 }
 
@@ -663,14 +676,15 @@ function updTakeError_(e) {
 }
 
 /**
- * Namen nach der Übernahme: die alte Tabelle bekommt „ (alt)“, eine von updateCopy angelegte neue den Namen der alten.
- * -> {old: neuer Name der alten oder '', now: Name dieser Tabelle}
+ * Namen nach der Übernahme: die alte Tabelle bekommt „ (alt 1.2.2)“ mit ihrer Version (#62, ohne Version „ (alt)“),
+ * eine von updateCopy angelegte neue den Namen der alten. -> {old: neuer Name der alten oder '', now: Name dieser Tabelle}
  */
-function updRenameAfterTakeover_(old, ss) {
+function updRenameAfterTakeover_(old, ss, version) {
   const out = { old: '', now: ss.getName() };
   try {
-    const base = old.getName().replace(/ \(alt\)$/, '');
-    if (old.getName() !== base + UPD_OLD_SUFFIX) { old.rename(base + UPD_OLD_SUFFIX); out.old = base + UPD_OLD_SUFFIX; }
+    const base = old.getName().replace(UPD_OLD_RE, '');
+    const oldName = base + (version ? ' (alt ' + version + ')' : UPD_OLD_SUFFIX);
+    if (old.getName() !== oldName) { old.rename(oldName); out.old = oldName; }
     const mine = updSheetId_(settingGet_('TAKE_FROM')) === old.getId() || ss.getName().indexOf(UPD_NEW_SUFFIX) >= 0;
     if (mine && ss.getName() !== base) { ss.rename(base); out.now = base; }
   } catch (e) { /* Namen sind nur Komfort */ }
@@ -713,16 +727,11 @@ function updWriteNotice_(old, sh, st, newUrl, when) {
     [newUrl],
     ['Die Daten hier bleiben zum Nachsehen. Du kannst diese Tabelle auch löschen, wenn du sie nicht mehr brauchst.']
   ];
-  // Code vor 1.0 kennt das Stilllegen nicht: Auslöser von Hand löschen, sonst läuft nachts der Preisabruf weiter
+  // läuft in der alten Tabelle doch noch älterer Code, der das Stilllegen nicht kennt: Auslöser von Hand löschen
   const manual = [['Damit hier nachts keine Preise mehr abgerufen werden: Erweiterungen > Apps Script öffnen, links auf „Trigger“ (Wecker) klicken und jeden Trigger über ⋮ > „Trigger löschen“ entfernen.'],
     [''], ['Hast du die Handy-Seite (Web-App) dieser Tabelle benutzt: In Apps Script auf Bereitstellen > Bereitstellungen verwalten klicken, die Web-App auswählen und „Archivieren“ wählen. Speichere am Handy danach den Link der neuen Tabelle (dort Pokémon > Web-App-Link anzeigen).']];
-  if (st.map.CODE_VERSION) {
-    // ab 1.0 legt sich die Tabelle selbst still; läuft hier doch wieder älterer Code, hilft nur der Weg von Hand
-    lines.push([''], ['Willst du doch hier weitermachen: Pokémon > Diese Tabelle wieder benutzen.'],
-      [''], ['Zeigt das Menü Pokémon hier nach dem Neuladen noch alle Punkte, läuft in dieser Tabelle eine ältere Version. Dann bitte so:'], ['']);
-  } else {
-    lines.push(['']);
-  }
+  lines.push([''], ['Willst du doch hier weitermachen: Pokémon > Diese Tabelle wieder benutzen.'],
+    [''], ['Zeigt das Menü Pokémon hier nach dem Neuladen noch alle Punkte, läuft in dieser Tabelle eine ältere Version. Dann bitte so:'], ['']);
   manual.forEach(function (l) { lines.push(l); });
   sh.getRange(1, 1, lines.length, 1).setValues(lines);
   sh.getRange('A1').setFontSize(16).setFontWeight('bold');
@@ -754,7 +763,7 @@ function wiederBenutzen() {
   if (sh && ss.getSheets().length > 1) ss.deleteSheet(sh);
   try {
     const n = ss.getName();
-    if (/ \(alt\)$/.test(n)) ss.rename(n.replace(/ \(alt\)$/, ''));
+    if (UPD_OLD_RE.test(n)) ss.rename(n.replace(UPD_OLD_RE, '')); // auch „ (alt 1.2.2)“ (#62); bis 1.2.2 nur „ (alt)“
   } catch (e) { /* Name ist nur Komfort */ }
   setupTriggers_();
   alert_('Diese Tabelle ist wieder aktiv. Bitte lade sie einmal neu, damit das ganze Menü erscheint.');

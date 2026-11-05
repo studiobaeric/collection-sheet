@@ -85,7 +85,7 @@ t.section('Nichts gefunden: Hinweis in einer Zelle');
   dex.getRange('I4').setValue('#151 Mew');
   eq('Pokédex: Pokémon ohne Karten', [cell(env, 'Pokédex', 'H6'), cell(env, 'Pokédex', 'I6'), cell(env, 'Pokédex', 'P6')], ['Keine Karten von diesem Pokémon', '', '']);
   dex.getRange('D4').setValue('xyzxyz');
-  eq('Pokédex: Liste ohne Treffer', [cell(env, 'Pokédex', 'A6'), cell(env, 'Pokédex', 'B6')], ['Keine Pokémon gefunden', '']);
+  eq('Pokédex: Liste ohne Treffer, Meldung in B (#63)', [cell(env, 'Pokédex', 'A6'), cell(env, 'Pokédex', 'B6')], ['', 'Keine Pokémon gefunden']);
 }
 
 // ---------------------------------------------------------------------------
