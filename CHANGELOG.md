@@ -7,9 +7,24 @@ Eine neue Version eintragen (Ablauf in [docs/RELEASE.md](docs/RELEASE.md)):
 - Oben einen Abschnitt `## [1.2.0]` anlegen, ohne Datum. Das Datum trägt `tools/release.js` beim Release ein.
 - Je Neuerung ein kurzer Stichpunkt (höchstens 70 Zeichen, kein ganzer Satz), aus Sicht der Nutzer, als einfacher Text ohne Markdown (die Tabellen zeigen ihn so, wie er hier steht) und ohne Punkt am Ende. Details gehören in die Anleitung, nicht hierher.
 
+## [1.2.3] – 2026-11-04
+
+- Set-Symbole erscheinen jetzt wirklich statt des Set-Namens
+- Übernahme zeigt Schritt für Schritt, wie weit sie ist
+- Übernahme behält die Nummern der Pokédex-Formen
+- Alte Tabelle heißt nach der Übernahme z. B. „Sammlung (alt 1.2.2)“
+- Pokédex: alle Nummern rechtsbündig, auch Formen wie 3.1
+- Pokédex-Tab zeigt die Karten eines Pokémon sofort, ohne Laden
+- Preislauf schneller: Preise werden seltener ins Blatt geschrieben
+- Tabellen vor Version 1.0 lassen sich nur noch über den Import einlesen
+- Menüpunkt „API prüfen“ entfernt
+- Hinzufügen verliert bei einem Speicherfehler keine Karte mehr
+- Nach einem Fehler bei −1 oder Bearbeiten lädt die Sammlung neu
+- Suche mit englischem Namen oder Tippfehler schneller
+
 ## [1.2.2] – 2026-10-29
 
-- Set-Symbole erscheinen wieder, auch wenn tcgdex sie als .webp liefert
+- Set-Symbole: neuer Ladeversuch als .png (wirkt erst ab 1.2.3)
 - Bearbeiten: Variante änderbar, z. B. Reverse Holo, mit passendem Preis
 - Pokédex auf Wunsch mit Formen: Mega, Regional, Gigadynamax und mehr
 - Formen je Gruppe per Haken an, im Blatt Pokédex und im Pokédex-Tab

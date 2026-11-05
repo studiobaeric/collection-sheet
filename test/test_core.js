@@ -55,69 +55,28 @@ function importeSheet(env, rows) {
 function groupBy(env, gkey) { return env.groups().find(g => g['Gruppenschlüssel'] === gkey); }
 
 // ---------------------------------------------------------------------------
-t.section('Migration v1 -> v2');
+t.section('Datenblatt prüfen (Format vor 1.0 wird seit 1.2.3 nicht mehr umgestellt, #36 B3)');
 {
+  // Daten im alten Format: Fehler, nichts wird geändert
   const env = fresh();
   const sh = env.ss.insertSheet('Daten');
-  const V1 = ['Schlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer', 'Nummer normalisiert', 'Setgröße',
-    'Name', 'Name englisch', 'Quelle', 'Variante', 'Zustand', 'Anzahl', 'Trendpreis (EUR)', 'Preisstand', 'Bild-URL', 'Seltenheit',
-    'Kartentyp', 'Illustrator', 'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar'];
-  const d1 = new Date(2026, 8, 1), d2 = new Date(2026, 8, 2);
-  const rows = [
-    V1,
-    ['swsh3-025|normal|NM', 'swsh3-025', 'swsh3', 'Flammende Finsternis', '2020-08-14', '025', '25', 189, 'Glurak', '', 'de', 'normal', 'NM', 2, 1.5, '2026-10-13', 'https://img/a', 'Rare', 'Pokemon', 'X', d1, d1, 25],
-    [],
-    ['base1-4|holo|', 'base1-4', 'base1', 'Grundset', '1999-01-09', '4', '4', 102, 'Glurak', '', 'de', 'holo', '', 1, 300, '2026-10-13', '', 'Rare Holo', 'Pokemon', 'Mitsuhiro Arita', d2, d2, 4],
-    ['old9-007|normal|LP', 'old9-007', 'old9', 'Old Set', '', '007', '7', 50, 'Mewtu', 'Mewtwo', 'en-Ersatz', 'normal', 'LP', 0, '', '', 'https://img/m', 'Rare', 'Pokemon', 'Y', d2, d2, 7]
-  ];
-  rows.forEach((r, i) => r.forEach((v, j) => sh.setCell(i + 1, j + 1, v))); // Rohdaten wie im echten Blatt
-  env.ctx.ensureSchema_();
-  const v = env.values('Daten');
-  eq('v2 headers (30)', v[0].slice(0, 30), env.run('DATA_HEADERS'));
-  const data = env.data();
-  ok('3 rows, blank row dropped', data.length === 3, data.length);
-  ok('eids E + 10 hex, unique', data.every(r => /^E[0-9a-f]{10}$/.test(r.eid)) && new Set(data.map(r => r.eid)).size === 3, data.map(r => r.eid));
-  ok('lang DE, origin Hand, fp/version/ownPrice empty', data.every(r => r.lang === 'DE' && r.origin === 'Hand' && r.fp === '' && r.version === '' && r.ownPrice === '' && r.ownPriceDate === ''));
-  eq('new keys', data.map(r => r.key), ['swsh3-025|normal||NM|DE', 'base1-4|holo|||DE', 'old9-007|normal||LP|DE']);
-  ok('number text kept', data[0].localId === '025' && data[2].localId === '007', data.map(r => r.localId));
-  ok('dates kept', data[0].added instanceof Date && data[0].added.getTime() === d1.getTime());
-  ok('SCHEMA_VERSION = 2', env.setting('SCHEMA_VERSION') === '2');
-  ok('Gruppen built (3)', env.groups().length === 3, env.groups().length);
-  const before = JSON.stringify(env.data().map(r => [r.eid, r.key, r.count]));
-  env.ctx.settingSet_('SCHEMA_VERSION', '');
-  env.ctx.migrateSchema_();
-  ok('second run idempotent', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
-  // Zusatzspalte überlebt setupAll_
-  env.ctx.withLock_(() => env.ctx.ensureExtraColumn_('Notiz'));
-  env.sheet('Daten').getRange(2, 31).setValue('Lieblingskarte');
-  env.ctx.setupAll_();
-  const v2 = env.values('Daten');
-  ok('setupAll_ keeps extra header + value', v2[0][30] === 'Notiz' && v2[1][30] === 'Lieblingskarte', v2[0].slice(28));
-  ok('setupAll_ keeps data', JSON.stringify(env.data().map(r => [r.eid, r.key, r.count])) === before);
-  ok('no nested locks', env.lock.nested === 0, env.lock);
-}
-{
-  // leeres v1-Blatt, fehlendes Blatt, alte Zusatzspalte hinter Spalte W
-  const env = fresh();
-  const sh = env.ss.insertSheet('Daten');
-  sh.getRange(1, 1, 1, 3).setValues([['Schlüssel', 'Karten-ID', 'Set-ID']]);
-  env.ctx.ensureSchema_();
-  ok('empty v1 sheet migrated', env.values('Daten')[0][23] === 'Eintrag-ID' && env.data().length === 0 && env.setting('SCHEMA_VERSION') === '2');
+  const r = ['base1-4|holo|', 'base1-4', 'base1', 'Grundset', '', '4', '4', 102, 'Glurak', '', 'de', 'holo', '', 1, '', '', '', '', '', '', '', '', 4];
+  [['Schlüssel', 'Karten-ID', 'Set-ID'], r].forEach((row, i) => row.forEach((v, j) => sh.setCell(i + 1, j + 1, v)));
+  let err = null;
+  try { env.ctx.ensureSchema_(); } catch (e) { err = e; }
+  ok('altes Format mit Karten: Fehler mit Hinweis auf Import', !!err && /vor Version 1\.0/.test(err.message) && /Import/.test(err.message), err && err.message);
+  ok('altes Format: nichts geändert', env.values('Daten')[1][0] === 'base1-4|holo|' && env.values('Daten')[0].length === 23 && !env.setting('SCHEMA_VERSION'));
+
+  // leeres Blatt mit alter Kopfzeile: bekommt die Kopfzeile von heute
+  const env1 = fresh();
+  env1.ss.insertSheet('Daten').getRange(1, 1, 1, 3).setValues([['Schlüssel', 'Karten-ID', 'Set-ID']]);
+  env1.ctx.ensureSchema_();
+  ok('leeres Blatt: Kopfzeile v2', env1.values('Daten')[0][23] === 'Eintrag-ID' && env1.data().length === 0 && env1.setting('SCHEMA_VERSION') === '2');
 
   const env2 = fresh();
   env2.ctx.ensureSchema_();
   ok('missing Daten created with v2 headers', env2.sheet('Daten') && env2.values('Daten')[0][29] === 'Quellzeile' && env2.setting('SCHEMA_VERSION') === '2');
   ok('Gruppen exists after migrate', !!env2.sheet('Gruppen'));
-
-  const env3 = fresh();
-  const s3 = env3.ss.insertSheet('Daten');
-  const head = env3.run('DATA_HEADERS').slice(0, 23).concat(['Meine Notiz']);
-  s3.getRange(1, 1, 1, 24).setValues([head]);
-  const r = ['base1-4|holo|', 'base1-4', 'base1', 'Grundset', '', '4', '4', 102, 'Glurak', '', 'de', 'holo', '', 1, '', '', '', '', '', '', '', '', 4, 'alt'];
-  r.forEach((x, j) => s3.setCell(2, j + 1, x));
-  env3.ctx.ensureSchema_();
-  const d3 = env3.data();
-  ok('old extra column moved to extras', d3[0].extras['Meine Notiz'] === 'alt' && d3[0].eid && d3[0].origin === 'Hand', d3[0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +182,7 @@ t.section('addCard / addFreeCard');
 }
 
 // ---------------------------------------------------------------------------
-t.section('searchCollection');
+t.section('Suche in der Sammlung (getCollection + Suche im Browser, #36 A4)');
 {
   const env = setup();
   importeSheet(env, [{ nr: 3, name: 'Pokemon Ordner', id: 'SRC1' }]);
@@ -234,7 +193,7 @@ t.section('searchCollection');
   env.uiCall('addCard', { id: 'base1-4', lang: 'de', variant: 'base', qty: 1 });
   env.uiCall('addCard', { id: 'swsh3-025', lang: 'de', variant: 'base', qty: 1, version: 'Snowflake' });
   ok('Set-Daten gleich beim Hinzufügen, auch neuer Sets (#43)', env.data().every(r => /^\d{4}-\d\d-\d\d$/.test(r.setDate)), env.data().map(r => [r.id, r.setDate]));
-  let res = env.uiCall('searchCollection', '', '');
+  let res = env.search('', '');
   ok('groups total', res.total === 3 && res.groups.length === 3, res.total);
   eq('sort by set date (base1 first)', res.groups.map(g => g.gkey), ['base1-4|holo|', 'swsh3-025|normal|', 'swsh3-025|normal|Snowflake']);
   const g = res.groups[1];
@@ -247,20 +206,20 @@ t.section('searchCollection');
   ok('row shape', g.rows.every(r => ['eid', 'key', 'cond', 'lang', 'count', 'origin', 'originLabel', 'isImport', 'importNr', 'extras'].every(k => k in r)) &&
     g.rows[2].isImport === true && g.rows[2].importNr === 3 && g.rows[0].isImport === false && g.rows[0].importNr === null, g.rows);
   ok('row eid matches addCard', g.rows[1].eid === a.eid);
-  res = env.uiCall('searchCollection', 'snow', '');
+  res = env.search('snow', '');
   ok('text matches version', res.total === 1 && res.groups[0].version === 'Snowflake', res.groups.map(x => x.gkey));
-  res = env.uiCall('searchCollection', '25/189', '');
+  res = env.search('25/189', '');
   ok('number with set size', res.total === 2, res.total);
-  res = env.uiCall('searchCollection', 'glurak 4', '');
+  res = env.search('glurak 4', '');
   ok('name + number', res.total === 1 && res.groups[0].gkey === 'base1-4|holo|', res.groups.map(x => x.gkey));
-  res = env.uiCall('searchCollection', '', 'Darkness Ablaze');
+  res = env.search('', 'Darkness Ablaze');
   ok('set filter via English set name', res.total === 2, res.total);
   // count-0-Gruppen ans Ende
-  const b = env.uiCall('searchCollection', 'glurak 4', '').groups[0].rows[0];
+  const b = env.search('glurak 4', '').groups[0].rows[0];
   env.uiCall('adjustEntry', b.eid, -1);
-  res = env.uiCall('searchCollection', '', '');
+  res = env.search('', '');
   ok('count 0 group last', res.groups[res.groups.length - 1].gkey === 'base1-4|holo|' && res.groups[res.groups.length - 1].count === 0, res.groups.map(x => [x.gkey, x.count]));
-  // höchstens 60 Gruppen
+  // ohne Grenze (früher höchstens 60 Gruppen)
   const c = env.ctx;
   c.withLock_(() => {
     const rows = [];
@@ -268,9 +227,9 @@ t.section('searchCollection');
     c.appendDataRows_(rows);
     c.afterDataChange_();
   });
-  res = env.uiCall('searchCollection', '', '');
-  ok('60-group cap', res.total === 68 && res.groups.length === 60, [res.total, res.groups.length]);
-  const fg = env.uiCall('searchCollection', 'Karte', 'Ordner').groups.find(x => x.name === 'Karte 7');
+  res = env.search('', '');
+  ok('alle Gruppen, keine Grenze', res.total === 68 && res.groups.length === 68, [res.total, res.groups.length]);
+  const fg = env.search('Karte', 'Ordner').groups.find(x => x.name === 'Karte 7');
   ok('free group flags', fg && fg.isFree && fg.image === '' && fg.price === null && fg.source === 'frei', fg);
 }
 
@@ -408,7 +367,7 @@ t.section('setGroupOwnPrice / Gruppen');
   ok('own price on all rows', env.data().every(x => x.ownPrice === 4.2 && x.ownPriceDate === TODAY));
   g = groupBy(env, a.gkey);
   ok('Gruppen effective price + manuell date', g['Preis (EUR)'] === 4.2 && g['Preisstand'] === 'manuell ' + TODAY_DMY, g['Preisstand']);
-  const s = env.uiCall('searchCollection', '', '').groups[0];
+  const s = env.search('', '').groups[0];
   ok('search shows manual price', s.price === 4.2 && s.priceManual && s.ownPrice === 4.2);
   r = env.uiCall('setGroupOwnPrice', a.gkey, null);
   ok('clear own price', r.price === 1.5 && r.priceManual === false && env.data().every(x => x.ownPrice === '' && x.ownPriceDate === ''), r);
@@ -499,7 +458,7 @@ t.section('linkFreeGroup');
   const free = env.uiCall('addFreeCard', { name: 'Glurak alt', setName: 'Flammende', number: '25', condition: 'NM', qty: 1, ownPrice: 9 });
   const c = env.ctx;
   const imp = addImportRow(env, { free: true, name: 'Glurak alt', setName: 'Flammende', localId: '25' }, { nr: 3, fp: 'fz', cond: 'LP', count: 1, ownPrice: 9 });
-  ok('free group has hand + import row', env.uiCall('searchCollection', 'Glurak alt', '').groups[0].rows.length === 2);
+  ok('free group has hand + import row', env.search('Glurak alt', '').groups[0].rows.length === 2);
   const r = env.uiCall('linkFreeGroup', free.gkey, 'swsh3-025', 'de', 'base');
   ok('link returns new gkey', r.gkey === 'swsh3-025|normal|', r);
   const d = env.data();
@@ -540,6 +499,36 @@ t.section('Preislauf und Verlauf');
   ok('history uses effective price (2*2 + 10 + 2*1.5)', last[1] === 17 && last[2] === 6 && last[3] === 1, last);
   ok('PRICE_RUN cleared', !env.props.PRICE_RUN);
   ok('own price untouched by price run', env.data().find(x => x.eid === b.eid).ownPrice === 10);
+  {
+    // #36 A2: drei Pakete, aber nur einmal schreiben; mit Pause einmal vor der Pause und einmal am Ende
+    const c = env.ctx;
+    const J = JSON.stringify;
+    const real = { targets: c.priceTargets_, write: c.writePrices_ };
+    const base = real.targets();
+    env.run('priceTargets_ = function () { return __t; }');
+    env.ctx.__t = Array.from({ length: 45 }, (x, i) => Object.assign({}, base[i % 2], i > 1 ? { key: base[i % 2].key + '#' + i } : {}));
+    const calls = [];
+    env.ctx.__w = real.write;
+    env.ctx.__calls = calls;
+    env.run('writePrices_ = function (cm, last, dex) { __calls.push([Object.keys(cm).length, last]); return __w(cm, last, dex); }');
+    env.props.PRICE_RUN = JSON.stringify({ pos: 0, failed: 0 });
+    c.continuePriceRun();
+    eq('drei Pakete: einmal geschrieben, mit allen 45 Karten', calls, [[45, true]]);
+    calls.length = 0;
+    const now = env.run('Date.now');
+    let tick = 0;
+    env.run('Date.now = function () { return __now(); }');
+    env.ctx.__now = () => (tick++ < 3 ? 0 : 10 * 60 * 1000); // erst unter, dann über der Zeitgrenze
+    env.props.PRICE_RUN = JSON.stringify({ pos: 0, failed: 0 });
+    const msg = c.continuePriceRun();
+    ok('Pause: vorher geschrieben, Stand gespeichert', /pausiert/.test(msg) && calls.length === 1 && calls[0][1] === false && calls[0][0] > 0 && calls[0][0] < 45 &&
+      JSON.parse(env.props.PRICE_RUN).pos === calls[0][0], [msg, calls, env.props.PRICE_RUN]);
+    env.ctx.__now = now;
+    c.continuePriceRun();
+    ok('Fortsetzung: Rest am Ende geschrieben', calls.length === 2 && J(calls[1]) === J([45 - calls[0][0], true]) && !env.props.PRICE_RUN, calls);
+    env.ctx.__rt = real.targets;
+    env.run('priceTargets_ = __rt; writePrices_ = __w');
+  }
   // Verlauf wächst über die letzte Zeile hinaus (alter Test)
   const hs = env.sheet('Verlauf');
   hs.clearContents();
@@ -659,8 +648,8 @@ t.section('Bestehendes Verhalten (Suche, Details, Set-Datum)');
   env.promptResponse = 'https://script.google.com/macros/s/abc/exec';
   env.ctx.webAppLinkAnzeigen();
   ok('web app link saved', env.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/abc/exec');
-  ok('menu mit Dashboard, ohne Einsortieren und Einrichtung (#43)', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 7 &&
-    env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung' || x[1] === 'einsortieren'), env.ui.menus[0].items);
+  ok('menu mit Dashboard, ohne Einsortieren, Einrichtung (#43) und API prüfen (#36 B4)', env.ctx.onOpen() === undefined && env.ui.menus[0].items.length === 6 &&
+    env.ui.menus[0].items[1][1] === 'zumDashboard' && !env.ui.menus[0].items.some(x => x[1] === 'einrichtung' || x[1] === 'einsortieren' || x[1] === 'apiPruefen'), env.ui.menus[0].items);
   // Auswahlliste mit Symbol und Name (#47): neueste Sets zuerst, deutscher Name, englischer nur wenn anders
   const sug = env.uiCall('getSetSuggestions');
   const fl = sug.filter(s => s.id === 'swsh3')[0], gs = sug.filter(s => s.id === 'base1')[0];
@@ -758,7 +747,7 @@ t.section('Code-Regeln');
   ok('no require/import in Code.gs', !/\brequire\(|^\s*import\s/m.test(src));
   const env = fresh();
   const pub = Object.keys(env.ctx).filter(k => typeof env.ctx[k] === 'function' && !/_$/.test(k));
-  const want = ['getUiConfig', 'addCard', 'addFreeCard', 'searchCollection', 'adjustEntry', 'revertAdjust', 'editEntry',
+  const want = ['getUiConfig', 'addCard', 'addFreeCard', 'getCollection', 'adjustEntry', 'revertAdjust', 'editEntry',
     'setGroupOwnPrice', 'linkFreeGroup', 'getSetSuggestions', 'setViewExtras', 'include', 'doGet', 'kartenErfassen', 'searchCards', 'getCardDetail', 'getCardBySetNumber'];
   ok('public API present', want.every(n => pub.indexOf(n) >= 0), want.filter(n => pub.indexOf(n) < 0));
 }

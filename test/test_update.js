@@ -337,8 +337,11 @@ t.section('Neue Version holen: Kopie der Vorlage, Übernahme, alte Tabelle');
   const p = neu.uiCall('takeoverPreview', ni.pendingTake);
   t.ok('neu: Vorschau', p.cards === 2 && p.copies === 3 && p.version === '1.0.0', p);
   const tr = neu.uiCall('takeoverRun', ni.pendingTake);
-  t.ok('neu: übernommen, Namen getauscht', tr.cards === 2 && tr.manualStop === false && tr.oldName === 'Meine Karten (alt)' && tr.newName === 'Meine Karten' &&
-    neu.ss.getName() === 'Meine Karten' && old.ss.getName() === 'Meine Karten (alt)' && /heißt jetzt „Meine Karten \(alt\)“/.test(tr.message), tr);
+  t.ok('neu: übernommen, Namen getauscht, alte mit Version (#62)', tr.cards === 2 && tr.oldName === 'Meine Karten (alt 1.0.0)' && tr.newName === 'Meine Karten' &&
+    neu.ss.getName() === 'Meine Karten' && old.ss.getName() === 'Meine Karten (alt 1.0.0)' && /heißt jetzt „Meine Karten \(alt 1\.0\.0\)“/.test(tr.message), tr);
+  const re = neu.run('UPD_OLD_RE');
+  t.eq('Endung „(alt …)“ erkannt, andere Klammern bleiben (#62)', ['X (alt)', 'X (alt 1.2.2)', 'X (alt 1.3.0-beta.1)', 'X (alt 2)', 'X (alt) (neu)', 'X (Alt 1.2.2)'].map(n => n.replace(re, '')),
+    ['X', 'X', 'X', 'X (alt 2)', 'X (alt) (neu)', 'X (Alt 1.2.2)']);
   t.ok('neu: Daten, Suchfeld, keine ausstehende Übernahme mehr', neu.data().length === 2 && neu.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' &&
     neu.uiCall('getUpdateInfo', false).pendingTake === '' && neu.setting('TAKEN_FROM') === old.ss.getUrl() && neu.setting('TAKE_RUN') === '');
   t.ok('neu: Vorabversionen wie in der alten Tabelle (aus)', neu.setting('PRERELEASES') === '');
@@ -585,6 +588,36 @@ t.section('Seitenleiste legt Fehlendes wieder an (statt Menüpunkt Einrichtung)'
 }
 
 // ---------------------------------------------------------------------------
+t.section('Vorlage: keine Auslöser, keine SPREADSHEET_ID (#67)');
+{
+  const tplId = /const TEMPLATE_SHEET_ID = '([^']+)'/.exec(read('src/Code.gs'))[1];
+  t.eq('ID der Vorlage im Code passt zum Kanal', tplId, updSheetIdOf(JSON.parse(read('releases/channel.json')).templateUrl));
+  const W = makeWorld();
+  const env = H.createEnv({ srcDir: BASE_DIR });
+  env.ss.id = tplId;
+  env.http = W.handler;
+  env.props.SPREADSHEET_ID = tplId; // so ließ Karten erfassen bis 1.2.2 die Vorlage zurück
+  env.ctx.setupAll_();
+  const state = e => ({ triggers: e.triggers.map(x => x.fn).sort(), id: e.props.SPREADSHEET_ID });
+  t.ok('Einrichtung in der Vorlage: fertig, ohne Auslöser und ohne SPREADSHEET_ID', env.ss.toasts.some(x => /^Einrichtung fertig\./.test(x)) &&
+    J(state(env)) === J({ triggers: [] }), state(env));
+  ['naechtlicherPreislauf', 'continuePriceRun', 'beiStrukturAenderung'].forEach(fn => env.ctx.ScriptApp.newTrigger(fn).create()); // von einer älteren Version
+  env.props.SPREADSHEET_ID = tplId;
+  const toasts = env.ss.toasts.length, sidebars = env.ui.sidebars.length;
+  env.ctx.kartenErfassen();
+  t.ok('Karten erfassen in der Vorlage: alte Auslöser und SPREADSHEET_ID weg, Seitenleiste offen', J(state(env)) === J({ triggers: [] }) &&
+    env.ui.sidebars.length === sidebars + 1, state(env));
+  t.ok('ohne Hinweis zu Auslösern', !env.ss.toasts.slice(toasts).some(x => /Auslöser/.test(x)), env.ss.toasts.slice(toasts));
+
+  // Kopie der Vorlage (Neue Version holen oder ein neuer Nutzer): richtet sich wie bisher ganz ein
+  const copyId = '1CopyOfTemplateCopyOfTemplateCopy01234567';
+  const copy = openWith({ id: copyId, name: 'Pokémon-Sammlung', list: env.ss.list }, BASE_DIR, W);
+  copy.ctx.kartenErfassen();
+  t.ok('Kopie der Vorlage: beide Auslöser und ihre eigene SPREADSHEET_ID', J(state(copy)) ===
+    J({ triggers: ['beiStrukturAenderung', 'naechtlicherPreislauf'], id: copyId }), state(copy));
+}
+
+// ---------------------------------------------------------------------------
 t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 {
   const W = makeWorld();
@@ -606,6 +639,10 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   ob.getSheetByName('Sammlung').getRange('H4').setValue(true);
   ob.getSheetByName('Verlauf').getRange(2, 1, 1, 5).setValues([[new Date(2026, 9, 1), 12.5, 3, 0, 0]]);
   ob.getSheetByName('Seltenheiten').getRange(2, 2).setValue(99);
+  // Pokédex-Formen der alten Tabelle (#58): andere Nummern als in der neuen
+  const OLD_FORMS = [['6_1', 6, 1, 'base', 'Glurak', 'Charizard', 'charizard'], ['6_2', 6, 2, 'mega', 'Mega-Glurak X', 'Mega Charizard X', 'charizard-mega-x'],
+    ['6_3', 6, 3, 'mega', 'Mega-Glurak Y', 'Mega Charizard Y', 'charizard-mega-y']];
+  ob.getSheetByName('Pokédex-Formen').getRange(2, 1, 3, 7).setValues(OLD_FORMS);
   const notes = ob.insertSheet('Notizen');
   notes.getRange('A1:B2').setValues([['Wunsch', 'Preis'], ['Glurak', 5]]);
   notes.getRange('C2').setFormula('=B2*2');
@@ -613,14 +650,26 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 
   const env = setupEnv(W);
   env.sources[OLD_ID] = ob;
+  // Vorlage mit anderer Zählung (PokeAPI hat eine Form eingefügt) und einer Zeile mehr
+  env.sheet('Pokédex-Formen').getRange(2, 1, 4, 7).setValues([['6_1', 6, 1, 'base', 'Glurak', 'Charizard', 'charizard'],
+    ['6_2', 6, 2, 'mega', 'Neue Form', 'New form', 'charizard-new'], ['6_3', 6, 3, 'mega', 'Mega-Glurak X', 'Mega Charizard X', 'charizard-mega-x'],
+    ['6_4', 6, 4, 'mega', 'Mega-Glurak Y', 'Mega Charizard Y', 'charizard-mega-y']]);
   const url = 'https://docs.google.com/spreadsheets/d/' + OLD_ID + '/edit#gid=0';
   const p = env.uiCall('takeoverPreview', url);
   t.ok('Vorschau: Karten, Exemplare, Version, eigene Blätter', p.cards === 2 && p.copies === 3 && p.version === '1.0.0' && J(p.own) === J(['Notizen']) &&
     p.sheets.some(s => s.name === 'Verlauf' && s.rows === 1), p);
   t.ok('Vorschau ändert nichts', env.data().length === 0 && !settingOf(ob, 'TAKEN_OVER_BY'));
+  const steps = [];
+  env.ctx.__steps = steps;
+  env.ctx.__put = env.ctx.updTakeStep_;
+  env.run('updTakeStep_ = function (n, total, text) { __steps.push([n, total, text]); __put(n, total, text); }');
   const r = env.uiCall('takeoverRun', url);
+  t.ok('Fortschritt (#61): Schritte 1 bis total, Blätter mit Namen, zuletzt Stilllegen', steps.length > 10 && steps.every((x, i) => x[0] === i + 1 && x[1] === steps[0][1]) &&
+    steps[steps.length - 1][0] === steps[0][1] && steps[0][2] === 'Blatt „Daten“' && steps.some(x => x[2] === 'eigenes Blatt „Notizen“') &&
+    steps[steps.length - 1][2] === 'Alte Tabelle stilllegen', steps);
+  t.ok('Fortschritt danach leer', env.uiCall('takeoverProgress') === null);
   t.ok('Übernahme: Meldung', r.cards === 2 && /2 Einträge/.test(r.message) && J(r.own) === J(['Notizen']), r);
-  t.ok('ab 1.0: legt sich selbst still', r.manualStop === false && /jetzt stillgelegt/.test(r.message) && r.noteSheet === 'Übernommen' &&
+  t.ok('ab 1.0: legt sich selbst still', /jetzt stillgelegt/.test(r.message) && r.noteSheet === 'Übernommen' &&
     settingOf(ob, 'TAKEN_OVER_SHEET') === 'Übernommen');
   t.ok('neue Tabelle: CODE_VERSION und SETUP_AT', env.setting('CODE_VERSION') === env.run('TOOL_VERSION') && !!env.setting('SETUP_AT'));
   const d = env.data();
@@ -629,6 +678,8 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
   t.ok('Zusatzspalte und Ansicht', J(d.map(x => x.extras.Ordner)) === J(['A', 'B']) && env.setting('VIEW_EXTRAS') === '["Ordner"]' &&
     env.values('Sammlung')[4].indexOf('Ordner') >= 0);
   t.ok('Gruppen neu gebaut', env.groups().length === 2);
+  t.ok('Pokédex-Formen: Nummern der alten Tabelle, Formel bleibt (#58)', J(env.values('Pokédex-Formen').slice(1).map(r => r.slice(0, 7))) === J(OLD_FORMS) &&
+    !!env.sheet('Pokédex-Formen').getRange('H2').getFormula(), env.values('Pokédex-Formen').slice(0, 5));
   t.ok('Verlauf, Seltenheiten übernommen', env.values('Verlauf').length === 2 && env.values('Verlauf')[1][1] === 12.5 && env.values('Seltenheiten')[1][1] === 99);
   t.ok('eigenes Blatt mit Formel kopiert, leeres nicht', env.sheet('Notizen') && env.sheet('Notizen').getRange('C2').getFormula() === '=B2*2' && !env.sheet('Leer'));
   t.ok('Suchfelder der Sammlung', env.sheet('Sammlung').getRange('B4').getValue() === 'Glurak' && env.sheet('Sammlung').getRange('H4').getValue() === true);
@@ -647,30 +698,13 @@ t.section('Übernahme aus einer alten Tabelle (Version 1.0)');
 }
 
 // ---------------------------------------------------------------------------
-t.section('Übernahme aus einer Tabelle vor 1.0 (Version 1, ohne Einstellungen)');
+t.section('Übernahme aus einer Tabelle vor 1.0: abgelehnt (#36 B3)');
 {
-  const backupDir = path.join(__dirname, '..', 'backup');
-  const old = H.createEnv({ srcDir: backupDir, files: ['Code.gs'] });
-  old.ss.id = OLD_ID;
-  old.ctx.einrichtung();
-  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 2 });
-  old.ctx.addCard({ id: 'base1-4', lang: 'de', variant: 'base', condition: 'LP', qty: 1 });
-  old.sheet('Sammlung').getRange('B4').setValue('Glurak');
-  t.ok('alte Tabelle hat 23 Spalten, kein Einstellungsblatt', old.values('Daten')[0].length === 23 && !old.sheet('Tool-Einstellungen'));
-  const W = makeWorld();
-  const env = setupEnv(W);
-  env.sources[OLD_ID] = old.ss;
-  const p = env.uiCall('takeoverPreview', OLD_ID);
-  t.ok('Vorschau: Version leer, 2 Karten', p.version === '' && p.cards === 2 && p.copies === 3, p);
-  const r = env.uiCall('takeoverRun', OLD_ID);
-  t.ok('vor 1.0: manualStop, Meldung nennt Trigger und Hinweisblatt', r.manualStop === true && /legt sich nicht selbst still/.test(r.message) &&
-    /Trigger/.test(r.message) && /„Übernommen“/.test(r.message), r);
-  const d = env.data();
-  t.ok('umgestellt auf Version 2', env.values('Daten')[0][23] === 'Eintrag-ID' && d.length === 2 && d.every(x => /^E[0-9a-f]{10}$/.test(x.eid) && x.origin === 'Hand') &&
-    J(d.map(x => x.key)) === J(['swsh3-025|normal||NM|DE', 'base1-4|holo||LP|DE']), d.map(x => x.key));
-  t.ok('Suchfeld übernommen', env.sheet('Sammlung').getRange('B4').getValue() === 'Glurak');
-  t.ok('alte Tabelle: Anleitung zum Löschen der Trigger', /Trigger/.test(J(old.values('Übernommen'))) && settingOf(old.ss, 'TAKEN_OVER_BY') === env.ss.getUrl());
-  t.ok('alte Tabelle: Anleitung zum Archivieren der Web-App', /Archivieren/.test(J(old.values('Übernommen'))) && /Web-App-Link anzeigen/.test(J(old.values('Übernommen'))));
+  const env = setupEnv(makeWorld());
+  env.addSource({ id: OLD_ID, name: 'Uralt', tabs: { Daten: [['Schlüssel', 'Karten-ID'], ['swsh3-025|normal|NM', 'swsh3-025']] } });
+  t.throws('ohne CODE_VERSION: Vorschau verweist auf den Import', () => env.uiCall('takeoverPreview', OLD_ID), /vor 1\.0[^]*Import/);
+  t.throws('ohne CODE_VERSION: Übernahme ebenso', () => env.uiCall('takeoverRun', OLD_ID), /vor 1\.0/);
+  t.ok('nichts übernommen', env.data().length === 0 && !env.setting('TAKE_RUN'));
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +721,7 @@ t.section('Übernahme: Fehler');
   t.throws('ohne Blatt Daten', () => env.uiCall('takeoverPreview', OLD_ID), /kein Blatt „Daten“/);
   const W2 = makeWorld();
   const env2 = setupEnv(W2);
-  env2.addSource({ id: OLD_ID, name: 'Alt', tabs: { Daten: [['Schlüssel'], ['x']], Importe: [['Nr', 'Datum', 'Quelle', 'Quelle-ID', 'Tab', 'Vorlage', 'Modus', 'Status'], [3, '', '', '', '', '', '', 'läuft']] } });
+  env2.addSource({ id: OLD_ID, name: 'Alt', tabs: { 'Tool-Einstellungen': [['Schlüssel', 'Wert'], ['CODE_VERSION', '1.0.0'], ['TOOL_SHEETS', '["Daten","Importe"]']], Daten: [['Schlüssel'], ['x']], Importe: [['Nr', 'Datum', 'Quelle', 'Quelle-ID', 'Tab', 'Vorlage', 'Modus', 'Status'], [3, '', '', '', '', '', '', 'läuft']] } });
   const p = env2.uiCall('takeoverPreview', OLD_ID);
   t.ok('Vorschau warnt vor unfertigem Import', p.warnings.some(w => /Import 3 ist nicht fertig/.test(w)), p.warnings);
 }
@@ -768,26 +802,6 @@ t.section('Übernahme: eigenes Blatt „Übernommen“, neueres Datenformat');
 // ---------------------------------------------------------------------------
 t.section('Übernahme: eigene Blätter mit Namen des Tools');
 {
-  // Tabelle vor 1.0 (Version 1 kannte weder Seltenheiten noch Import-Blätter): gleichnamige Blätter mit fremder
-  // Kopfzeile gehören dem Nutzer. (Generierte Blätter wie Pokédex erkennt das erst ab 1.0, über TOOL_SHEETS.)
-  const backupDir = path.join(__dirname, '..', 'backup');
-  const old = H.createEnv({ srcDir: backupDir, files: ['Code.gs'] });
-  old.ss.id = OLD_ID;
-  old.ctx.einrichtung();
-  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
-  old.ss.insertSheet('Import-Sets').getRange('A1:B2').setValues([['Set', 'Gefangen'], ['Basis', 'ja']]);
-  old.ss.insertSheet('Seltenheiten').getRange('A1:B2').setValues([['Mein Ziel', 'Budget'], ['Glurak', 300]]);
-  const env = setupEnv(makeWorld());
-  env.sources[OLD_ID] = old.ss;
-  const p = env.uiCall('takeoverPreview', OLD_ID);
-  t.ok('vor 1.0: Vorschau zählt sie als eigene Blätter', J(p.own.slice().sort()) === J(['Import-Sets', 'Seltenheiten']) &&
-    !p.sheets.some(s => s.name === 'Seltenheiten' || s.name === 'Import-Sets'), p);
-  env.uiCall('takeoverRun', OLD_ID);
-  t.ok('vor 1.0: als „(alt)“ kopiert, Seltenheiten des Tools unberührt', env.sheet('Import-Sets (alt)').getRange('B2').getValue() === 'ja' &&
-    env.sheet('Seltenheiten (alt)').getRange('A2').getValue() === 'Glurak' && env.values('Seltenheiten').length > 2 &&
-    !env.values('Seltenheiten').some(r => r[0] === 'Glurak'), env.values('Seltenheiten').slice(0, 3));
-  t.ok('neue Tabelle: Liste ihrer Blätter gespeichert', JSON.parse(env.setting('TOOL_SHEETS')).indexOf('Pokédex') >= 0);
-
   // ab 1.0: die Liste der alten Tabelle zählt (ein Blatt, das erst eine spätere Version anlegt)
   const o2 = baseEnv();
   o2.ss.id = OLD_ID;
@@ -807,17 +821,6 @@ t.section('Übernahme: eigene Blätter mit Namen des Tools');
 t.section('Übernahme: eigenes Blatt „Dashboard“ aus Versionen vor 1.1.0');
 {
   const dashOk = env => env.sheet('Dashboard').getRange('C2').getValue() === 'Pokémon-Sammlung' && env.sheet('Dashboard').getImages().length === env.run('DASH_BUTTONS').length;
-  // vor 1.0 (ohne TOOL_SHEETS)
-  const old = H.createEnv({ srcDir: path.join(__dirname, '..', 'backup'), files: ['Code.gs'] });
-  old.ss.id = OLD_ID;
-  old.ctx.einrichtung();
-  old.ctx.addCard({ id: 'swsh3-025', lang: 'de', variant: 'base', condition: 'NM', qty: 1 });
-  old.ss.insertSheet('Dashboard').getRange('A1:B2').setValues([['Ziel', 'Budget'], ['Glurak', 300]]);
-  const env = setupEnv(makeWorld());
-  env.sources[OLD_ID] = old.ss;
-  t.ok('vor 1.0: eigenes Dashboard zählt als eigenes Blatt', env.uiCall('takeoverPreview', OLD_ID).own.indexOf('Dashboard') >= 0);
-  env.uiCall('takeoverRun', OLD_ID);
-  t.ok('vor 1.0: als „Dashboard (alt)“ kopiert, Dashboard des Tools mit Knöpfen', env.sheet('Dashboard (alt)').getRange('B2').getValue() === 300 && dashOk(env));
   // 1.0.x: TOOL_SHEETS ohne Dashboard
   const o2 = baseEnv();
   o2.ss.id = OLD_ID;
@@ -905,7 +908,7 @@ t.section('Übernahme: abgebrochen, wiederholt, doppelt, ohne Schreibrecht');
 }
 
 // ---------------------------------------------------------------------------
-t.section('Älterer Code als die Daten, Kopie einer Tabelle vor 1.0');
+t.section('Älterer Code als die Daten');
 {
   const W = makeWorld();
   const env = setupEnv(W);
@@ -921,29 +924,6 @@ t.section('Älterer Code als die Daten, Kopie einer Tabelle vor 1.0');
   env.ctx.kartenErfassen();
   t.ok('frische Kopie mit neuerem Format: keine Seitenleiste', env.ui.sidebars.length === n && env.setting('SCHEMA_VERSION') === '3');
 
-  // „Kopie erstellen“ einer Tabelle vor 1.0: Skript-Eigenschaften der anderen Tabelle, keine Auslöser
-  const c = setupEnv(W);
-  c.ss.deleteSheet(c.sheet('Tool-Einstellungen'));
-  Object.assign(c.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: 'ORIGINALORIGINALORIGINAL', WEBAPP_URL: 'https://script.google.com/macros/s/ALT/exec' });
-  c.triggers = [];
-  c.run('settingsCache_ = null');
-  c.ctx.kartenErfassen();
-  t.ok('Kopie vor 1.0: wird eingerichtet (Auslöser, eigene ID), alter Web-App-Link gilt nicht', c.triggers.length === 2 && c.props.SPREADSHEET_ID === c.ss.getId() &&
-    c.ctx.settingGet_('WEBAPP_URL') === '' && c.setting('SETUP_AT') !== 'vor 1.0', [c.triggers.length, c.props.SPREADSHEET_ID, c.setting('SETUP_AT')]);
-  // dasselbe direkt über setupAll_
-  const c2 = setupEnv(W);
-  c2.ss.deleteSheet(c2.sheet('Tool-Einstellungen'));
-  Object.assign(c2.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: 'ORIGINALORIGINALORIGINAL', WEBAPP_URL: 'https://script.google.com/macros/s/ALT/exec' });
-  c2.run('settingsCache_ = null');
-  c2.ctx.setupAll_();
-  t.ok('Kopie vor 1.0 über setupAll_: alter Web-App-Link gilt nicht', c2.ctx.settingGet_('WEBAPP_URL') === '' && c2.props.SPREADSHEET_ID === c2.ss.getId() && c2.triggers.length === 2);
-  // eigene Tabelle vor 1.0 (SPREADSHEET_ID passt): gilt als eingerichtet
-  const own = setupEnv(W);
-  own.ss.deleteSheet(own.sheet('Tool-Einstellungen'));
-  Object.assign(own.props, { SCHEMA_VERSION: '2', SPREADSHEET_ID: own.ss.getId(), WEBAPP_URL: 'https://script.google.com/macros/s/MEINS/exec' });
-  own.run('settingsCache_ = null');
-  own.ctx.kartenErfassen();
-  t.ok('eigene Tabelle vor 1.0: SETUP_AT vor 1.0, Web-App-Link bleibt', own.setting('SETUP_AT') === 'vor 1.0' && own.setting('WEBAPP_URL') === 'https://script.google.com/macros/s/MEINS/exec');
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,6 +1082,72 @@ t.section('Release-Werkzeug und Kanal im Repo');
   t.ok('CLI Release-Lauf ohne Abschnitt in CHANGELOG.md: Exit 1 mit Hinweis', noSection.status === 1 && /CHANGELOG\.md/.test(noSection.stderr), noSection.stderr);
   t.eq('CLI --print-notes ohne Abschnitt: Exit 1', cli2(['--print-notes', '1.9.1']).status, 1);
   fs.rmSync(tmp2, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+t.section('Code in die Vorlage: tools/vorlage.sh und Job „Vorlage“ (#67)');
+{
+  const cp = require('child_process');
+  const wf = read('.github/workflows/test.yml');
+  const mode = "inputs.vorlage && 'einspielen' || 'pruefen'";
+  t.ok('Job Vorlage: nach den Tests, mit Secret CLASPRC_JSON; einspielen nur per „Run workflow“ mit Haken, sonst nachsehen', /\n {4}needs: test\n/.test(wf) &&
+    wf.indexOf('CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}') > 0 && wf.indexOf('sh tools/vorlage.sh ${{ ' + mode + ' }}') > 0 &&
+    wf.indexOf("startsWith(github.head_ref, 'version/')") > 0 && /vorlage:\n\s+description: .+\n\s+type: boolean\n\s+default: false/.test(wf));
+  t.eq('.clasp.json: Code aus src/', JSON.parse(read('.clasp.json')).rootDir, 'src');
+  t.ok('Anmeldung (.clasprc.json) kommt nie ins Repo', /^\.clasprc\.json$/m.test(read('.gitignore')));
+
+  // in einer Kopie, clasp ist eine Attrappe (npx im PATH), die ihre Aufrufe aufschreibt
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vorlage-'));
+  const bin = path.join(tmp, 'bin'), home = path.join(tmp, 'home'), log = path.join(tmp, 'aufrufe.txt');
+  [bin, home, path.join(tmp, 'tools'), path.join(tmp, 'src')].forEach(d => fs.mkdirSync(d, { recursive: true }));
+  fs.copyFileSync(path.join(SRC, '..', 'tools', 'vorlage.sh'), path.join(tmp, 'tools', 'vorlage.sh'));
+  fs.writeFileSync(path.join(bin, 'npx'), ['#!/bin/sh', 'echo "$*" >> "$FAKE_LOG"', 'case "$*" in',
+    '  *" pull") [ -n "$FAKE_PULL" ] || { echo "kein Zugriff" >&2; exit 1; }; printf "/*\\n *  Pokémon-Sammlung · Version %s\\n */\\n" "$FAKE_PULL" > Code.js ;;',
+    '  *" push --force") [ -z "$FAKE_PUSH_FAIL" ] || exit 1 ;;', 'esac', ''].join('\n'), { mode: 0o755 });
+  const V = /const TOOL_VERSION = '([^']*)'/.exec(read('src/Code.gs'))[1];
+  const rc = path.join(home, '.clasprc.json');
+  const prep = (version, scriptId) => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Code.gs'), withVersion(read('src/Code.gs'), version));
+    fs.writeFileSync(path.join(tmp, '.clasp.json'), J({ scriptId: scriptId, rootDir: 'src' }));
+    fs.rmSync(rc, { force: true });
+  };
+  const run = (args, env) => {
+    fs.writeFileSync(log, '');
+    const r = cp.spawnSync('sh', [path.join(tmp, 'tools', 'vorlage.sh')].concat(args), { encoding: 'utf8',
+      env: Object.assign({ PATH: bin + path.delimiter + process.env.PATH, HOME: home, FAKE_LOG: log, FAKE_PULL: '', FAKE_PUSH_FAIL: '' }, env) });
+    return { status: r.status, out: r.stdout + r.stderr, calls: fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  };
+  const SECRET = { CLASPRC_JSON: '{"tokens":{"default":{}}}' };
+  prep(V, 'SKRIPT-ID');
+  let r = run([]);
+  t.ok('ohne Modus: Exit 2 mit Aufruf', r.status === 2 && /pruefen\|einspielen/.test(r.out), r);
+  prep(V, '');
+  r = run(['einspielen'], SECRET);
+  t.ok('ohne Script-ID: Hinweis, Exit 0, kein clasp', r.status === 0 && /::notice .*Script-ID der Vorlage fehlt/.test(r.out) && !r.calls.length, r);
+  prep(V, 'SKRIPT-ID');
+  r = run(['einspielen']);
+  t.ok('ohne Anmeldung: Hinweis, Exit 0, kein clasp', r.status === 0 && /::notice .*Keine clasp-Anmeldung/.test(r.out) && !r.calls.length, r);
+  prep(V + '-beta.1', 'SKRIPT-ID');
+  r = run(['einspielen'], SECRET);
+  t.ok('Vorabversion: Hauptvorlage bleibt, kein clasp', r.status === 0 && /::notice .*Vorabversion/.test(r.out) && !r.calls.length, r);
+  prep(V, 'SKRIPT-ID');
+  r = run(['einspielen'], Object.assign({ FAKE_PULL: V }, SECRET));
+  t.ok('einspielen: push --force, dann nachsehen, Version passt', r.status === 0 && r.calls.length === 2 &&
+    /^--yes @google\/clasp@\d+\.\d+\.\d+ push --force$/.test(r.calls[0]) && / pull$/.test(r.calls[1]) && r.out.indexOf('Vorlage hat Version ' + V + '.') >= 0, r);
+  t.eq('Anmeldung aus dem Secret, nur für den Besitzer lesbar', [fs.readFileSync(rc, 'utf8'), (fs.statSync(rc).mode & 0o777).toString(8)], [SECRET.CLASPRC_JSON, '600']);
+  r = run(['einspielen'], { FAKE_PULL: '1.0.0' });
+  t.ok('einspielen, Vorlage danach auf anderer Version: Fehler, Exit 1', r.status === 1 && /::error .*Version 1\.0\.0 statt/.test(r.out), r);
+  r = run(['einspielen'], { FAKE_PULL: V, FAKE_PUSH_FAIL: '1' });
+  t.ok('einspielen, push scheitert: Exit 1, kein Nachsehen', r.status === 1 && r.calls.length === 1, r);
+  r = run(['pruefen'], { FAKE_PULL: '1.2.2' });
+  t.ok('pruefen: kein push, Version der Vorlage als Hinweis', r.status === 0 && r.calls.length === 1 && / pull$/.test(r.calls[0]) &&
+    /::notice .*Vorlage hat Version 1\.2\.2, src\/ hat/.test(r.out), r);
+  r = run(['pruefen'], { FAKE_PULL: '1.2.2', GITHUB_REF: 'refs/heads/main' });
+  t.ok('pruefen auf main, Vorlage alt: Warnung, Exit 0', r.status === 0 && /::warning .*Vorlage hat Version 1\.2\.2, main hat/.test(r.out), r);
+  r = run(['pruefen']);
+  t.ok('pruefen, Vorlage nicht lesbar: Warnung, Exit 0', r.status === 0 && /::warning .*nicht lesen/.test(r.out), r);
+  t.ok('Nachsehen holt in einen leeren Ordner, die Kopie bleibt sauber', !fs.existsSync(path.join(tmp, 'Code.js')) && !fs.existsSync(path.join(tmp, 'src', 'Code.js')));
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 fs.rmSync(BASE_DIR, { recursive: true, force: true });

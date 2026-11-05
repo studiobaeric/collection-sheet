@@ -157,17 +157,6 @@ function makeServer() {
     S.rows.forEach(r => { const k = S.gkey(r); if (keys.indexOf(k) < 0) keys.push(k); });
     return { groups: keys.map(S.uiGroup), total: keys.length };
   };
-  // nur noch für den Tab Pokédex
-  S.searchCollection = (query, setText) => {
-    const words = low(query).split(/\s+/).filter(Boolean);
-    const st = low(setText);
-    const keys = [];
-    S.rows.filter(r => words.every(w => low(r.name).includes(w) || low(r.version).includes(w)) && (!st || low(r.setName).includes(st)))
-      .forEach(r => { const k = S.gkey(r); if (keys.indexOf(k) < 0) keys.push(k); });
-    const groups = keys.map(S.uiGroup);
-    groups.sort((a, b) => (a.count > 0 ? 0 : 1) - (b.count > 0 ? 0 : 1));
-    return { total: groups.length, groups: groups.slice(0, 60) };
-  };
   S.adjustEntry = (eid, delta) => {
     const row = byEid(eid);
     if (!row) throw new Error('Eintrag nicht gefunden.');
@@ -250,7 +239,7 @@ function makeServer() {
   S.setPrereleases = on => Object.assign(S.updInfo, { prereleases: !!on });
   S.updateCopy = () => ({ state: 'copied', version: '1.1.0', url: 'https://docs.google.com/spreadsheets/d/NEUNEU/edit', name: 'Pokémon-Sammlung (neu, Version 1.1.0)',
     message: 'Die neue Tabelle mit Version 1.1.0 liegt im selben Ordner wie diese.' });
-  S.takeoverPreview = url => ({ name: '<i>Alte Sammlung</i>', url, version: '', cards: 2, copies: 3, sheets: [{ name: 'Verlauf', rows: 1 }], own: ['Notizen'], warnings: ['<b>Achtung</b> Import 3'] });
+  S.takeoverPreview = url => ({ name: '<i>Alte Sammlung</i>', url, version: '1.0.3', cards: 2, copies: 3, sheets: [{ name: 'Verlauf', rows: 1 }], own: ['Notizen'], warnings: ['<b>Achtung</b> Import 3'] });
   S.takeoverRun = () => ({ cards: 2, sheets: ['Verlauf'], own: ['Notizen'], message: '2 Einträge und 2 weitere Blätter übernommen. Die alte Tabelle ist jetzt stillgelegt.' });
   S.kartenErfassen = () => null;
   return S;
@@ -422,7 +411,7 @@ function boot(mode, opts) {
     $('fSet').focus();
     ok('Setfeld anwählen: Liste mit allen Sets', !!drop() && !drop().classList.contains('hidden') && opts().length === 3, drop() && drop().outerHTML.slice(0, 300));
     const sym = opts()[1].querySelector('img.sym');
-    ok('Liste: Symbol und Name', !!sym && sym.getAttribute('src') === 'https://assets.tcgdex.net/univ/swsh/swsh3/symbol.png' && opts()[1].textContent === 'Flammende Finsternis', opts()[1].innerHTML);
+    ok('Liste: Symbol und Name', !!sym && sym.getAttribute('src') === 'https://assets.tcgdex.net/en/swsh/swsh3/symbol.png' && opts()[1].textContent === 'Flammende Finsternis', opts()[1].innerHTML);
     {
       // #57: .png lädt nicht -> .webp, lädt auch das nicht -> der Set-Name an seiner Stelle
       const box = E.doc.createElement('div');
@@ -432,6 +421,14 @@ function boot(mode, opts) {
       const second = img.getAttribute('src');
       E.win.symFail(img);
       ok('Symbol: erst .png, dann .webp, dann der Set-Name (#57)', second === 'https://x/sym.webp' && !box.querySelector('img') && box.textContent === 'Flammende Finsternis', [second, box.innerHTML]);
+      // /univ/ gibt es auf dem Bild-Server nicht: /en/, dann /de/, dann der Name
+      box.innerHTML = E.win.setMark({ setId: 'swsh3', setName: 'Flammende Finsternis', setSymbol: SYM.swsh3 }).html;
+      const u = box.querySelector('img.sym'), first = u.getAttribute('src');
+      E.win.symFail(u);
+      const de = u.getAttribute('src');
+      E.win.symFail(u);
+      ok('Symbol unter /univ/: erst /en/…png, dann /de/…png, dann der Set-Name (#57)', first === 'https://assets.tcgdex.net/en/swsh/swsh3/symbol.png' &&
+        de === 'https://assets.tcgdex.net/de/swsh/swsh3/symbol.png' && !box.querySelector('img') && box.textContent === 'Flammende Finsternis', [first, de, box.innerHTML]);
     }
     ok('Liste: Promo-Set mit Stern, Set ohne Symbol nur mit Namen', !!opts()[0].querySelector('.promo') && opts()[0].textContent === '★SWSH Black Star Promos' &&
       !opts()[2].querySelector('img') && opts()[2].textContent === 'Basis-Set', opts().map(o => o.innerHTML));
@@ -1530,6 +1527,18 @@ function boot(mode, opts) {
     await E.respond('adjustEntry', { error: 'Sperre belegt' });
     ok('adjust-Fehler: Meldung oben und an der Karte, Knöpfe frei, Anzahl unverändert', /Sperre belegt/.test($('collMsg').textContent) &&
       /Nicht geändert: Sperre belegt/.test($('gh' + gi).textContent) && !E.btn(E.erow(gi, 0), '−1').disabled && E.cnt(gi) === '3');
+    // #66: danach lädt die Liste neu, die Meldung bleibt stehen
+    ok('adjust-Fehler: lädt neu und sagt es', E.calls('getCollection').length === 1 && /Sperre belegt\. Die Liste lädt neu/.test($('collMsg').textContent), $('collMsg').textContent);
+    await E.respond('getCollection');
+    ok('nach dem Neuladen: Meldung bleibt, Karte offen, Anzahl vom Server', /Sperre belegt/.test($('collMsg').textContent) &&
+      !$('gx' + gi).classList.contains('hidden') && E.cnt(gi) === '3', [$('collMsg').textContent, E.cnt(gi)]);
+    // Antwort verloren, der Server hat aber gespeichert: nach dem Neuladen zeigt die Karte den echten Stand
+    E.click(E.btn(E.erow(gi, 0), '−1'));
+    S.adjustEntry(...E.calls('adjustEntry')[0].args);
+    await E.respond('adjustEntry', { error: 'NetworkError: Connection failure due to HTTP 0' });
+    ok('Antwort verloren: erst der alte Stand', E.cnt(gi) === '3' && E.calls('getCollection').length === 1);
+    await E.respond('getCollection');
+    ok('Antwort verloren: nach dem Neuladen der echte Stand', E.cnt(gi) === '2' && !/Nicht geändert/.test($('gh' + gi).textContent), [E.cnt(gi), $('gh' + gi).textContent]);
     E.click(E.btn(E.erow(gi, 0), '−1'));
     await E.respond('adjustEntry');
     const ub = E.btn($('gh' + gi), 'Rückgängig');
@@ -1701,7 +1710,17 @@ function boot(mode, opts) {
     E.click(E.btn($('takeBox'), 'Prüfen'));
     await E.respond('takeoverPreview');
     E.click(E.btn($('takeMsg'), 'Jetzt übernehmen'));
+    // #61: Fortschritt während der Übernahme
+    E.win.takeProgPoll();
+    await E.respond('takeoverProgress', { value: { n: 3, total: 12, text: 'Blatt „Verlauf“' } });
+    const bar = $('takeMsg').querySelector('.take-bar');
+    ok('Fortschritt: Schritt, Blatt und Balken (#61)', /Schritt 3 von 12: Blatt „Verlauf“/.test($('takeMsg').textContent) && !!bar && bar.getAttribute('aria-valuenow') === '25',
+      $('takeMsg').innerHTML);
     await E.respond('takeoverRun', { error: 'Die Übernahme ist nicht fertig geworden (Zeit). Bitte versuch es noch einmal.' });
+    ok('abgebrochen: letzter Schritt in der Meldung (#61)', /Zuletzt: Schritt 3 von 12: Blatt „Verlauf“/.test($('takeMsg').textContent), $('takeMsg').textContent);
+    E.win.takeProgPoll();
+    await E.respond('takeoverProgress', { value: { n: 4, total: 12, text: 'spät' } });
+    ok('späte Antwort nach dem Ende überschreibt nichts', !/spät/.test($('takeMsg').textContent));
     ok('abgebrochen: Meldung, Noch einmal versuchen, Feld frei, Info neu', /nicht fertig geworden/.test($('takeMsg').textContent) && !!E.btn($('takeMsg'), 'Noch einmal versuchen') &&
       !$('takeUrl').disabled && !$('takeCheck').disabled && E.calls('getUpdateInfo').length === 1);
     await E.respond('getUpdateInfo');
@@ -1730,8 +1749,8 @@ function boot(mode, opts) {
     ok('Prüfen: takeoverPreview mit Link', J(E.calls('takeoverPreview')[0].args) === J(['https://docs.google.com/spreadsheets/d/ALT/edit']) && /Prüfe/.test($('takeMsg').textContent));
     await E.respond('takeoverPreview');
     const tm = $('takeMsg');
-    ok('Vorschau vor 1.0: Hinweis auf Trigger statt „stillgelegt“', /legt sich nicht selbst still/.test(tm.textContent) && /Trigger/.test(tm.textContent));
-    ok('Vorschau: Name escaped, Version vor 1.0, Zahlen, Blätter, Warnungen', !tm.querySelector('i') && /<i>Alte Sammlung<\/i>/.test(tm.textContent) && /Version vor 1\.0/.test(tm.textContent) &&
+    ok('Vorschau: Hinweis „stillgelegt“', /stillgelegt/.test(tm.textContent) && !/vor 1\.0/.test(tm.textContent));
+    ok('Vorschau: Name escaped, Version, Zahlen, Blätter, Warnungen', !tm.querySelector('i') && /<i>Alte Sammlung<\/i>/.test(tm.textContent) && /Version 1\.0\.3/.test(tm.textContent) &&
       /2 Einträge mit 3 Karten/.test(tm.textContent) && /Verlauf \(1\)/.test(tm.textContent) && /Eigene Blätter: Notizen/.test(tm.textContent) && tm.querySelectorAll('.warn').length === 1 && !tm.querySelector('.warn b'));
     E.type($('takeUrl'), 'https://docs.google.com/spreadsheets/d/ANDERS/edit');
     E.click(E.btn(tm, 'Jetzt übernehmen'));

@@ -164,7 +164,7 @@ safe(() => {
   const v1 = c.buildCardRow_(C.GLURAK, { count: 1 }).slice(0, 23);
   v1[COL.key] = 'swsh3-025|normal|';
   sh.getRange(sh.getLastRow() + 1, 1, 1, 23).setValues([v1]);
-  const res = env.uiCall('searchCollection', 'Glurak', '');
+  const res = env.search('Glurak', '');
   const g = res.groups[0];
   t.ok('MIGR-2: Suche liefert keine Zeile ohne Eintrag-ID', g.rows.every((r) => r.eid), g.rows);
   t.eq('MIGR-2: alte Zeile in die Hand-Zeile eingerechnet (eine Hand-Zeile, 3 Exemplare)', g.rows.map((r) => [r.eid, r.count, r.origin]), [[handEid, 3, 'Hand']]);
@@ -268,7 +268,7 @@ safe(() => {
   const handEid = C.handRow(env, C.GLURAK, 1);
   C.seed(env, { mode: 'abgleich', items: [C.clear('fpX', 3, C.GLURAK)] });
   env.uiCall('importCommit', { hand: { fpX: 'same' } }); // 1 gleich + 2 neu
-  const total = () => c.searchCollection('Glurak', '').groups[0].count;
+  const total = () => env.search('Glurak', '').groups[0].count;
   t.eq('DATA-3: nach Import 1: 3 Glurak', total(), 3);
   C.seed(env, { mode: 'abgleich', items: [C.clear('fpX', 2, C.GLURAK)] });
   let pv = env.uiCall('importBuildPreview');

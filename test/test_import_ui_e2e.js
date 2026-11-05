@@ -154,19 +154,18 @@ function addXlsx(env) {
   });
 }
 
-/** Erics Blatt vor dem Einspielen: Daten im alten Format (23 Spalten) mit drei Testkarten von Hand, Verlauf. */
+/** Erics Blatt vor dem Einspielen: Daten mit drei Testkarten von Hand, Verlauf. */
 function addV1Data(env) {
   const sh = env.ss.insertSheet('Daten');
-  const V1 = ['Schlüssel', 'Karten-ID', 'Set-ID', 'Setname', 'Set-Erscheinungsdatum', 'Nummer', 'Nummer normalisiert', 'Setgröße',
-    'Name', 'Name englisch', 'Quelle', 'Variante', 'Zustand', 'Anzahl', 'Trendpreis (EUR)', 'Preisstand', 'Bild-URL', 'Seltenheit',
-    'Kartentyp', 'Illustrator', 'Hinzugefügt am', 'Zuletzt geändert', 'Nummer sortierbar'];
+  sh.insertColumnsAfter(sh.getMaxColumns(), 10); // Platz für alle Spalten wie im echten Blatt
   const d = new Date(2026, 8, 20);
-  [
-    V1,
+  // Format seit 1.0: 23 alte Spalten + Eintrag-ID, Sprache, …, Herkunft Hand, neuer Schlüssel
+  const v2 = (r) => { const row = r.concat([env.ctx.newEid_(), 'DE', '', '', '', 'Hand', '']); row[0] = env.ctx.entryKey_(row); return row; };
+  [env.run('DATA_HEADERS')].concat([
     ['pl3-148|holo|NM', 'pl3-148', 'pl3', 'Ultimative Sieger', '2009-08-19', '148', '148', 147, 'Arktos', 'Articuno', 'de', 'holo', 'NM', 1, 2.2, '2026-10-13', 'https://assets.tcgdex.net/de/x/pl3/148', 'Rare', 'Pokemon', 'Z', d, d, 148],
     ['pl2-12|normal|', 'pl2-12', 'pl2', 'Aufstieg der Rivalen', '2009-05-16', '12', '12', 111, 'Celebi', 'Celebi', 'de', 'normal', '', 1, 0.5, '2026-10-13', 'https://assets.tcgdex.net/de/x/pl2/12', 'Rare', 'Pokemon', 'Z', d, d, 12],
     ['hgss2-10|holo|LP', 'hgss2-10', 'hgss2', 'Entfesselt', '2010-05-12', '10', '10', 95, 'Nachtara', 'Umbreon', 'de', 'holo', 'LP', 2, 3, '2026-10-13', 'https://assets.tcgdex.net/de/x/hgss2/10', 'Rare Holo', 'Pokemon', 'Z', d, d, 10]
-  ].forEach((r, i) => r.forEach((v, j) => sh.setCell(i + 1, j + 1, v)));
+  ].map(v2)).forEach((r, i) => r.forEach((v, j) => sh.setCell(i + 1, j + 1, v)));
   const hist = env.ss.insertSheet('Verlauf');
   [['Datum', 'Gesamtwert (EUR)', 'Kartenanzahl', 'Einträge ohne Preis', 'Fehlgeschlagene Abrufe'],
     [new Date(2026, 9, 13), 8.7, 4, 0, 0], [new Date(2026, 9, 14), 8.7, 4, 0, 0]]

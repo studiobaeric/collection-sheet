@@ -99,7 +99,7 @@ const S = scenario();
     h1['Vergleich 90 Tage'] === '', h1);
   const g1 = groupBy(env, a.gkey);
   ok('Tag 1: keine Veränderung in Gruppen', g1['Veränderung 30 Tage (EUR)'] === '' && g1['Veränderung 30 Tage (%)'] === '' && g1['Verlauf seit'] === '', g1);
-  ok('Tag 1: searchCollection ohne chg', env.uiCall('searchCollection', 'glurak', '').groups.every(g => g.chg === null));
+  ok('Tag 1: searchCollection ohne chg', env.search('glurak', '').groups.every(g => g.chg === null));
 
   runDay(env, '2026-09-02', { 'de|swsh3-025': [1.6, 3.25], 'de|base1-4': [1.5, 3] });
   const g2 = groupBy(env, a.gkey);
@@ -123,7 +123,7 @@ const S = scenario();
     [1.9, '', 1.6, '', 1.5, '2026-09-01']);
   const g5 = groupBy(env, a.gkey);
   ok('Gruppen: 30 Tage +0,40 € (+25 %), ganzer Zeitraum', g5['Veränderung 30 Tage (EUR)'] === 0.4 && g5['Veränderung 30 Tage (%)'] === 0.25 && g5['Verlauf seit'] === '', g5);
-  const ui = env.uiCall('searchCollection', '', '');
+  const ui = env.search('', '');
   const ga = ui.groups.find(x => x.gkey === a.gkey);
   eq('searchCollection: chg für 7, 30 und 90 Tage', ga.chg, { 7: { eur: 0.1, pct: 5, since: '' }, 30: { eur: 0.4, pct: 25, since: '' }, 90: { eur: 0.5, pct: 33, since: '2026-09-01' } });
   const gbu = ui.groups.find(x => x.gkey === b.gkey);
@@ -165,14 +165,12 @@ t.section('Künstlersuche (Seitenleiste und Web-App)');
 {
   const { env, a, r, b } = S;
   const keys = res => res.groups.map(g => g.gkey).sort();
-  eq('„arita“ findet beide Glurak aus Flammende Finsternis', keys(env.uiCall('searchCollection', 'arita', '')), [a.gkey, r.gkey].sort());
-  eq('„Sugimori“ findet das Grundset-Glurak', keys(env.uiCall('searchCollection', 'Sugimori', '')), [b.gkey]);
-  eq('Künstler und Nummer zusammen', keys(env.uiCall('searchCollection', 'arita 025', '')), [a.gkey, r.gkey].sort());
-  eq('Künstler, der nicht passt', env.uiCall('searchCollection', 'arita 4', '').groups.length, 0);
-  const g = env.uiCall('searchCollection', 'arita', '').groups[0];
+  eq('„arita“ findet beide Glurak aus Flammende Finsternis', keys(env.search('arita', '')), [a.gkey, r.gkey].sort());
+  eq('„Sugimori“ findet das Grundset-Glurak', keys(env.search('Sugimori', '')), [b.gkey]);
+  eq('Künstler und Nummer zusammen', keys(env.search('arita 025', '')), [a.gkey, r.gkey].sort());
+  eq('Künstler, der nicht passt', env.search('arita 4', '').groups.length, 0);
+  const g = env.search('arita', '').groups[0];
   eq('Gruppe hat den Künstler', g.illustrator, 'Mitsuhiro Arita');
-  const COL = env.run('COL');
-  ok('matchWord_ prüft den Künstler', env.ctx.matchWord_(Object.assign(new Array(30).fill(''), { [COL.illustrator]: 'Atsuko Nishida' }), 'nishida'));
 }
 
 // ---------------------------------------------------------------------------
@@ -215,20 +213,6 @@ t.section('Fremdes Blatt „Kartenverlauf“, Übernahme, alte Sammlung');
   ok('zweite Einrichtung: Tool-Blatt bleibt (steht in TOOL_SHEETS)', !env.sheet('Kartenverlauf (alt 2)') && env.values('Kartenverlauf')[0][0] === 'Karten-ID');
   const c = env.ctx;
   ok('Übernahme kopiert den Kartenverlauf', c.updTakeoverSheets_().indexOf('Kartenverlauf') === 2);
-  eq('Kopfzeile für alte Tabellen bekannt', c.updTakeoverHeads_()['Kartenverlauf'], env.run('CARD_HIST_HEADERS'));
-
-  // Zusatzspalten einer alten Sammlung (13 feste Spalten) und einer neuen (16)
-  const mk = (name, head) => {
-    const e = H.createEnv();
-    const sh = e.ss.insertSheet('Sammlung');
-    sh.getRange(5, 1, 1, head.length).setValues([head]);
-    return e;
-  };
-  const old13 = ['Bild', 'Name', 'Set', 'Nummer', 'Variante', 'Exemplare', 'Anzahl', 'Preis (EUR)', 'Wert (EUR)', 'Seltenheit', 'Kartentyp', 'Illustrator', 'Preisstand', 'Ordner'];
-  const e1 = mk('alt', old13);
-  eq('alte Sammlung: Zusatzspalte hinter Preisstand', e1.ctx.updOldViewExtras_(e1.ss), ['Ordner']);
-  const e2 = mk('neu', env.run('VIEW_HEADERS').concat(['Fach', 'Box']));
-  eq('neue Sammlung: Zusatzspalten hinter Preisstand', e2.ctx.updOldViewExtras_(e2.ss), ['Fach', 'Box']);
 }
 
 // ---------------------------------------------------------------------------

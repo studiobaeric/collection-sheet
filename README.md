@@ -58,7 +58,7 @@ Google erlaubt einem Skript in einer Tabelle nicht, seinen eigenen Code zu erset
 
 1. **Neue Version holen** (nur in der Seitenleiste am Computer) legt eine Kopie der Vorlage mit der neuen Version im selben Ordner an (geht das nicht, in „Meine Ablage“; die Seitenleiste sagt, wo). Hier ändert sich dabei nichts.
 2. Öffne die neue Tabelle und dort **Pokémon > Karten erfassen**. Google fragt bei jeder neuen Tabelle einmal nach den Berechtigungen. Die gelbe Leiste zu „Daten externer Nutzer“ meint die Kartenbilder (siehe „Einrichten“): **Zugriff erlauben**.
-3. Die Seitenleiste bietet dir sofort die Übernahme an: **Jetzt übernehmen**. Die neue Tabelle bekommt den Namen der alten, die alte heißt danach „… (alt)“. Wer die alte Tabelle sehen oder bearbeiten durfte, darf das auch in der neuen (ohne E-Mail an diese Personen).
+3. Die Seitenleiste bietet dir sofort die Übernahme an: **Jetzt übernehmen**. Die neue Tabelle bekommt den Namen der alten, die alte heißt danach „… (alt 1.2.2)“ mit ihrer Version. Wer die alte Tabelle sehen oder bearbeiten durfte, darf das auch in der neuen (ohne E-Mail an diese Personen).
 4. Nutzt du die Handy-Seite: In der neuen Tabelle neu bereitstellen und den Link unter **Pokémon > Web-App-Link anzeigen** einfügen. Die alte Handy-Seite verweist dann auf die neue.
 
 Mit **Vorabversionen bekommen** probierst du neue Versionen aus, bevor alle sie bekommen. Sie können noch Fehler haben.
@@ -73,7 +73,7 @@ Bricht die Übernahme ab (zum Beispiel weil Google eine Ausführung nach sechs M
 
 Die alte Tabelle wird danach stillgelegt. Ab Version 1.0 geschieht das von selbst: Sie zeigt nur noch einen Hinweis auf die neue und ruft keine Preise mehr ab. Ihre Daten bleiben zum Nachsehen. Willst du doch dort weitermachen, wähle in ihr **Pokémon > Diese Tabelle wieder benutzen**. Was du inzwischen in der neuen Tabelle geändert hast, fehlt dann dort.
 
-Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis, läuft aber sonst weiter, bis du dort die Trigger löschst und die Web-App archivierst. Die Schritte stehen in diesem Blatt.
+Tabellen vor Version 1.0 lassen sich nicht übernehmen, ihre Karten liest du über den Tab Import ein.
 
 ## Von Hand aktualisieren
 
@@ -93,12 +93,11 @@ Eine Tabelle mit einer älteren Version bekommt vorne ein Blatt mit dem Hinweis,
 | --- | --- |
 | `src/` | Die Dateien, die ins Apps-Script-Projekt gehören: `Code.gs`, `Ui.html`, `Import.gs`, `ImportUi.html`, `Update.gs`, `appsscript.json` |
 | `releases/` | `channel.json`: die Liste der Versionen mit Neuerungen und Vorlage, die die Tabellen lesen (die Neuerungen kommen aus `CHANGELOG.md`) |
-| `.github/` | `workflows/release.yml` legt beim Tag `v…` den GitHub-Release mit den Neuerungen aus `CHANGELOG.md` an |
+| `.github/` | `workflows/release.yml` legt beim Tag `v…` den GitHub-Release mit den Neuerungen aus `CHANGELOG.md` an, `workflows/test.yml` prüft jeden Push und schreibt auf Knopfdruck („Run workflow“ mit Haken) den Code in die Vorlage |
 | `assets/` | `dashboard/`: die Bilder der Dashboard-Knöpfe, die Tabellen laden sie von hier |
-| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look |
+| `tools/` | `release.js` schreibt einen Release in `releases/channel.json` (siehe `docs/RELEASE.md`), `dashboard-knoepfe.js` zeichnet die Dashboard-Knöpfe, `dashboard-vorschau.js` eine Vorschau des Dashboards je Look, `vorlage.sh` schreibt `src/` mit clasp in die Vorlage (Script-ID in `.clasp.json`) |
 | `parts/` | Quelle von `src/Import.gs`; `sh build_import.sh` baut daraus die Datei |
 | `test/` | Tests mit Apps-Script-Attrappen in Node (`npm install`, dann `npm test`) |
-| `backup/` | Version 1 des Codes, gegen die `test/test_integration.js` und `test/test_update.js` die Umstellung prüfen |
 | `docs/` | Plan, Bau-Spezifikation, Release-Ablauf, Installationsanleitungen, in `dashboard/` die Looks des Dashboards |
 
 ## Lizenz

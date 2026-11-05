@@ -197,15 +197,15 @@ function sortEnv() {
 }
 {
   const env = sortEnv();
-  const ids = opts => env.uiCall('searchCollection', '', '', opts).groups.map(g => g.id || g.name);
-  const res0 = env.uiCall('searchCollection', '', '');
+  const ids = opts => env.search('', '', opts).groups.map(g => g.id || g.name);
+  const res0 = env.search('', '');
   eq('Standard = Set aufsteigend (wie bisher)', [res0.sort, res0.desc], ['set', false]);
   eq('Set', ids(), ['base1-4', 'sm9-33', 'swsh1-178', 'swsh3-025', 'swsh3-136', 'sv1-1', 'Bisasam']);
   eq('Set absteigend: neueste zuerst, 0 Exemplare bleibt hinten', ids({ sort: 'set', desc: true }), ['sv1-1', 'swsh3-136', 'swsh3-025', 'swsh1-178', 'sm9-33', 'base1-4', 'Bisasam']);
   // Pokédex: base1-4 hat keine dexId in der Attrappe -> Name „Glurak“ -> 6
   eq('Pokédex-Nr.: 6, 6, 6, 25, 150, Trainer am Ende', ids({ sort: 'dex' }), ['base1-4', 'swsh3-025', 'swsh3-136', 'sm9-33', 'sv1-1', 'swsh1-178', 'Bisasam']);
   eq('Pokédex-Nr. absteigend: Trainer trotzdem am Ende', ids({ sort: 'dex', desc: true }), ['sv1-1', 'sm9-33', 'base1-4', 'swsh3-025', 'swsh3-136', 'swsh1-178', 'Bisasam']);
-  const rr = env.uiCall('searchCollection', '', '', { sort: 'rarity' });
+  const rr = env.search('', '', { sort: 'rarity' });
   eq('Seltenheit: Standard absteigend', rr.desc, true);
   eq('Seltenheit: seltenste zuerst, ohne Stufe am Ende', rr.groups.map(g => g.id || g.name), ['swsh3-136', 'base1-4', 'swsh3-025', 'swsh1-178', 'sv1-1', 'sm9-33', 'Bisasam']);
   eq('Seltenheit im UI-Objekt', rr.groups[0].rarity, 'Selten, besondere Illustration');
@@ -224,13 +224,13 @@ function sortEnv() {
   eq('unbekannte Sortierung = Set', ids({ sort: 'quatsch' }), ids());
   eq('desc als Text', ids({ sort: 'set', desc: 'true' })[0], 'sv1-1');
   // Pokédex-Filter
-  const d6 = env.uiCall('searchCollection', '', '', { dex: 6 });
+  const d6 = env.search('', '', { dex: 6 });
   eq('nur Glurak', d6.groups.map(g => g.id), ['base1-4', 'swsh3-025', 'swsh3-136']);
   eq('dex im Ergebnis', [d6.dex, J(d6.groups[0].dex)], [6, '[6]']);
   eq('Zekrom findet das Tag Team', ids({ dex: 644 }), ['sm9-33']);
-  eq('Filter mit Suche kombiniert', env.uiCall('searchCollection', 'Glurak 025', '', { dex: 6 }).groups.map(g => g.id), ['swsh3-025']);
+  eq('Filter mit Suche kombiniert', env.search('Glurak 025', '', { dex: 6 }).groups.map(g => g.id), ['swsh3-025']);
   eq('Bisasam: nur die freie Karte mit 0 Exemplaren', ids({ dex: 1 }), ['Bisasam']);
-  eq('Filter ohne Treffer', env.uiCall('searchCollection', '', '', { dex: 4 }).total, 0);
+  eq('Filter ohne Treffer', env.search('', '', { dex: 4 }).total, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -357,36 +357,6 @@ function boot(env, mode, storage) {
     eq('unbekannte gemerkte Sortierung: Set', E3.$('colSort').value, 'set');
   }
 
-  t.section('UI: Suche und Sortierung im Browser = searchCollection');
-  {
-    const env = sortEnv();
-    env.ctx.addFreeCard({ name: 'Glurak Fake', setName: 'Flammende Finsternis', number: '025/189', version: 'Snowflake', qty: 2 });
-    const E = boot(env, 'sidebar');
-    await E.settle();
-    await E.click(E.$('tabColl'));
-    const bad = [];
-    const queries = [['', ''], ['glurak', ''], ['025/189', ''], ['25', ''], ['Glurak 4', ''], ['snowflake', ''], ['arita', ''], ['', 'flammende'],
-      ['', 'swsh3'], ['', 'Darkness'], ['glurak', 'Grundset'], ['zekrom', ''], ['xyz', '']];
-    for (const [q, setText] of queries) {
-      for (const sort of ['set', 'dex', 'rarity', 'name', 'price', 'added']) {
-        for (const desc of [false, true]) {
-          for (const dex of [null, 6]) {
-            E.win.collSort.sort = sort; E.win.collSort.desc = desc;
-            E.win.collSort.dex = dex ? { nr: dex, name: 'Glurak' } : null;
-            E.$('colQuery').value = q; E.$('colSet').value = setText;
-            E.win.refilter();
-            const ui = E.win.state.groups.map(g => g.gkey);
-            const srv = env.uiCall('searchCollection', q, setText, { sort, desc, dex }).groups.map(g => g.gkey);
-            if (J(ui) !== J(srv)) bad.push({ q, setText, sort, desc, dex, ui, srv });
-          }
-        }
-      }
-    }
-    eq('alle Kombinationen gleich (' + queries.length * 24 + ')', bad.slice(0, 3), []);
-    ok('dabei kein weiterer Serveraufruf', E.calls('getCollection').length === 1 && !E.log.some(p => p.fn === 'searchCollection'));
-    ok('keine Skriptfehler', E.errors.length === 0, E.errors);
-  }
-
   t.section('UI: Pokédex-Tab');
   {
     const env = setup();
@@ -419,7 +389,7 @@ function boot(env, mode, storage) {
     await E.click(rows()[0]);
     const box = E.$('dx6');
     ok('Glurak aufgeklappt mit Karte', box && !box.classList.contains('hidden') && /Glurak/.test(box.textContent) && /025\/189/.test(box.textContent) && /2× · 1,50/.test(box.textContent), box && box.textContent);
-    eq('Aufruf mit Pokédex-Filter', J(E.calls('searchCollection').pop().args), J(['', '', { dex: 6, sort: 'set', desc: false }]));
+    ok('Karten aus der geladenen Sammlung, kein eigener Serveraufruf (#36 A4)', E.calls('getCollection').length === 1 && !E.log.some(p => p.fn === 'searchCollection'));
     ok('Bild der Karte', !!box.querySelector('img'));
     await E.click(E.btn(box, 'In Sammlung öffnen'));
     ok('Sammlung offen mit Chip', E.$('tabColl').classList.contains('active') && /Nur #006 Glurak/.test(E.$('colDex').textContent));
